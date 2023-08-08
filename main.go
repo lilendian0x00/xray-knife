@@ -1,9 +1,7 @@
 package main
 
-import "xray-knife/xray/vmess"
+import "xray-knife/cmd"
 
 func main() {
-
-	config := "vmess://ew0KICAidiI6ICIyIiwNCiAgInBzIjogIlRlc3QiLA0KICAiYWRkIjogIjEyNy4wLjAuMSIsDQogICJwb3J0IjogIjgwODAiLA0KICAiaWQiOiAiMWU3NjAxZGYtY2I1Yi00Mjk1LTlhNWQtNjU3M2Q0Yzk4NTRhIiwNCiAgImFpZCI6ICIwIiwNCiAgInNjeSI6ICJhdXRvIiwNCiAgIm5ldCI6ICJ0Y3AiLA0KICAidHlwZSI6ICJodHRwIiwNCiAgImhvc3QiOiAiZXhhbXBsZS5jb20iLA0KICAicGF0aCI6ICIvIiwNCiAgInRscyI6ICIiLA0KICAic25pIjogIiIsDQogICJhbHBuIjogIiINCn0="
-	vmess.ParseVmess(config)
+	cmd.Execute()
 }
