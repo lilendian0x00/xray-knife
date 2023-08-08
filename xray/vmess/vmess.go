@@ -8,20 +8,21 @@ import (
 )
 
 type Vmess struct {
-	Version  string      `json:"v"`
-	Address  string      `json:"add"`
-	Aid      interface{} `json:"aid"`
-	Host     string      `json:"host"`
-	ID       string      `json:"id"`
-	Network  string      `json:"net"`
-	Path     string      `json:"path"`
-	Port     interface{} `json:"port"`
-	Remark   string      `json:"ps"` // Config's name
-	TLS      string      `json:"tls"`
-	SNI      string      `json:"sni"`  // Server name indication
-	ALPN     string      `json:"alpn"` // Application-Layer Protocol Negotiation
-	Type     string      `json:"type"` // Used for HTTP Obfuscation
-	OrigLink string      `json:"-"`    // Original link
+	Version        string      `json:"v"`
+	Address        string      `json:"add"`
+	Aid            interface{} `json:"aid"`
+	Host           string      `json:"host"`
+	ID             string      `json:"id"`
+	Network        string      `json:"net"`
+	Path           string      `json:"path"`
+	Port           interface{} `json:"port"`
+	Remark         string      `json:"ps"` // Config's name
+	TLS            string      `json:"tls"`
+	SNI            string      `json:"sni"`  // Server name indication
+	ALPN           string      `json:"alpn"` // Application-Layer Protocol Negotiation
+	TlsFingerprint string      `json:"fp"`   // TLS fingerprint
+	Type           string      `json:"type"` // Used for HTTP Obfuscation
+	OrigLink       string      `json:"-"`    // Original link
 }
 
 func NewVmess(config string) (*Vmess, error) {
@@ -34,7 +35,6 @@ func NewVmess(config string) (*Vmess, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println(string(decoded))
 
 	v := &Vmess{}
 	if err := json.Unmarshal(decoded, v); err != nil {
@@ -53,4 +53,12 @@ func ParseVmess(vmess string) (*Vmess, error) {
 		return nil, fmt.Errorf("%v", err)
 	}
 	return config, nil
+}
+
+func (v Vmess) Details() string {
+	info := fmt.Sprintf("Remark: %s\nNetwork: %s\nIP: %s\nPort: %v\nUUID: %s\nType: %s\nTLS: %s\nPATH: %s\n", v.Remark, v.Network, v.Address, v.Port, v.ID, v.Type, v.TLS, v.Path)
+	if len(v.TLS) != 0 {
+		info += fmt.Sprintf("TLS: yes\nSNI: %s\nALPN:%s\nFingerprint: %s\n", v.SNI, v.ALPN, v.TlsFingerprint)
+	}
+	return info
 }
