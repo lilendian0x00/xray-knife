@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"github.com/spf13/cobra"
 	"os"
-	"xray-knife/xray/vmess"
+	"xray-knife/xray"
 )
 
 var (
@@ -28,16 +28,15 @@ var ParseCmd = &cobra.Command{
 
 		fmt.Printf("\n")
 
-		parsedVmess, err := vmess.ParseVmess(configLink)
+		protocol, err := xray.ParseXrayConfig(configLink)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%v", parsedVmess)
+			fmt.Fprintf(os.Stderr, "%v", err)
 			os.Exit(1)
 		}
-		fmt.Println(parsedVmess.Details())
+		fmt.Println(protocol.DetailsStr())
 	},
 }
 
 func init() {
 	ParseCmd.Flags().StringVarP(&configLink, "config", "c", "", "The xray config link")
-
 }
