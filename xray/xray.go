@@ -237,7 +237,10 @@ func ParseXrayConfig(configLink string) (Protocol, error) {
 		return protocol, errors.New("Wrong protocol type! ")
 	}
 
-	err := protocol.Parse(configLink)
+	rm1 := strings.TrimSuffix(configLink, "\r\n")
+	rm2 := strings.TrimSuffix(rm1, "\n")
+
+	err := protocol.Parse(rm2)
 	if err != nil {
 		return protocol, err
 	}

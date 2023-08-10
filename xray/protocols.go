@@ -29,6 +29,7 @@ type Vmess struct {
 	Version        string `json:"v"`
 	Address        string `json:"add"`
 	Aid            uint16 `json:"aid"` // AlterID
+	Security       string `json:"scy"`
 	Host           string `json:"host"`
 	ID             string `json:"id"`
 	Network        string `json:"net"`
@@ -44,7 +45,7 @@ type Vmess struct {
 }
 
 type Vless struct {
-	Version        string `json:"v"`
+	LinkVersion    string `json:"-"`
 	ID             string `json:"id"`  // UUID
 	Address        string `json:"add"` // IP:PORT
 	Encryption     string `json:"encryption"`
