@@ -8,12 +8,22 @@ import (
 var NetCmd = &cobra.Command{
 	Use:   "net",
 	Short: "Multiple tools for testing one or multiple xray configs",
-	Long:  ``,
+	Long: `
+icmp: send icmp packets
+tcp: establish tcp connection
+http: connect and send a http req to the dest
+`,
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Help()
 	},
 }
 
-func init() {
+func addSubcommandPalettes() {
+	NetCmd.AddCommand(IcmpCmd)
+	NetCmd.AddCommand(TcpCmd)
+	NetCmd.AddCommand(HttpCmd)
+}
 
+func init() {
+	addSubcommandPalettes()
 }
