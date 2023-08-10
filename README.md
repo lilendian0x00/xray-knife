@@ -1,2 +1,2 @@
 # xray-knife
-A handy tool for xray-core to do tasks such as parsing a config link or switch outbouds automatically etc
+A swiss army knife for xray-core to do tasks such as parsing xray config links, network testing, switch outbounds automatically etc
