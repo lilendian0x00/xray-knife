@@ -72,23 +72,30 @@ func (v *Vless) Parse(configLink string) error {
 }
 
 func (v *Vless) DetailsStr() string {
+	copyV := *v
 	info := fmt.Sprintf("Protocol: Vless\nRemark: %s\nNetwork: %s\nIP: %s\nPort: %v\nUUID: %s\n", v.Remark, v.Type, v.Address, v.Port, v.ID)
-	if v.Type == "" {
+	if copyV.Type == "" {
 
-	} else if v.Type == "http" || v.Type == "ws" || v.Type == "h2" {
-		info += fmt.Sprintf("Host: %s\nPath: %s\n", v.Host, v.Path)
-	} else if v.Type == "kcp" {
-		info += fmt.Sprintf("KCP Seed: %s\n", v.Path)
-	} else if v.Type == "grpc" {
-		info += fmt.Sprintf("ServiceName: %s\nPath: %s\n", v.Host, v.Path)
+	} else if copyV.Type == "http" || copyV.Type == "ws" || copyV.Type == "h2" {
+		info += fmt.Sprintf("Host: %s\nPath: %s\n", copyV.Host, copyV.Path)
+	} else if copyV.Type == "kcp" {
+		info += fmt.Sprintf("KCP Seed: %s\n", copyV.Path)
+	} else if copyV.Type == "grpc" {
+		info += fmt.Sprintf("ServiceName: %s\n", copyV.ServiceName)
 	}
 
-	if v.Security == "reality" {
+	if copyV.Security == "reality" {
 		info += fmt.Sprintf("TLS: reality\n")
-		info += fmt.Sprintf("SNI: %s\nShordID: %s\nSpiderX: %s\nFingerprint: %s\n", v.SNI, v.ShortIds, v.SpiderX, v.TlsFingerprint)
-	} else if v.Security == "tls" {
+		if copyV.SpiderX == "" {
+			copyV.SpiderX = "none"
+		}
+		info += fmt.Sprintf("SNI: %s\nShordID: %s\nSpiderX: %s\nFingerprint: %s\n", copyV.SNI, copyV.ShortIds, copyV.SpiderX, copyV.TlsFingerprint)
+	} else if copyV.Security == "tls" {
 		info += fmt.Sprintf("TLS: tls\n")
-		info += fmt.Sprintf("SNI: %s\nALPN:%s\nFingerprint: %s\n", v.SNI, v.ALPN, v.TlsFingerprint)
+		if copyV.TlsFingerprint == "" {
+			copyV.TlsFingerprint = "none"
+		}
+		info += fmt.Sprintf("SNI: %s\nALPN:%s\nFingerprint: %s\n", copyV.SNI, copyV.ALPN, copyV.TlsFingerprint)
 	} else {
 		info += fmt.Sprintf("TLS: none\n")
 	}
@@ -107,6 +114,8 @@ func (v *Vless) ConvertToGeneralConfig() (GeneralConfig, error) {
 	g.SNI = v.SNI
 	g.ALPN = v.ALPN
 	g.TlsFingerprint = v.TlsFingerprint
+	g.ServiceName = v.ServiceName
+	g.Mode = v.Mode
 	g.Type = v.Type
 	g.OrigLink = v.OrigLink
 
@@ -161,6 +170,20 @@ func (v *Vless) BuildOutboundDetourConfig() (*conf.OutboundDetourConfig, error) 
 			h := conf.StringList(strings.Split(v.Host, ","))
 			s.HTTPSettings.Host = &h
 		}
+	case "grpc":
+		multiMode := false
+		if v.Mode != "gun" {
+			multiMode = true
+		}
+		s.GRPCConfig = &conf.GRPCConfig{
+			InitialWindowsSize: 65536,
+			HealthCheckTimeout: 20,
+			MultiMode:          multiMode,
+			IdleTimeout:        60,
+			ServiceName:        v.ServiceName,
+		}
+
+		v.Flow = ""
 	}
 
 	if v.Security == "tls" {
@@ -198,7 +221,7 @@ func (v *Vless) BuildOutboundDetourConfig() (*conf.OutboundDetourConfig, error) 
       "users": [
         {
           "id": "%s",
-          "flow": %v,
+          "flow": "%s",
           "encryption": "%s"
         }
       ]

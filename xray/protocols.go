@@ -24,6 +24,8 @@ type GeneralConfig struct {
 	SNI            string
 	ALPN           string
 	TlsFingerprint string
+	ServiceName    string
+	Mode           string
 	Type           string
 	OrigLink       string
 }
