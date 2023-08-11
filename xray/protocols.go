@@ -1,7 +1,10 @@
 package xray
 
+import "github.com/xtls/xray-core/infra/conf"
+
 type Protocol interface {
 	Parse(configLink string) error
+	BuildOutboundDetourConfig() (*conf.OutboundDetourConfig, error)
 	DetailsStr() string
 	ConvertToGeneralConfig() (GeneralConfig, error)
 }
@@ -10,12 +13,12 @@ type GeneralConfig struct {
 	Protocol       string
 	Address        string
 	Security       string
-	Aid            uint16
+	Aid            string
 	Host           string
 	ID             string
 	Network        string
 	Path           string
-	Port           interface{}
+	Port           string
 	Remark         string
 	TLS            string
 	SNI            string
@@ -28,13 +31,13 @@ type GeneralConfig struct {
 type Vmess struct {
 	Version        string `json:"v"`
 	Address        string `json:"add"`
-	Aid            uint16 `json:"aid"` // AlterID
+	Aid            string `json:"aid"` // AlterID
+	Port           string `json:"port"`
 	Security       string `json:"scy"`
 	Host           string `json:"host"`
 	ID             string `json:"id"`
 	Network        string `json:"net"`
 	Path           string `json:"path"`
-	Port           uint16 `json:"port"`
 	Remark         string `json:"ps"` // Config's name
 	TLS            string `json:"tls"`
 	SNI            string `json:"sni"`  // Server name indication
@@ -57,7 +60,7 @@ type Vless struct {
 	HeaderType     string `json:"headerType"` // TCP HTTP Obfuscation
 	Host           string `json:"host"`       // HTTP, WS
 	Path           string `json:"path"`
-	Port           uint16 `json:"port"`
+	Port           string `json:"port"`
 	SNI            string `json:"sni"`         // Server name indication
 	ALPN           string `json:"alpn"`        // Application-Layer Protocol Negotiation
 	TlsFingerprint string `json:"fp"`          // TLS fingerprint

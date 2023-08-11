@@ -1,11 +1,11 @@
 package xray
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/xtls/xray-core/infra/conf"
 	"net/url"
-	"os"
 	"reflect"
-	"strconv"
 	"strings"
 )
 
@@ -59,12 +59,13 @@ func (v *Vless) Parse(configLink string) error {
 	v.Remark = remarkStr
 	v.ID = uuid
 	v.Address = address[0]
-	portUint, err := strconv.ParseUint(address[1], 10, 16)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v", err)
-		os.Exit(1)
-	}
-	v.Port = uint16(portUint)
+	//portUint, err := strconv.ParseUint(address[1], 10, 16)
+	//if err != nil {
+	//	fmt.Fprintf(os.Stderr, "%v", err)
+	//	os.Exit(1)
+	//}
+	//v.Port = uint16(portUint)
+	v.Port = address[1]
 	v.OrigLink = configLink
 
 	return nil
@@ -110,4 +111,100 @@ func (v *Vless) ConvertToGeneralConfig() (GeneralConfig, error) {
 	g.OrigLink = v.OrigLink
 
 	return g, nil
+}
+
+func (v *Vless) BuildOutboundDetourConfig() (*conf.OutboundDetourConfig, error) {
+	out := &conf.OutboundDetourConfig{}
+	out.Tag = "proxy"
+	out.Protocol = "vless"
+
+	p := conf.TransportProtocol(v.Type)
+	s := &conf.StreamConfig{
+		Network:  &p,
+		Security: v.Security,
+	}
+
+	switch v.Type {
+	case "tcp":
+		s.TCPSettings = &conf.TCPConfig{}
+		if v.Type == "" || v.Type == "none" {
+			s.TCPSettings.HeaderConfig = json.RawMessage([]byte(`{ "type": "none" }`))
+		} else {
+			pathb, _ := json.Marshal(strings.Split(v.Path, ","))
+			hostb, _ := json.Marshal(strings.Split(v.Host, ","))
+			s.TCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`
+			{
+				"type": "http",
+				"request": {
+					"path": %s,
+					"headers": {
+						"Host": %s
+					}
+				}
+			}
+			`, string(pathb), string(hostb))))
+		}
+	case "kcp":
+		s.KCPSettings = &conf.KCPConfig{}
+		s.KCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, v.Type)))
+	case "ws":
+		s.WSSettings = &conf.WebSocketConfig{}
+		s.WSSettings.Path = v.Path
+		s.WSSettings.Headers = map[string]string{
+			"Host": v.Host,
+		}
+	case "h2", "http":
+		s.HTTPSettings = &conf.HTTPConfig{
+			Path: v.Path,
+		}
+		if v.Host != "" {
+			h := conf.StringList(strings.Split(v.Host, ","))
+			s.HTTPSettings.Host = &h
+		}
+	}
+
+	if v.Security == "tls" {
+		if v.TlsFingerprint == "" {
+			v.TlsFingerprint = "chrome"
+		}
+		s.TLSSettings = &conf.TLSConfig{
+			Fingerprint: v.TlsFingerprint,
+		}
+		if v.SNI != "" {
+			s.TLSSettings.ServerName = v.SNI
+		} else {
+			s.TLSSettings.ServerName = v.Host
+		}
+		if v.ALPN != "" {
+			s.TLSSettings.ALPN = &conf.StringList{v.ALPN}
+		}
+	} else if v.Security == "reality" {
+		s.REALITYSettings = &conf.REALITYConfig{
+			Show:        false,
+			Fingerprint: v.TlsFingerprint,
+			ServerName:  v.SNI,
+			PublicKey:   v.PublicKey,
+			ShortId:     v.ShortIds,
+			SpiderX:     v.SpiderX,
+		}
+	}
+
+	out.StreamSetting = s
+	oset := json.RawMessage([]byte(fmt.Sprintf(`{
+  "vnext": [
+    {
+      "address": "%s",
+      "port": %v,
+      "users": [
+        {
+          "id": "%s",
+          "flow": %v,
+          "encryption": "%s"
+        }
+      ]
+    }
+  ]
+}`, v.Address, v.Port, v.ID, v.Flow, v.Encryption)))
+	out.Settings = &oset
+	return out, nil
 }
