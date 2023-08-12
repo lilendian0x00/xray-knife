@@ -6,16 +6,18 @@ import (
 	"xray-knife/cmd/bot"
 	"xray-knife/cmd/net"
 	"xray-knife/cmd/parse"
+	"xray-knife/cmd/subs"
 )
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "xray-knife",
 	Short: "Swiss Army Knife for xray-core",
-	Long: `Main Tools:
-1. parse: Parses xray config link.
-2. net: Multiple network tests for xray configs.
-3. bot: A service to automatically switch outbound connections from a subscription or a file of configs.`,
+	Long:  ``,
+	// Main Tools:
+	//1. parse: Parses xray config link.
+	//2. net: Multiple network tests for xray configs.
+	//3. bot: A service to automatically switch outbound connections from a subscription or a file of configs.
 
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Help()
@@ -35,9 +37,9 @@ func addSubcommandPalettes() {
 	rootCmd.AddCommand(net.NetCmd)
 	rootCmd.AddCommand(parse.ParseCmd)
 	rootCmd.AddCommand(bot.BotCmd)
+	rootCmd.AddCommand(subs.SubsCmd)
 }
 
 func init() {
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 	addSubcommandPalettes()
 }
