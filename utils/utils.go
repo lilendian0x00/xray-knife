@@ -2,6 +2,7 @@ package utils
 
 import (
 	"encoding/base64"
+	"os"
 	"strings"
 )
 
@@ -17,4 +18,12 @@ func Base64Decode(b64 string) ([]byte, error) {
 		return base64.URLEncoding.DecodeString(b64)
 	}
 	return b, nil
+}
+
+func WriteIntoFile(fileName string, data []byte) error {
+	err := os.WriteFile(fileName, data, 0644)
+	if err != nil {
+		return err
+	}
+	return nil
 }
