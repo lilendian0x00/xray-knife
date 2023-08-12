@@ -3,6 +3,7 @@ module xray-knife
 go 1.20
 
 require (
+	github.com/fatih/color v1.15.0
 	github.com/refraction-networking/utls v1.3.2
 	github.com/spf13/cobra v1.7.0
 	github.com/xtls/xray-core v1.8.3
@@ -23,6 +24,8 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.16.7 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.5 // indirect
+	github.com/mattn/go-colorable v0.1.13 // indirect
+	github.com/mattn/go-isatty v0.0.17 // indirect
 	github.com/onsi/ginkgo/v2 v2.11.0 // indirect
 	github.com/pires/go-proxyproto v0.7.0 // indirect
 	github.com/quic-go/qtls-go1-20 v0.3.1 // indirect
