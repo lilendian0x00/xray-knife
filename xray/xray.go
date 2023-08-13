@@ -63,17 +63,17 @@ func StartXray(conf Protocol, verbose, allowInsecure bool) (*core.Instance, erro
 	return server, nil
 }
 
-func MeasureDelay(inst *core.Instance, timeout time.Duration, showBody bool, dest string, httpMethod string) (int64, error) {
+func MeasureDelay(inst *core.Instance, timeout time.Duration, showBody bool, dest string, httpMethod string) (int64, int, error) {
 	start := time.Now()
 	code, body, err := CoreHTTPRequest(inst, timeout, httpMethod, dest)
 	if err != nil {
-		return -1, err
+		return -1, -1, err
 	}
-	fmt.Printf("Status code: %d\n", code)
+	//fmt.Printf("%s: %d\n", color.YellowString("Status code"), code)
 	if showBody {
 		fmt.Printf("Response body: \n%s\n", body)
 	}
-	return time.Since(start).Milliseconds(), nil
+	return time.Since(start).Milliseconds(), code, nil
 }
 
 func httpClient(inst *core.Instance, timeout time.Duration) (*http.Client, error) {
@@ -133,7 +133,7 @@ func ParseXrayConfig(configLink string) (Protocol, error) {
 	} else if strings.HasPrefix(configLink, "vless://") {
 		protocol = &Vless{}
 	} else {
-		return protocol, errors.New("Wrong protocol type! ")
+		return protocol, errors.New("Invalid protocol type! ")
 	}
 
 	rm1 := strings.TrimSuffix(configLink, "\r\n")

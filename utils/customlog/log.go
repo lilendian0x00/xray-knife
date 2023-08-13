@@ -26,6 +26,6 @@ var logTypeMap = map[Type]TypesDetails{
 
 func Printf(logType Type, format string, v ...interface{}) {
 	t := logTypeMap[logType]
-	currentTime := time.Now()
-	t.color.Printf(t.symbol+" "+currentTime.Format("2006-01-02 15:04:05")+" "+format, v...)
+	currentTime := time.Now() // 2006-01-02
+	t.color.Printf(t.symbol+" "+currentTime.Format("15:04:05")+" "+format, v...)
 }

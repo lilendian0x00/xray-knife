@@ -250,12 +250,12 @@ func (v *Vless) BuildOutboundDetourConfig() (*conf.OutboundDetourConfig, error) 
 		  "alterId": 0,
           "security": "auto",
           "flow": "%s",
-          "encryption": "%s"
+          "encryption": "none"
         }
       ]
     }
   ]
-}`, v.Address, v.Port, v.ID, v.Flow, v.Encryption)))
+}`, v.Address, v.Port, v.ID, v.Flow)))
 	out.Settings = &oset
 	return out, nil
 }
