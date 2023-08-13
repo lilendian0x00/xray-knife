@@ -156,9 +156,9 @@ func (v *Vless) BuildOutboundDetourConfig() (*conf.OutboundDetourConfig, error) 
 	switch v.Type {
 	case "tcp":
 		s.TCPSettings = &conf.TCPConfig{}
-		if v.Type == "" || v.Type == "none" {
+		if v.HeaderType == "" || v.HeaderType == "none" {
 			s.TCPSettings.HeaderConfig = json.RawMessage([]byte(`{ "type": "none" }`))
-		} else {
+		} else { // headerType=http
 			pathb, _ := json.Marshal(strings.Split(v.Path, ","))
 			hostb, _ := json.Marshal(strings.Split(v.Host, ","))
 			s.TCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`
@@ -241,6 +241,8 @@ func (v *Vless) BuildOutboundDetourConfig() (*conf.OutboundDetourConfig, error) 
       "users": [
         {
           "id": "%s",
+		  "alterId": 0,
+          "security": "auto",
           "flow": "%s",
           "encryption": "%s"
         }
