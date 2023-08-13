@@ -3,6 +3,7 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/fatih/color"
 	"github.com/xtls/xray-core/infra/conf"
 	"net/url"
 	"reflect"
@@ -15,17 +16,20 @@ func (v *Vless) Parse(configLink string) error {
 	}
 	nonProtocolPart := configLink[8:]
 
-	secondPart := strings.Split(nonProtocolPart, "@")
+	secondPart := strings.SplitN(nonProtocolPart, "@", 2)
 	uuid := secondPart[0]
 
 	thirdPart := strings.Split(secondPart[1], "?")
 	address := strings.Split(thirdPart[0], ":")
 
-	queryValues, err := url.ParseQuery(strings.Join(thirdPart[1:], "?"))
+	queryPart := strings.Join(thirdPart[1:], "?")
+	lastIndex := strings.LastIndex(queryPart, "#")
+	rmRemark := queryPart[0:lastIndex]
+
+	queryValues, err := url.ParseQuery(rmRemark)
 	if err != nil {
 		return err
 	}
-
 	// Get the type of the struct
 	t := reflect.TypeOf(*v)
 
@@ -73,31 +77,47 @@ func (v *Vless) Parse(configLink string) error {
 
 func (v *Vless) DetailsStr() string {
 	copyV := *v
-	info := fmt.Sprintf("Protocol: Vless\nRemark: %s\nNetwork: %s\nIP: %s\nPort: %v\nUUID: %s\n", v.Remark, v.Type, v.Address, v.Port, v.ID)
+	info := fmt.Sprintf("%s: Vless\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n",
+		color.RedString("Protocol"),
+		color.RedString("Remark"), v.Remark,
+		color.RedString("Network"), v.Type,
+		color.RedString("IP"), v.Address,
+		color.RedString("Port"), v.Port,
+		color.RedString("UUID"), v.ID)
 	if copyV.Type == "" {
 
 	} else if copyV.Type == "http" || copyV.Type == "ws" || copyV.Type == "h2" {
-		info += fmt.Sprintf("Host: %s\nPath: %s\n", copyV.Host, copyV.Path)
+		info += fmt.Sprintf("%s: %s\n%s: %s\n",
+			color.RedString("Host"), copyV.Host,
+			color.RedString("Path"), copyV.Path)
 	} else if copyV.Type == "kcp" {
-		info += fmt.Sprintf("KCP Seed: %s\n", copyV.Path)
+		info += fmt.Sprintf("%s: %s\n", color.RedString("KCP Seed"), copyV.Path)
 	} else if copyV.Type == "grpc" {
-		info += fmt.Sprintf("ServiceName: %s\n", copyV.ServiceName)
+		info += fmt.Sprintf("%s: %s\n", color.RedString("ServiceName"), copyV.ServiceName)
 	}
 
 	if copyV.Security == "reality" {
-		info += fmt.Sprintf("TLS: reality\n")
+		info += fmt.Sprintf("%s: reality\n", color.RedString("TLS"))
 		if copyV.SpiderX == "" {
 			copyV.SpiderX = "none"
 		}
-		info += fmt.Sprintf("SNI: %s\nShordID: %s\nSpiderX: %s\nFingerprint: %s\n", copyV.SNI, copyV.ShortIds, copyV.SpiderX, copyV.TlsFingerprint)
+		info += fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %s\n",
+			color.RedString("SNI"), copyV.SNI,
+			color.RedString("ShordID"), copyV.ShortIds,
+			color.RedString("SpiderX"), copyV.SpiderX,
+			color.RedString("Fingerprint"), copyV.TlsFingerprint,
+		)
 	} else if copyV.Security == "tls" {
-		info += fmt.Sprintf("TLS: tls\n")
+		info += fmt.Sprintf("%s: tls\n", color.RedString("TLS"))
 		if copyV.TlsFingerprint == "" {
 			copyV.TlsFingerprint = "none"
 		}
-		info += fmt.Sprintf("SNI: %s\nALPN:%s\nFingerprint: %s\n", copyV.SNI, copyV.ALPN, copyV.TlsFingerprint)
+		info += fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n",
+			color.RedString("SNI"), copyV.SNI,
+			color.RedString("ALPN"), copyV.ALPN,
+			color.RedString("Fingerprint"), copyV.TlsFingerprint)
 	} else {
-		info += fmt.Sprintf("TLS: none\n")
+		info += fmt.Sprintf("%s: none\n", color.RedString("TLS"))
 	}
 	return info
 }
