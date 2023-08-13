@@ -11,6 +11,7 @@ var (
 	Success    Type = 0x00
 	Failure    Type = 0x01
 	Processing Type = 0x02
+	Finished   Type = 0x03
 )
 
 type TypesDetails struct {
@@ -22,6 +23,7 @@ var logTypeMap = map[Type]TypesDetails{
 	Success:    {symbol: "[+]", color: color.New(color.Bold, color.FgGreen)},
 	Failure:    {symbol: "[-]", color: color.New(color.Bold, color.FgRed)},
 	Processing: {symbol: "[/]", color: color.New(color.Bold, color.FgBlue)},
+	Finished:   {symbol: "[$]", color: color.New(color.Bold, color.BgGreen, color.FgBlack)},
 }
 
 func Printf(logType Type, format string, v ...interface{}) {
