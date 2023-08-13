@@ -4,7 +4,7 @@ import "github.com/xtls/xray-core/infra/conf"
 
 type Protocol interface {
 	Parse(configLink string) error
-	BuildOutboundDetourConfig() (*conf.OutboundDetourConfig, error)
+	BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error)
 	DetailsStr() string
 	ConvertToGeneralConfig() (GeneralConfig, error)
 }

@@ -148,7 +148,7 @@ func (v *Vless) ConvertToGeneralConfig() (GeneralConfig, error) {
 	return g, nil
 }
 
-func (v *Vless) BuildOutboundDetourConfig() (*conf.OutboundDetourConfig, error) {
+func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
 	out := &conf.OutboundDetourConfig{}
 	out.Tag = "proxy"
 	out.Protocol = "vless"
@@ -218,6 +218,7 @@ func (v *Vless) BuildOutboundDetourConfig() (*conf.OutboundDetourConfig, error) 
 		}
 		s.TLSSettings = &conf.TLSConfig{
 			Fingerprint: v.TlsFingerprint,
+			Insecure:    allowInsecure,
 		}
 		if v.SNI != "" {
 			s.TLSSettings.ServerName = v.SNI
