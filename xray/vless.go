@@ -115,6 +115,12 @@ func (v *Vless) DetailsStr() string {
 		)
 	} else if copyV.Security == "tls" {
 		info += fmt.Sprintf("%s: tls\n", color.RedString("TLS"))
+		if len(copyV.SNI) == 0 {
+			copyV.SNI = copyV.Host
+		}
+		if len(copyV.ALPN) == 0 {
+			copyV.ALPN = "none"
+		}
 		if copyV.TlsFingerprint == "" {
 			copyV.TlsFingerprint = "none"
 		}

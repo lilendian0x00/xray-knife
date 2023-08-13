@@ -42,6 +42,7 @@ type Vmess struct {
 	Path           string `json:"path"`
 	Remark         string `json:"ps"` // Config's name
 	TLS            string `json:"tls"`
+	AllowInsecure  string `json:"allowinsecure"`
 	SNI            string `json:"sni"`  // Server name indication
 	ALPN           string `json:"alpn"` // Application-Layer Protocol Negotiation
 	TlsFingerprint string `json:"fp"`   // TLS fingerprint

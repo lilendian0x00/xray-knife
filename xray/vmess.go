@@ -17,7 +17,6 @@ func method1(v *Vmess, link string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(string(decoded))
 	if err = json.Unmarshal(decoded, v); err != nil {
 		return err
 	}
@@ -105,18 +104,29 @@ func (v *Vmess) Parse(configLink string) error {
 
 func (v *Vmess) DetailsStr() string {
 	copyV := *v
-	info := fmt.Sprintf("%s: Vmess\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n%s: %s\n",
+	info := fmt.Sprintf("%s: Vmess\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n",
 		color.RedString("Protocol"),
 		color.RedString("Remark"), copyV.Remark,
 		color.RedString("Network"), copyV.Network,
 		color.RedString("IP"), copyV.Address,
 		color.RedString("Port"), copyV.Port,
-		color.RedString("UUID"), copyV.ID,
-		color.RedString("Type"), copyV.Type)
+		color.RedString("UUID"), copyV.ID)
+
 	if copyV.Network == "" {
 
 	} else if copyV.Network == "http" || copyV.Network == "ws" || copyV.Network == "h2" {
-		info += fmt.Sprintf("%s: %s\n%s: %s\n",
+		if copyV.Type == "" {
+			copyV.Type = "none"
+		}
+		if copyV.Host == "" {
+			copyV.Host = "none"
+		}
+		if copyV.Path == "" {
+			copyV.Path = "none"
+		}
+
+		info += fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n",
+			color.RedString("Type"), copyV.Type,
 			color.RedString("Host"), copyV.Host,
 			color.RedString("Path"), copyV.Path)
 	} else if copyV.Network == "kcp" {
@@ -128,6 +138,9 @@ func (v *Vmess) DetailsStr() string {
 		info += fmt.Sprintf("%s: %s\n", color.RedString("ServiceName"), copyV.Path)
 	}
 	if len(copyV.TLS) != 0 {
+		if len(copyV.SNI) == 0 {
+			copyV.SNI = copyV.Host
+		}
 		if len(copyV.ALPN) == 0 {
 			copyV.ALPN = "none"
 		}
