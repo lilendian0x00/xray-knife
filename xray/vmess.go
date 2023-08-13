@@ -17,6 +17,7 @@ func method1(v *Vmess, link string) error {
 	if err != nil {
 		return err
 	}
+	fmt.Println(string(decoded))
 	if err = json.Unmarshal(decoded, v); err != nil {
 		return err
 	}
@@ -103,27 +104,41 @@ func (v *Vmess) Parse(configLink string) error {
 }
 
 func (v *Vmess) DetailsStr() string {
-	info := fmt.Sprintf("%s: Vmess\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n%s: %s\n%s: %s\n",
+	copyV := *v
+	info := fmt.Sprintf("%s: Vmess\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n%s: %s\n",
 		color.RedString("Protocol"),
-		color.RedString("Remark"), v.Remark,
-		color.RedString("Network"), v.Network,
-		color.RedString("IP"), v.Address,
-		color.RedString("Port"), v.Port,
-		color.RedString("UUID"), v.ID,
-		color.RedString("Type"), v.Type,
-		color.RedString("Path"), v.Path)
-	if len(v.TLS) != 0 {
-		if len(v.ALPN) == 0 {
-			v.ALPN = "none"
+		color.RedString("Remark"), copyV.Remark,
+		color.RedString("Network"), copyV.Network,
+		color.RedString("IP"), copyV.Address,
+		color.RedString("Port"), copyV.Port,
+		color.RedString("UUID"), copyV.ID,
+		color.RedString("Type"), copyV.Type)
+	if copyV.Network == "" {
+
+	} else if copyV.Network == "http" || copyV.Network == "ws" || copyV.Network == "h2" {
+		info += fmt.Sprintf("%s: %s\n%s: %s\n",
+			color.RedString("Host"), copyV.Host,
+			color.RedString("Path"), copyV.Path)
+	} else if copyV.Network == "kcp" {
+		info += fmt.Sprintf("%s: %s\n", color.RedString("KCP Seed"), copyV.Path)
+	} else if copyV.Network == "grpc" {
+		if copyV.Host == "" {
+			copyV.Host = "none"
 		}
-		if len(v.TlsFingerprint) == 0 {
-			v.TlsFingerprint = "none"
+		info += fmt.Sprintf("%s: %s\n", color.RedString("ServiceName"), copyV.Path)
+	}
+	if len(copyV.TLS) != 0 {
+		if len(copyV.ALPN) == 0 {
+			copyV.ALPN = "none"
+		}
+		if len(copyV.TlsFingerprint) == 0 {
+			copyV.TlsFingerprint = "none"
 		}
 		info += fmt.Sprintf("%s: tls\n%s: %s\n%s: %s\n%s: %s\n",
 			color.RedString("TLS"),
-			color.RedString("SNI"), v.SNI,
-			color.RedString("ALPN"), v.ALPN,
-			color.RedString("Fingerprint"), v.TlsFingerprint)
+			color.RedString("SNI"), copyV.SNI,
+			color.RedString("ALPN"), copyV.ALPN,
+			color.RedString("Fingerprint"), copyV.TlsFingerprint)
 	}
 	return info
 }
@@ -149,7 +164,7 @@ func (v *Vmess) ConvertToGeneralConfig() (GeneralConfig, error) {
 	return g, nil
 }
 
-func (v *Vmess) BuildOutboundDetourConfig() (*conf.OutboundDetourConfig, error) {
+func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
 	out := &conf.OutboundDetourConfig{}
 	out.Tag = "proxy"
 	out.Protocol = "vmess"
@@ -161,10 +176,7 @@ func (v *Vmess) BuildOutboundDetourConfig() (*conf.OutboundDetourConfig, error) 
 
 	switch v.Network {
 	case "tcp":
-		s.TCPSettings = &conf.TCPConfig{
-			HeaderConfig:        nil,
-			AcceptProxyProtocol: false,
-		}
+		s.TCPSettings = &conf.TCPConfig{}
 		if v.Type == "" || v.Type == "none" {
 			s.TCPSettings.HeaderConfig = json.RawMessage([]byte(`{ "type": "none" }`))
 		} else {
@@ -199,6 +211,18 @@ func (v *Vmess) BuildOutboundDetourConfig() (*conf.OutboundDetourConfig, error) 
 			h := conf.StringList(strings.Split(v.Host, ","))
 			s.HTTPSettings.Host = &h
 		}
+	case "grpc":
+		multiMode := false
+		if v.Type != "gun" {
+			multiMode = true
+		}
+		s.GRPCConfig = &conf.GRPCConfig{
+			InitialWindowsSize: 65536,
+			HealthCheckTimeout: 20,
+			MultiMode:          multiMode,
+			IdleTimeout:        60,
+			ServiceName:        v.Path,
+		}
 	}
 
 	if v.TLS == "tls" {
@@ -207,6 +231,7 @@ func (v *Vmess) BuildOutboundDetourConfig() (*conf.OutboundDetourConfig, error) 
 		}
 		s.TLSSettings = &conf.TLSConfig{
 			Fingerprint: v.TlsFingerprint,
+			Insecure:    allowInsecure,
 		}
 		if v.SNI != "" {
 			s.TLSSettings.ServerName = v.SNI
