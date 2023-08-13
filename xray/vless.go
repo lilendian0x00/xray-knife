@@ -60,7 +60,10 @@ func (v *Vless) Parse(configLink string) error {
 	remarkIndex := strings.LastIndex(configLink, "#")
 	remarkStr, _, _ := strings.Cut(configLink[remarkIndex+1:], "\n")
 
-	v.Remark = remarkStr
+	v.Remark, err = url.PathUnescape(remarkStr)
+	if err != nil {
+		v.Remark = remarkStr
+	}
 	v.ID = uuid
 	v.Address = address[0]
 	//portUint, err := strconv.ParseUint(address[1], 10, 16)
@@ -93,6 +96,9 @@ func (v *Vless) DetailsStr() string {
 	} else if copyV.Type == "kcp" {
 		info += fmt.Sprintf("%s: %s\n", color.RedString("KCP Seed"), copyV.Path)
 	} else if copyV.Type == "grpc" {
+		if copyV.ServiceName == "" {
+			copyV.ServiceName = "none"
+		}
 		info += fmt.Sprintf("%s: %s\n", color.RedString("ServiceName"), copyV.ServiceName)
 	}
 
@@ -103,7 +109,7 @@ func (v *Vless) DetailsStr() string {
 		}
 		info += fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %s\n",
 			color.RedString("SNI"), copyV.SNI,
-			color.RedString("ShordID"), copyV.ShortIds,
+			color.RedString("ShortID"), copyV.ShortIds,
 			color.RedString("SpiderX"), copyV.SpiderX,
 			color.RedString("Fingerprint"), copyV.TlsFingerprint,
 		)
