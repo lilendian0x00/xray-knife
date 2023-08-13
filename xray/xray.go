@@ -33,7 +33,7 @@ func StartXray(conf Protocol, verbose, allowInsecure bool) (*core.Instance, erro
 		loglevel = commlog.Severity_Debug
 	}
 
-	ob, err := conf.BuildOutboundDetourConfig()
+	ob, err := conf.BuildOutboundDetourConfig(allowInsecure)
 	if err != nil {
 		return nil, err
 	}
