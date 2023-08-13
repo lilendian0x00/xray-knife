@@ -66,7 +66,7 @@ type Vless struct {
 	SNI            string `json:"sni"`         // Server name indication
 	ALPN           string `json:"alpn"`        // Application-Layer Protocol Negotiation
 	TlsFingerprint string `json:"fp"`          // TLS fingerprint
-	Type           string `json:"type"`        // Used for HTTP Obfuscation
+	Type           string `json:"type"`        // Network
 	Remark         string `json:"ps"`          // Config's name
 	ServiceName    string `json:"serviceName"` // GRPC
 	Mode           string `json:"mode"`        // GRPC
