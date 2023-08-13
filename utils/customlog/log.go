@@ -23,7 +23,7 @@ var logTypeMap = map[Type]TypesDetails{
 	Success:    {symbol: "[+]", color: color.New(color.Bold, color.FgGreen)},
 	Failure:    {symbol: "[-]", color: color.New(color.Bold, color.FgRed)},
 	Processing: {symbol: "[/]", color: color.New(color.Bold, color.FgBlue)},
-	Finished:   {symbol: "[$]", color: color.New(color.Bold, color.BgGreen, color.FgBlack)},
+	Finished:   {symbol: "[$]", color: color.New(color.BgGreen, color.FgBlack)},
 }
 
 func Printf(logType Type, format string, v ...interface{}) {
