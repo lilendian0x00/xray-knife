@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/fatih/color"
 	"github.com/xtls/xray-core/infra/conf"
 	"net/url"
 	"strings"
@@ -102,7 +103,15 @@ func (v *Vmess) Parse(configLink string) error {
 }
 
 func (v *Vmess) DetailsStr() string {
-	info := fmt.Sprintf("Protocol: Vmess\nRemark: %s\nNetwork: %s\nIP: %s\nPort: %v\nUUID: %s\nType: %s\nPATH: %s\n", v.Remark, v.Network, v.Address, v.Port, v.ID, v.Type, v.Path)
+	info := fmt.Sprintf("%s: Vmess\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n%s: %s\n%s: %s\n",
+		color.RedString("Protocol"),
+		color.RedString("Remark"), v.Remark,
+		color.RedString("Network"), v.Network,
+		color.RedString("IP"), v.Address,
+		color.RedString("Port"), v.Port,
+		color.RedString("UUID"), v.ID,
+		color.RedString("Type"), v.Type,
+		color.RedString("Path"), v.Path)
 	if len(v.TLS) != 0 {
 		if len(v.ALPN) == 0 {
 			v.ALPN = "none"
@@ -110,7 +119,11 @@ func (v *Vmess) DetailsStr() string {
 		if len(v.TlsFingerprint) == 0 {
 			v.TlsFingerprint = "none"
 		}
-		info += fmt.Sprintf("TLS: yes\nSNI: %s\nALPN: %s\nFingerprint: %s\n", v.SNI, v.ALPN, v.TlsFingerprint)
+		info += fmt.Sprintf("%s: tls\n%s: %s\n%s: %s\n%s: %s\n",
+			color.RedString("TLS"),
+			color.RedString("SNI"), v.SNI,
+			color.RedString("ALPN"), v.ALPN,
+			color.RedString("Fingerprint"), v.TlsFingerprint)
 	}
 	return info
 }
