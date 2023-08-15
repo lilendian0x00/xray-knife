@@ -9,7 +9,8 @@ Swiss army knife tool for xray-core
 
 
 # Build instruction
-0. `Install golang version 1.20+`
+only tested on go version 1.20.2
+0. `Install golang`
 1. `git clone https://github.com/lilendian0x00/xray-knife.git`
 2. `cd xray-knife`
 3. `go build .`
