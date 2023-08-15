@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"xray-knife/utils"
+	"xray-knife/utils/customlog"
 )
 
 // TODO: Make a database to store subscriptions
@@ -29,7 +30,16 @@ func (s *Subscription) FetchAll() ([]string, error) {
 	bytes, _ := io.ReadAll(response.Body)
 	decoded, err2 := utils.Base64Decode(string(bytes))
 	if err2 != nil {
-		return nil, err2
+		// Probably It's not base64 encoded!, let's try parsing without decoding
+		customlog.Printf(customlog.Processing, "Couldn't decode the body! let's try parsing without decoding...\n")
+		links := strings.Split(string(bytes), "\n")
+		_, err = ParseXrayConfig(links[0])
+		if err != nil {
+			customlog.Printf(customlog.Failure, "Failed to parse the first config from the subscription!\n")
+			return nil, err2
+		}
+		s.ConfigLinks = links
+		return links, nil
 	}
 	// Configs are separated by newline char
 	links := strings.Split(string(decoded), "\n")
