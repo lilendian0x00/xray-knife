@@ -123,7 +123,7 @@ func ParseXrayConfig(configLink string) (Protocol, error) {
 		fmt.Println("Reading config from STDIN:")
 		text, _ := reader.ReadString('\n')
 		configLink = text
-
+		fmt.Printf("\n")
 	}
 
 	var protocol Protocol
