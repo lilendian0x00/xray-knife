@@ -9,7 +9,7 @@ import (
 // TcpCmd represents the tcp command
 var TcpCmd = &cobra.Command{
 	Use:   "tcp",
-	Short: "Establishes TCP Connection to config's host",
+	Short: "Examine TCP Connection delay to config's host",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println("tcp called")

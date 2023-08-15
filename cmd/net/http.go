@@ -31,7 +31,7 @@ var validConfigsMu sync.Mutex
 // HttpCmd represents the http command
 var HttpCmd = &cobra.Command{
 	Use:   "http",
-	Short: "Test config[s] using http request",
+	Short: "Examine config[s] real delay using http request",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
 		if configLinksFile != "" {
