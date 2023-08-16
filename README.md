@@ -21,7 +21,7 @@ Only tested on go version 1.20.2
 ## parse
 - [X] Completed
 ## subs
-- [ ] Sort configs based on their real delay when saving them into a file
+- [X] Sort configs based on their real delay when saving them into a file
 - [ ] Database for managing subscriptions
 ## net
 - [ ] Complete `tcp` command
