@@ -1,7 +1,11 @@
 package net
 
 import (
-	"fmt"
+	"net"
+	"os"
+	"time"
+	"xray-knife/utils/customlog"
+	"xray-knife/xray"
 
 	"github.com/spf13/cobra"
 )
@@ -12,10 +16,29 @@ var TcpCmd = &cobra.Command{
 	Short: "Examine TCP Connection delay to config's host",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("tcp called")
+		parsed, err := xray.ParseXrayConfig(configLink)
+		if err != nil {
+			customlog.Printf(customlog.Failure, "Couldn't parse the config!\n")
+			os.Exit(1)
+		}
+		generalDetails, _ := parsed.ConvertToGeneralConfig()
+
+		tcpAddr, err := net.ResolveTCPAddr("tcp", generalDetails.Address+":"+generalDetails.Port)
+		if err != nil {
+			customlog.Printf(customlog.Failure, "ResolveTCPAddr failed: %v\n", err)
+			os.Exit(1)
+		}
+		start := time.Now()
+		conn, err := net.DialTCP("tcp", nil, tcpAddr)
+		if err != nil {
+			customlog.Printf(customlog.Failure, "Couldn't establish tcp conn! : %v\n", err)
+			os.Exit(1)
+		}
+		customlog.Printf(customlog.Success, "Established TCP connection in %dms\n", time.Since(start).Milliseconds())
+		conn.Close()
 	},
 }
 
 func init() {
-
+	TcpCmd.Flags().StringVarP(&configLink, "config", "c", "", "The xray config link")
 }
