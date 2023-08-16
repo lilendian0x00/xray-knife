@@ -16,17 +16,6 @@ jobs:
         goos: [windows, linux]
         goarch: [amd64, arm64]
         include:
-          # BEGIN Linux ARM 5 6 7
-          - goos: linux
-            goarch: arm
-            goarm: 7
-          - goos: linux
-            goarch: arm
-            goarm: 6
-          - goos: linux
-            goarch: arm
-            goarm: 5
-          # END Linux ARM 5 6 7
           # BEGIN Android ARM 8
           - goos: android
             goarch: arm64
@@ -34,9 +23,6 @@ jobs:
           # Windows ARM
           - goos: windows
             goarch: arm64
-          - goos: windows
-            goarch: arm
-            goarm: 7
       fail-fast: false
 
     runs-on: ubuntu-latest
