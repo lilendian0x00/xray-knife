@@ -13,16 +13,13 @@ jobs:
     strategy:
       matrix:
         # Include amd64 and arm64 on all platforms.
-        goos: [windows, linux]
+        goos: [windows, linux, darwin]
         goarch: [amd64, arm64]
         include:
           # BEGIN Android ARM 8
           - goos: android
             goarch: arm64
           # END Android ARM 8
-          # Windows ARM
-          - goos: windows
-            goarch: arm64
       fail-fast: false
 
     runs-on: ubuntu-latest
