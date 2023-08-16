@@ -24,6 +24,6 @@ Only tested on go version 1.20.2
 - [X] Sort configs based on their real delay when saving them into a file
 - [ ] Database for managing subscriptions
 ## net
-- [ ] Complete `tcp` command
+- [X] Complete `tcp` command
 ## bot (under development)
 - [ ] Initialization
