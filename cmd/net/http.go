@@ -124,7 +124,7 @@ var HttpCmd = &cobra.Command{
 				customlog.Printf(customlog.Failure, "Config save configs due to file error!\n")
 				os.Exit(1)
 			}
-			customlog.Printf(customlog.Finished, "%d number of configs have been saved into %s\n", len(validConfigs), saveFile)
+			customlog.Printf(customlog.Finished, "A total of %d configurations have been saved to %s\n", len(validConfigs), saveFile)
 		} else {
 			parsed, err := xray.ParseXrayConfig(configLink)
 			if err != nil {
