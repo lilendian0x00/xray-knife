@@ -2,9 +2,9 @@
 Swiss army knife tool (cli) for [xray-core](https://github.com/XTLS/Xray-core)
 
 ## Features (main flags)
-- `parse`: Detailed info about xray config link.
+- `parse`: Detailed info about given xray config link.
 - `subs`: Subscription management tool.
-- `net`: Multiple network testing tool for one or multiple xray configs.
+- `net`: Network testing tools for one or multiple xray configs.
 - `bot`: Automation bot for switching outbound connection automatically.
 
 
