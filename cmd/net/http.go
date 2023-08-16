@@ -5,6 +5,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,18 +16,45 @@ import (
 )
 
 var (
-	configLink      string
-	configLinksFile string
-	saveFile        string
-	threadCount     uint16
-	destURL         string
-	httpMethod      string
-	showBody        bool
-	verbose         bool
+	configLink        string
+	configLinksFile   string
+	saveFile          string
+	threadCount       uint16
+	destURL           string
+	httpMethod        string
+	showBody          bool
+	verbose           bool
+	sortedByRealDelay bool
 )
 
 var validConfigs []string
 var validConfigsMu sync.Mutex
+
+type result struct {
+	delay      int64
+	configLink string
+}
+
+type configResults []result
+
+func (cResults configResults) Len() int {
+	return len(cResults)
+}
+
+func (cResults configResults) Less(i, j int) bool {
+	if cResults[i].delay < cResults[j].delay {
+		return true
+	} else if cResults[i].delay == cResults[j].delay {
+		return cResults[i].configLink < cResults[j].configLink
+	}
+	return false
+}
+
+func (cResults configResults) Swap(i, j int) {
+	cResults[i], cResults[j] = cResults[j], cResults[i]
+}
+
+var confRes configResults
 
 // HttpCmd represents the http command
 var HttpCmd = &cobra.Command{
@@ -73,15 +101,24 @@ var HttpCmd = &cobra.Command{
 					fmt.Printf("%v", parsed.DetailsStr())
 					customlog.Printf(customlog.Success, "Real Delay: %dms\n\n", delay)
 					validConfigsMu.Lock()
-					validConfigs = append(validConfigs, links[configIndex])
+					confRes = append(confRes, result{
+						configLink: links[configIndex],
+						delay:      delay,
+					})
+					//validConfigs = append(validConfigs, links[configIndex])
 					validConfigsMu.Unlock()
 					return
 				}(i)
 			}
 			wg.Wait()
-
+			// Sort configs based on their delay
+			if sortedByRealDelay {
+				sort.Sort(confRes)
+			}
+			for _, v := range confRes {
+				validConfigs = append(validConfigs, v.configLink)
+			}
 			// Save configs
-
 			err := utils.WriteIntoFile(saveFile, []byte(strings.Join(validConfigs, "\n\n")))
 			if err != nil {
 				customlog.Printf(customlog.Failure, "Config save configs due to file error!\n")
@@ -124,5 +161,6 @@ func init() {
 	HttpCmd.Flags().BoolVarP(&showBody, "body", "b", false, "Show response body")
 	HttpCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose xray-core")
 	HttpCmd.Flags().StringVarP(&saveFile, "out", "o", "valid.txt", "Output file for valid config links")
+	HttpCmd.Flags().BoolVarP(&sortedByRealDelay, "sort", "s", true, "Sort config links by their delay (fast to slow)")
 
 }
