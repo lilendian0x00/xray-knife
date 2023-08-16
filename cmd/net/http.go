@@ -16,7 +16,6 @@ import (
 )
 
 var (
-	configLink        string
 	configLinksFile   string
 	saveFile          string
 	threadCount       uint16
