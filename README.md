@@ -19,7 +19,11 @@ Only tested on go version 1.20.2
 
 # TODO
 ## parse
-- [X] ~~Completed~~
+- [X] ~~Add Vmess link support (`vmess://...`, full b64 encoded)~~
+- [X] ~~Add Vmess link v2 support (`vmess://...`, semi b64 encoded)~~
+- [X] ~~Add Vless link support (`vless://...`)~~
+- [ ] Add Shadowsocks support (`ss://...`)
+- [ ] Add Trojan support (`trojan://...`)
 ## subs
 - [X] ~~Sort configs based on their real delay when saving them into a file~~
 - [ ] Database for managing subscriptions
