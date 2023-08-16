@@ -1,5 +1,5 @@
 # xray-knife
-Swiss army knife tool (cli) for xray-core
+Swiss army knife tool (cli) for [xray-core](https://github.com/XTLS/Xray-core)
 
 ## Features (main flags)
 - `parse`: Detailed info about xray config link.
