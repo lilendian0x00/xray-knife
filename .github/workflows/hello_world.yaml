@@ -37,7 +37,7 @@ jobs:
           - goos: windows
             goarch: arm
             goarm: 7
-    fail-fast: false
+      fail-fast: false
 
     runs-on: ubuntu-latest
     env:
