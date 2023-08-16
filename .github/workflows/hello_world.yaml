@@ -1,0 +1,111 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+
+  release:
+    types: [published]
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        # Include amd64 and arm64 on all platforms.
+        goos: [windows, linux]
+        goarch: [amd64, arm64]
+        include:
+          # BEGIN Linux ARM 5 6 7
+          - goos: linux
+            goarch: arm
+            goarm: 7
+          - goos: linux
+            goarch: arm
+            goarm: 6
+          - goos: linux
+            goarch: arm
+            goarm: 5
+          # END Linux ARM 5 6 7
+          # BEGIN Android ARM 8
+          - goos: android
+            goarch: arm64
+          # END Android ARM 8
+          # Windows ARM
+          - goos: windows
+            goarch: arm64
+          - goos: windows
+            goarch: arm
+            goarm: 7
+
+    fail-fast: false
+
+    runs-on: ubuntu-latest
+    env:
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+      GOARM: ${{ matrix.goarm }}
+      CGO_ENABLED: 0
+
+    steps:
+      - name: Checkout codebase
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20.2'
+
+      - name: Donwload Project dependencies
+        run: go mod download
+
+      - name: Build Xray-knife
+        run: |
+          mkdir -p build_assets
+          go build -v -o build_assets/xray-knife -trimpath -ldflags "-s -w -buildid=" 
+
+      - name: Rename Windows Xray-knife
+          if: matrix.goos == 'windows'
+          run: |
+            cd ./build_assets || exit 1
+            mv xray-knife xray-knife.exe
+
+      - name: Copy README.md & LICENSE
+          run: |
+            mv -f resources/* build_assets
+            cp ${GITHUB_WORKSPACE}/README.md ./build/README.md
+            cp ${GITHUB_WORKSPACE}/LICENSE ./build/LICENSE
+
+      - name: Create ZIP archive
+      shell: bash
+      run: |
+        pushd build_assets || exit 1
+        touch -mt $(date +%Y01010000) *
+        zip -9vr ../Xray-knife-${{ env.ASSET_NAME }}.zip .
+        popd || exit 1
+        FILE=./Xray-knife-${{ env.ASSET_NAME }}.zip
+        DGST=$FILE.dgst
+        for METHOD in {"md5","sha1","sha256","sha512"}
+        do
+        openssl dgst -$METHOD $FILE | sed 's/([^)]*)//g' >>$DGST
+        done
+
+      - name: Change the name
+        run: |
+          mv build_assets Xray-knife-${{ env.ASSET_NAME }}
+
+      - name: Upload files to Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: Xray-knife-${{ env.ASSET_NAME }}
+          path: |
+            ./Xray-knife-${{ env.ASSET_NAME }}/*
+
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v2
+        if: github.event_name == 'release'
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ./Xray-knife-${{ env.ASSET_NAME }}.zip*
+          tag: ${{ github.ref }}
+          file_glob: true
