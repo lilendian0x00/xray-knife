@@ -19,11 +19,11 @@ Only tested on go version 1.20.2
 
 # TODO
 ## parse
-- [X] Completed
+- [X] ~~Completed~~
 ## subs
-- [X] Sort configs based on their real delay when saving them into a file
+- [X] ~~Sort configs based on their real delay when saving them into a file~~
 - [ ] Database for managing subscriptions
 ## net
-- [X] Complete `tcp` command
+- [X] ~~Complete `tcp` command~~
 ## bot (under development)
 - [ ] Initialization
