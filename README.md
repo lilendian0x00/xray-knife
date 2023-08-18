@@ -7,7 +7,7 @@ Swiss army knife tool (cli) for [xray-core](https://github.com/XTLS/Xray-core).
 - `parse`: Detailed info about given xray config link.
 - `subs`: Subscription management tool.
 - `net`: Network testing tools for one or multiple xray configs.
-- `scan`: Scanning tools for bypassing GFW (CF Scanner, REALITY Scanner)
+- `scan`: Scanning tools needed for bypassing GFW (CF Scanner, REALITY Scanner)
 - `bot`: Automation bot for switching outbound connection automatically.
 
 ## Download
