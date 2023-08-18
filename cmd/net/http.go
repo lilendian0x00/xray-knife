@@ -97,6 +97,9 @@ var HttpCmd = &cobra.Command{
 						return
 						//os.Exit(1)
 					}
+					// Close xray conn after testing
+					_ = instance.Close()
+
 					fmt.Printf("%v", parsed.DetailsStr())
 					customlog.Printf(customlog.Success, "Real Delay: %dms\n\n", delay)
 					validConfigsMu.Lock()
