@@ -4,7 +4,7 @@ import "testing"
 
 func TestSubscription_FetchAll(t *testing.T) {
 	s := Subscription{Url: "https://raw.githubusercontent.com/soroushmirzaei/telegram-configs-collector/main/protocols/reality"}
-	err := s.FetchAll()
+	_, err := s.FetchAll()
 	if err != nil {
 		t.Errorf("FetchAll error: %v", err)
 	}
