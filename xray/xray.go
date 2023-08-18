@@ -28,8 +28,10 @@ import (
 
 func StartXray(conf Protocol, verbose, allowInsecure bool) (*core.Instance, error) {
 
-	loglevel := commlog.Severity_Error
+	loglevel := commlog.Severity_Unknown
+	logType := applog.LogType_None
 	if verbose {
+		logType = applog.LogType_Console
 		loglevel = commlog.Severity_Debug
 	}
 
@@ -45,7 +47,8 @@ func StartXray(conf Protocol, verbose, allowInsecure bool) (*core.Instance, erro
 	clientConfig := &core.Config{
 		App: []*serial.TypedMessage{
 			serial.ToTypedMessage(&applog.Config{
-				ErrorLogType:  applog.LogType_Console,
+				ErrorLogType:  logType,
+				AccessLogType: logType,
 				ErrorLogLevel: loglevel,
 			}),
 			serial.ToTypedMessage(&dispatcher.Config{}),
