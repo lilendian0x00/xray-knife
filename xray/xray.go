@@ -50,6 +50,7 @@ func StartXray(conf Protocol, verbose, allowInsecure bool) (*core.Instance, erro
 				ErrorLogType:  logType,
 				AccessLogType: logType,
 				ErrorLogLevel: loglevel,
+				EnableDnsLog:  false,
 			}),
 			serial.ToTypedMessage(&dispatcher.Config{}),
 			serial.ToTypedMessage(&proxyman.InboundConfig{}),
@@ -135,6 +136,10 @@ func ParseXrayConfig(configLink string) (Protocol, error) {
 		protocol = &Vmess{}
 	} else if strings.HasPrefix(configLink, "vless://") {
 		protocol = &Vless{}
+	} else if strings.HasPrefix(configLink, "ss://") {
+		protocol = &Shadowsocks{}
+	} else if strings.HasPrefix(configLink, "trojan://") {
+		protocol = &Trojan{}
 	} else {
 		return protocol, errors.New("Invalid protocol type! ")
 	}
