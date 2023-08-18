@@ -158,7 +158,7 @@ func init() {
 	HttpCmd.Flags().StringVarP(&configLink, "config", "c", "", "The xray config link")
 	HttpCmd.Flags().StringVarP(&configLinksFile, "file", "f", "", "Read config links from a file")
 	HttpCmd.Flags().Uint16VarP(&threadCount, "thread", "t", 5, "Number of threads to be used for checking links from file")
-	HttpCmd.Flags().StringVarP(&destURL, "url", "u", "http://api.ipify.org/", "The url to test config")
+	HttpCmd.Flags().StringVarP(&destURL, "url", "u", "https://google.com/", "The url to test config")
 	HttpCmd.Flags().StringVarP(&httpMethod, "method", "m", "GET", "Http method")
 	HttpCmd.Flags().BoolVarP(&showBody, "body", "b", false, "Show response body")
 	HttpCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose xray-core")
