@@ -53,7 +53,7 @@ type Vmess struct {
 type Vless struct {
 	LinkVersion    string `json:"-"`
 	ID             string `json:"id"`  // UUID
-	Address        string `json:"add"` // IP:PORT
+	Address        string `json:"add"` // HOST:PORT
 	Encryption     string `json:"encryption"`
 	Flow           string `json:"flow"`
 	Security       string `json:"security"` // reality or tls
@@ -69,6 +69,35 @@ type Vless struct {
 	TlsFingerprint string `json:"fp"`          // TLS fingerprint
 	Type           string `json:"type"`        // Network
 	Remark         string `json:"ps"`          // Config's name
+	ServiceName    string `json:"serviceName"` // GRPC
+	Mode           string `json:"mode"`        // GRPC
+	OrigLink       string `json:"-"`           // Original link
+}
+
+type Shadowsocks struct {
+	Address    string
+	Port       string
+	Encryption string
+	Password   string
+	Remark     string
+	OrigLink   string // Original link
+}
+
+type Trojan struct {
+	LinkVersion    string `json:"-"`
+	Password       string // Password
+	Address        string `json:"add"` // HOST:PORT
+	Flow           string `json:"flow"`
+	Security       string `json:"security"`   // reality or tls
+	HeaderType     string `json:"headerType"` // TCP HTTP Obfuscation
+	Host           string `json:"host"`       // HTTP, WS
+	Path           string `json:"path"`
+	Port           string `json:"port"`
+	SNI            string `json:"sni"`  // Server name indication
+	ALPN           string `json:"alpn"` // Application-Layer Protocol Negotiation
+	TlsFingerprint string `json:"fp"`   // TLS fingerprint
+	Type           string `json:"type"` // Network
+	Remark         string // Config's name
 	ServiceName    string `json:"serviceName"` // GRPC
 	Mode           string `json:"mode"`        // GRPC
 	OrigLink       string `json:"-"`           // Original link
