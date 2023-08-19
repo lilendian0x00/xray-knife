@@ -24,12 +24,12 @@ Only tested on go version 1.20.2
     
 
 # TODO
-## parse
+## protocols
 - [X] ~~Add Vmess link support (`vmess://...`, full b64 encoded)~~
 - [X] ~~Add Vmess link v2 support (`vmess://...`, semi b64 encoded)~~
 - [X] ~~Add Vless link support (`vless://...`)~~
 - [X] ~~Add Shadowsocks support (`ss://...`)~~
-- [ ] Add Trojan support (`trojan://...`)
+- [X] ~~Add Trojan support (`trojan://...`)~~
 
 ## subs
 - [X] ~~Fetch config links inside subscription~~
