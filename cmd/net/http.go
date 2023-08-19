@@ -22,6 +22,7 @@ var (
 	destURL           string
 	httpMethod        string
 	showBody          bool
+	insecureTLS       bool
 	verbose           bool
 	sortedByRealDelay bool
 )
@@ -86,7 +87,7 @@ var HttpCmd = &cobra.Command{
 						return
 						//os.Exit(1)
 					}
-					instance, err1 := xray.StartXray(parsed, verbose, false)
+					instance, err1 := xray.StartXray(parsed, verbose, insecureTLS)
 					if err1 != nil {
 						customlog.Printf(customlog.Failure, "Couldn't start the xray! : %v\n\n", err)
 						return
@@ -136,7 +137,7 @@ var HttpCmd = &cobra.Command{
 
 			fmt.Println("\n" + parsed.DetailsStr())
 
-			instance, err := xray.StartXray(parsed, verbose, false)
+			instance, err := xray.StartXray(parsed, verbose, true)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%v", err)
 				os.Exit(1)
@@ -161,6 +162,7 @@ func init() {
 	HttpCmd.Flags().StringVarP(&destURL, "url", "u", "https://google.com/", "The url to test config")
 	HttpCmd.Flags().StringVarP(&httpMethod, "method", "m", "GET", "Http method")
 	HttpCmd.Flags().BoolVarP(&showBody, "body", "b", false, "Show response body")
+	HttpCmd.Flags().BoolVarP(&insecureTLS, "insecure", "e", false, "Insecure tls connection (fake SNI)")
 	HttpCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose xray-core")
 	HttpCmd.Flags().StringVarP(&saveFile, "out", "o", "valid.txt", "Output file for valid config links")
 	HttpCmd.Flags().BoolVarP(&sortedByRealDelay, "sort", "s", true, "Sort config links by their delay (fast to slow)")
