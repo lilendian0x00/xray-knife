@@ -107,7 +107,8 @@ func (v *Vless) DetailsStr() string {
 		if copyV.SpiderX == "" {
 			copyV.SpiderX = "none"
 		}
-		info += fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %s\n",
+		info += fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %s\n%s: %s\n",
+			color.RedString("Public key"), copyV.PublicKey,
 			color.RedString("SNI"), copyV.SNI,
 			color.RedString("ShortID"), copyV.ShortIds,
 			color.RedString("SpiderX"), copyV.SpiderX,
