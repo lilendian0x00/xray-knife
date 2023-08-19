@@ -87,7 +87,7 @@ func (v *Vless) DetailsStr() string {
 		color.RedString("Protocol"),
 		color.RedString("Remark"), v.Remark,
 		color.RedString("Network"), v.Type,
-		color.RedString("IP"), v.Address,
+		color.RedString("Address"), v.Address,
 		color.RedString("Port"), v.Port,
 		color.RedString("UUID"), v.ID,
 		color.RedString("Flow"), copyV.Flow)

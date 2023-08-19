@@ -108,7 +108,7 @@ func (v *Vmess) DetailsStr() string {
 		color.RedString("Protocol"),
 		color.RedString("Remark"), copyV.Remark,
 		color.RedString("Network"), copyV.Network,
-		color.RedString("IP"), copyV.Address,
+		color.RedString("Address"), copyV.Address,
 		color.RedString("Port"), copyV.Port,
 		color.RedString("UUID"), copyV.ID)
 
