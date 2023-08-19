@@ -6,6 +6,7 @@ import (
 	"xray-knife/cmd/bot"
 	"xray-knife/cmd/net"
 	"xray-knife/cmd/parse"
+	"xray-knife/cmd/scan"
 	"xray-knife/cmd/subs"
 )
 
@@ -34,10 +35,11 @@ func Execute() {
 }
 
 func addSubcommandPalettes() {
-	rootCmd.AddCommand(net.NetCmd)
 	rootCmd.AddCommand(parse.ParseCmd)
-	rootCmd.AddCommand(bot.BotCmd)
 	rootCmd.AddCommand(subs.SubsCmd)
+	rootCmd.AddCommand(net.NetCmd)
+	rootCmd.AddCommand(scan.ScanCmd)
+	rootCmd.AddCommand(bot.BotCmd)
 }
 
 func init() {
