@@ -67,7 +67,6 @@ func (t *Trojan) Parse(configLink string) error {
 	if err != nil {
 		t.Remark = remarkStr
 	}
-	
 	t.OrigLink = configLink
 
 	return nil
