@@ -11,16 +11,19 @@ import (
 )
 
 func (t *Trojan) Parse(configLink string) error {
-	if !strings.HasPrefix(configLink, "vless://") {
+	if !strings.HasPrefix(configLink, "trojan://") {
 		return fmt.Errorf("vmess unreconized: %s", configLink)
 	}
-	nonProtocolPart := configLink[8:]
+	nonProtocolPart := configLink[9:]
 
 	secondPart := strings.SplitN(nonProtocolPart, "@", 2)
 	uuid := secondPart[0]
+	t.Password = uuid
 
 	thirdPart := strings.Split(secondPart[1], "?")
 	address := strings.Split(thirdPart[0], ":")
+	t.Address = address[0]
+	t.Port = address[1]
 
 	queryPart := strings.Join(thirdPart[1:], "?")
 	lastIndex := strings.LastIndex(queryPart, "#")
@@ -64,15 +67,13 @@ func (t *Trojan) Parse(configLink string) error {
 	if err != nil {
 		t.Remark = remarkStr
 	}
-	t.Password = uuid
-	t.Address = address[0]
+
 	//portUint, err := strconv.ParseUint(address[1], 10, 16)
 	//if err != nil {
 	//	fmt.Fprintf(os.Stderr, "%v", err)
 	//	os.Exit(1)
 	//}
 	//v.Port = uint16(portUint)
-	t.Port = address[1]
 	t.OrigLink = configLink
 
 	return nil
@@ -80,13 +81,19 @@ func (t *Trojan) Parse(configLink string) error {
 
 func (t *Trojan) DetailsStr() string {
 	copyV := *t
-	info := fmt.Sprintf("%s: Trojan\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n",
+	if copyV.Flow == "" || copyV.Type == "grpc" {
+		copyV.Flow = "none"
+	}
+	info := fmt.Sprintf("%s: Trojan\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n%s: %s\n",
 		color.RedString("Protocol"),
 		color.RedString("Remark"), t.Remark,
 		color.RedString("Network"), t.Type,
 		color.RedString("IP"), t.Address,
 		color.RedString("Port"), t.Port,
-		color.RedString("PASSWORD"), t.Password)
+		color.RedString("Password"), t.Password,
+		color.RedString("Flow"), copyV.Flow,
+	)
+
 	if copyV.Type == "" {
 
 	} else if copyV.Type == "http" || copyV.Type == "ws" || copyV.Type == "h2" {
@@ -102,18 +109,7 @@ func (t *Trojan) DetailsStr() string {
 		info += fmt.Sprintf("%s: %s\n", color.RedString("ServiceName"), copyV.ServiceName)
 	}
 
-	if copyV.Security == "reality" {
-		info += fmt.Sprintf("%s: reality\n", color.RedString("TLS"))
-		if copyV.SpiderX == "" {
-			copyV.SpiderX = "none"
-		}
-		info += fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %s\n",
-			color.RedString("SNI"), copyV.SNI,
-			color.RedString("ShortID"), copyV.ShortIds,
-			color.RedString("SpiderX"), copyV.SpiderX,
-			color.RedString("Fingerprint"), copyV.TlsFingerprint,
-		)
-	} else if copyV.Security == "tls" {
+	if copyV.Security == "tls" {
 		info += fmt.Sprintf("%s: tls\n", color.RedString("TLS"))
 		if len(copyV.SNI) == 0 {
 			copyV.SNI = copyV.Host
@@ -136,7 +132,7 @@ func (t *Trojan) DetailsStr() string {
 
 func (t *Trojan) ConvertToGeneralConfig() (GeneralConfig, error) {
 	var g GeneralConfig
-	g.Protocol = "vless"
+	g.Protocol = "trojan"
 	g.Address = t.Address
 	g.Host = t.Host
 	g.ID = t.Password
@@ -157,7 +153,7 @@ func (t *Trojan) ConvertToGeneralConfig() (GeneralConfig, error) {
 func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
 	out := &conf.OutboundDetourConfig{}
 	out.Tag = "proxy"
-	out.Protocol = "vless"
+	out.Protocol = "trojan"
 
 	p := conf.TransportProtocol(t.Type)
 	s := &conf.StreamConfig{

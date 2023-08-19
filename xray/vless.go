@@ -80,13 +80,17 @@ func (v *Vless) Parse(configLink string) error {
 
 func (v *Vless) DetailsStr() string {
 	copyV := *v
-	info := fmt.Sprintf("%s: Vless\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n",
+	if copyV.Flow == "" || copyV.Type == "grpc" {
+		copyV.Flow = "none"
+	}
+	info := fmt.Sprintf("%s: Vless\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n%s: %s\n",
 		color.RedString("Protocol"),
 		color.RedString("Remark"), v.Remark,
 		color.RedString("Network"), v.Type,
 		color.RedString("IP"), v.Address,
 		color.RedString("Port"), v.Port,
-		color.RedString("UUID"), v.ID)
+		color.RedString("UUID"), v.ID,
+		color.RedString("Flow"), copyV.Flow)
 	if copyV.Type == "" {
 
 	} else if copyV.Type == "http" || copyV.Type == "ws" || copyV.Type == "h2" {
