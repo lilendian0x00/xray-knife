@@ -67,13 +67,7 @@ func (t *Trojan) Parse(configLink string) error {
 	if err != nil {
 		t.Remark = remarkStr
 	}
-
-	//portUint, err := strconv.ParseUint(address[1], 10, 16)
-	//if err != nil {
-	//	fmt.Fprintf(os.Stderr, "%v", err)
-	//	os.Exit(1)
-	//}
-	//v.Port = uint16(portUint)
+	
 	t.OrigLink = configLink
 
 	return nil
@@ -88,7 +82,7 @@ func (t *Trojan) DetailsStr() string {
 		color.RedString("Protocol"),
 		color.RedString("Remark"), t.Remark,
 		color.RedString("Network"), t.Type,
-		color.RedString("IP"), t.Address,
+		color.RedString("Address"), t.Address,
 		color.RedString("Port"), t.Port,
 		color.RedString("Password"), t.Password,
 		color.RedString("Flow"), copyV.Flow,
@@ -181,15 +175,18 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 			}
 			`, string(pathb), string(hostb))))
 		}
+		break
 	case "kcp":
 		s.KCPSettings = &conf.KCPConfig{}
 		s.KCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, t.Type)))
+		break
 	case "ws":
 		s.WSSettings = &conf.WebSocketConfig{}
 		s.WSSettings.Path = t.Path
 		s.WSSettings.Headers = map[string]string{
 			"Host": t.Host,
 		}
+		break
 	case "h2", "http":
 		s.HTTPSettings = &conf.HTTPConfig{
 			Path: t.Path,
@@ -198,6 +195,7 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 			h := conf.StringList(strings.Split(t.Host, ","))
 			s.HTTPSettings.Host = &h
 		}
+		break
 	case "grpc":
 		multiMode := false
 		if t.Mode != "gun" {
@@ -212,6 +210,7 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 		}
 
 		t.Flow = ""
+		break
 	}
 
 	if t.Security == "tls" {
@@ -234,22 +233,18 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 
 	out.StreamSetting = s
 	oset := json.RawMessage([]byte(fmt.Sprintf(`{
-  "vnext": [
+  "servers": [
     {
       "address": "%s",
+      "method": "chacha20",
       "port": %v,
-      "users": [
-        {
-          "id": "%s",
-		  "alterId": 0,
-          "security": "auto",
-          "flow": "%s",
-          "encryption": "none"
-        }
-      ]
+	  "password": "%s",
+	  "ota": false,
+	  "flow": "%s"
     }
   ]
 }`, t.Address, t.Port, t.Password, t.Flow)))
+	fmt.Println(string(oset))
 	out.Settings = &oset
 	return out, nil
 }
