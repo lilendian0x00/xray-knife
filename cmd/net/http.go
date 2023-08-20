@@ -113,7 +113,12 @@ var HttpCmd = &cobra.Command{
 					return
 				}(i)
 			}
+			// Wait for all goroutines to finish
 			wg.Wait()
+
+			// Close semaphore channel
+			close(semaphore)
+
 			// Sort configs based on their delay
 			if sortedByRealDelay {
 				sort.Sort(confRes)
@@ -121,6 +126,7 @@ var HttpCmd = &cobra.Command{
 			for _, v := range confRes {
 				validConfigs = append(validConfigs, v.configLink)
 			}
+			
 			// Save configs
 			err := utils.WriteIntoFile(saveFile, []byte(strings.Join(validConfigs, "\n\n")))
 			if err != nil {
