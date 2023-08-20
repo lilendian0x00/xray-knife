@@ -15,7 +15,7 @@ Swiss army knife tool (cli) for [xray-core](https://github.com/XTLS/Xray-core).
 Get the latest version from [GitHub](https://github.com/lilendian0x00/xray-knife/releases/latest).
 
 # Build instruction
-Only tested on go version 1.20.2
+Only tested on go version 1.20
 
 1. `Install golang`
 2. `git clone https://github.com/lilendian0x00/xray-knife.git`
