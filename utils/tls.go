@@ -49,9 +49,10 @@ func SendHTTPRequest(fullURL *url.URL, useragent string, method string) (*http.R
 	var alpn string
 	var utlsErr error
 
+	// TODO: For ARM it gives error (https://github.com/coyove/goflyway/issues/126)
 	addrs, err := net.LookupIP(fullURL.Host)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Could not get resolve dns: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Could not resolve dns: %v\n", err)
 		os.Exit(1)
 	}
 
