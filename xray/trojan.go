@@ -243,7 +243,6 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
     }
   ]
 }`, t.Address, t.Port, t.Password, t.Flow)))
-	fmt.Println(string(oset))
 	out.Settings = &oset
 	return out, nil
 }
