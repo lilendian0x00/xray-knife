@@ -6,10 +6,10 @@ import (
 	"github.com/spf13/cobra"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"xray-knife/speedtester/cloudflare"
 	"xray-knife/utils"
 	"xray-knife/utils/customlog"
 	"xray-knife/xray"
@@ -25,14 +25,18 @@ var (
 	insecureTLS       bool
 	verbose           bool
 	sortedByRealDelay bool
+	speedtest         bool
+	speedtestAmount   uint32
 )
 
 var validConfigs []string
 var validConfigsMu sync.Mutex
 
 type result struct {
-	delay      int64
-	configLink string
+	delay        int64
+	downloadTime int64
+	UploadTime   int64
+	configLink   string
 }
 
 type configResults []result
@@ -42,7 +46,7 @@ func (cResults configResults) Len() int {
 }
 
 func (cResults configResults) Less(i, j int) bool {
-	if cResults[i].delay < cResults[j].delay {
+	if (cResults[i].delay < cResults[j].delay) && (cResults[i].downloadTime <= cResults[j].downloadTime) && (cResults[i].UploadTime <= cResults[j].UploadTime) {
 		return true
 	} else if cResults[i].delay == cResults[j].delay {
 		return cResults[i].configLink < cResults[j].configLink
@@ -92,21 +96,54 @@ var HttpCmd = &cobra.Command{
 						customlog.Printf(customlog.Failure, "Couldn't start the xray! : %v\n\n", err)
 						return
 					}
+
+					var delay int64
+					var downloadTime int64
+					var uploadTime int64
+
 					delay, _, err2 := xray.MeasureDelay(instance, time.Duration(15)*time.Second, showBody, destURL, httpMethod)
 					if err2 != nil {
 						customlog.Printf(customlog.Failure, "Config didn't respond!\n\n")
 						return
 						//os.Exit(1)
 					}
+					fmt.Printf("%v", parsed.DetailsStr())
+					customlog.Printf(customlog.Success, "Real Delay: %dms\n", delay)
+
+					if speedtest {
+						downloadStartTime := time.Now()
+						_, _, err := xray.CoreHTTPRequestCustom(instance, time.Duration(15)*time.Second, cloudflare.Speedtest.MakeDownloadHTTPRequest(false, speedtestAmount*1000))
+						if err != nil {
+							//customlog.Printf(customlog.Failure, "Download failed!\n")
+							return
+						} else {
+							downloadTime = time.Since(downloadStartTime).Milliseconds()
+
+							//customlog.Printf(customlog.Success, "Download took: %dms\n", downloadTime)
+						}
+
+						uploadStartTime := time.Now()
+						_, _, err = xray.CoreHTTPRequestCustom(instance, time.Duration(15)*time.Second, cloudflare.Speedtest.MakeUploadHTTPRequest(false, speedtestAmount*1000))
+						if err != nil {
+							//customlog.Printf(customlog.Failure, "Upload failed!\n")
+							return
+						} else {
+							uploadTime = time.Since(uploadStartTime).Milliseconds()
+
+							//customlog.Printf(customlog.Success, "Upload took: %dms\n", uploadTime)
+						}
+
+					}
+					fmt.Printf("\n")
 					// Close xray conn after testing
 					_ = instance.Close()
 
-					fmt.Printf("%v", parsed.DetailsStr())
-					customlog.Printf(customlog.Success, "Real Delay: %dms\n\n", delay)
 					validConfigsMu.Lock()
 					confRes = append(confRes, result{
-						configLink: links[configIndex],
-						delay:      delay,
+						configLink:   links[configIndex],
+						delay:        delay,
+						downloadTime: downloadTime,
+						UploadTime:   uploadTime,
 					})
 					//validConfigs = append(validConfigs, links[configIndex])
 					validConfigsMu.Unlock()
@@ -126,7 +163,7 @@ var HttpCmd = &cobra.Command{
 			for _, v := range confRes {
 				validConfigs = append(validConfigs, v.configLink)
 			}
-			
+
 			// Save configs
 			err := utils.WriteIntoFile(saveFile, []byte(strings.Join(validConfigs, "\n\n")))
 			if err != nil {
@@ -155,7 +192,32 @@ var HttpCmd = &cobra.Command{
 				customlog.Printf(customlog.Failure, "Config didn't respond!")
 				os.Exit(1)
 			}
-			fmt.Printf("%s: %sms\n", color.RedString("Real delay"), color.YellowString(strconv.Itoa(int(delay))))
+			customlog.Printf(customlog.Success, "Real Delay: %dms\n", delay)
+			if speedtest {
+				downloadStartTime := time.Now()
+				_, _, err := xray.CoreHTTPRequestCustom(instance, time.Duration(15)*time.Second, cloudflare.Speedtest.MakeDownloadHTTPRequest(false, speedtestAmount*1000))
+				if err != nil {
+					customlog.Printf(customlog.Failure, "Download failed!\n")
+					//return
+				} else {
+					downloadTime := time.Since(downloadStartTime).Milliseconds()
+
+					customlog.Printf(customlog.Success, "Downloaded %dKB - took: %dms\n", speedtestAmount, downloadTime)
+				}
+
+				uploadStartTime := time.Now()
+				_, _, err = xray.CoreHTTPRequestCustom(instance, time.Duration(15)*time.Second, cloudflare.Speedtest.MakeUploadHTTPRequest(false, speedtestAmount*1000))
+				if err != nil {
+					customlog.Printf(customlog.Failure, "Upload failed!\n")
+					//return
+				} else {
+					uploadTime := time.Since(uploadStartTime).Milliseconds()
+
+					customlog.Printf(customlog.Success, "Upload %dKB - took: %dms\n", speedtestAmount, uploadTime)
+				}
+
+			}
+			//fmt.Printf("%s: %sms\n", color.RedString("Real delay"), color.YellowString(strconv.Itoa(int(delay))))
 		}
 
 	},
@@ -169,8 +231,9 @@ func init() {
 	HttpCmd.Flags().StringVarP(&httpMethod, "method", "m", "GET", "Http method")
 	HttpCmd.Flags().BoolVarP(&showBody, "body", "b", false, "Show response body")
 	HttpCmd.Flags().BoolVarP(&insecureTLS, "insecure", "e", false, "Insecure tls connection (fake SNI)")
+	HttpCmd.Flags().BoolVarP(&speedtest, "speedtest", "p", false, "Speed test with speed.cloudflare.com")
+	HttpCmd.Flags().Uint32VarP(&speedtestAmount, "amount", "a", 10000, "Download and upload amount (KB) default: 10000")
 	HttpCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose xray-core")
 	HttpCmd.Flags().StringVarP(&saveFile, "out", "o", "valid.txt", "Output file for valid config links")
 	HttpCmd.Flags().BoolVarP(&sortedByRealDelay, "sort", "s", true, "Sort config links by their delay (fast to slow)")
-
 }
