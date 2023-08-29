@@ -213,7 +213,7 @@ var HttpCmd = &cobra.Command{
 				} else {
 					uploadTime := time.Since(uploadStartTime).Milliseconds()
 
-					customlog.Printf(customlog.Success, "Upload %dKB - took: %dms\n", speedtestAmount, uploadTime)
+					customlog.Printf(customlog.Success, "Uploaded %dKB - took: %dms\n", speedtestAmount, uploadTime)
 				}
 
 			}
