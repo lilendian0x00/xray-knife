@@ -23,6 +23,27 @@ type IcmpPacket struct {
 	DelayBetweenEachPacket uint16
 }
 
+type IcmpPacketOption = func(c *IcmpPacket)
+
+func NewIcmpPacket(dest string, count uint16, opts ...IcmpPacketOption) (*IcmpPacket, error) {
+	i := &IcmpPacket{
+		TestCount: count,
+	}
+	for _, opt := range opts {
+		opt(i)
+	}
+
+	i.DestIP = net.ParseIP(dest)
+	if i.DestIP != nil {
+		addr, err := net.LookupIP(dest)
+		if err != nil {
+			return nil, err
+		}
+		i.DestIP = addr[0]
+	}
+	return i, nil
+}
+
 func (i *IcmpPacket) MeasureReplyDelay() error {
 	rnd := rand.New(rand.NewSource(time.Now().Unix()))
 

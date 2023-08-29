@@ -33,20 +33,11 @@ var IcmpCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		destIP = net.ParseIP(generalDetails.Address)
-		if destIP != nil {
-			addr, err := net.LookupIP(generalDetails.Address)
-			if err != nil {
-				customlog.Printf(customlog.Failure, "Error when doing reverse lookup: %v", err)
-				os.Exit(1)
-			}
-			destIP = addr[0]
+		icmp, err := network.NewIcmpPacket(generalDetails.Address, testCount)
+		if err != nil {
+			customlog.Printf(customlog.Failure, "%v\n", err)
 		}
 
-		icmp := network.IcmpPacket{
-			DestIP:    destIP,
-			TestCount: testCount,
-		}
 		err = icmp.MeasureReplyDelay()
 		if err != nil {
 			customlog.Printf(customlog.Failure, "MeasureReplyDelay Error: %v", err)
