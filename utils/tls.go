@@ -10,15 +10,16 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 )
 
-func makeUTlsConn(hostname string, addr string) (*tls.UConn, string, error) {
+func makeUTlsConn(hostname string) (*tls.UConn, string, error) {
 	config := tls.Config{
-		ServerName:         hostname,
+		ServerName:         strings.Split(hostname, ":")[0],
 		InsecureSkipVerify: false,
 	}
-	dialConn, err := net.DialTimeout("tcp", addr, time.Duration(15)*time.Second)
+	dialConn, err := net.DialTimeout("tcp", hostname, time.Duration(15)*time.Second)
 	if err != nil {
 		return nil, "", fmt.Errorf("net.DialTimeout error: %+v", err)
 	}
@@ -50,16 +51,15 @@ func SendHTTPRequest(fullURL *url.URL, useragent string, method string) (*http.R
 	var utlsErr error
 
 	// TODO: For ARM it gives error (https://github.com/coyove/goflyway/issues/126)
-	addrs, err := net.LookupIP(fullURL.Host)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Could not resolve dns: %v\n", err)
-		os.Exit(1)
-	}
-
-	addr := addrs[0].String() + ":" + p
+	//addrs, err := net.LookupIP(fullURL.Host)
+	//if err != nil {
+	//	fmt.Fprintf(os.Stderr, "Could not resolve dns: %v\n", err)
+	//	os.Exit(1)
+	//}
+	//addr := addrs[0].String() + ":" + p
 
 	if fullURL.Scheme == "https" {
-		conn, alpn, utlsErr = makeUTlsConn(fullURL.Host, addr)
+		conn, alpn, utlsErr = makeUTlsConn(fullURL.Host + ":" + p)
 		if utlsErr != nil {
 			return nil, utlsErr
 		}
@@ -120,7 +120,7 @@ func SendHTTPRequest(fullURL *url.URL, useragent string, method string) (*http.R
 			req.Proto = "HTTP/1.1"
 			req.ProtoMajor = 1
 			req.ProtoMinor = 1
-			err = req.Write(conn)
+			err := req.Write(conn)
 			if err != nil {
 				return nil, err
 			}
@@ -132,7 +132,7 @@ func SendHTTPRequest(fullURL *url.URL, useragent string, method string) (*http.R
 		}
 	} else {
 		// HTTP
-		dialConn, err := net.DialTimeout("tcp", addr, time.Duration(15)*time.Second)
+		dialConn, err := net.DialTimeout("tcp", fullURL.Host+":"+p, time.Duration(15)*time.Second)
 		if err != nil {
 			return nil, fmt.Errorf("net.DialTimeout error: %+v", err)
 		}
