@@ -1,7 +1,6 @@
 package scan
 
 import (
-	"fmt"
 	"github.com/spf13/cobra"
 )
 
@@ -11,8 +10,13 @@ var ScanCmd = &cobra.Command{
 	Short: "Scanning tools needed for bypassing GFW",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("scan called")
+		cmd.Help()
 	},
+}
+
+func addSubcommandPalettes() {
+	ScanCmd.AddCommand(CFscannerCmd)
+	ScanCmd.AddCommand(RealityscannerCmd)
 }
 
 func init() {
