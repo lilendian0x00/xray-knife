@@ -3,6 +3,7 @@ package net
 import (
 	"fmt"
 	"github.com/fatih/color"
+	"github.com/gocarina/gocsv"
 	"github.com/spf13/cobra"
 	"os"
 	"sort"
@@ -17,7 +18,8 @@ import (
 
 var (
 	configLinksFile   string
-	saveFile          string
+	outputFile        string
+	outputType        string
 	threadCount       uint16
 	destURL           string
 	httpMethod        string
@@ -33,23 +35,24 @@ var validConfigs []string
 var validConfigsMu sync.Mutex
 
 type result struct {
-	delay        int64
-	downloadTime int64
-	UploadTime   int64
-	configLink   string
+	ConfigLink    string  `csv:"link"`     // vmess://... vless//..., etc
+	TLS           string  `csv:"tls"`      // none, tls, reality
+	Delay         int64   `csv:"delay"`    // millisecond
+	DownloadSpeed float32 `csv:"download"` // mbps
+	UploadSpeed   float32 `csv:"upload"`   // mbps
 }
 
-type configResults []result
+type configResults []*result
 
 func (cResults configResults) Len() int {
 	return len(cResults)
 }
 
 func (cResults configResults) Less(i, j int) bool {
-	if (cResults[i].delay < cResults[j].delay) && (cResults[i].downloadTime <= cResults[j].downloadTime) && (cResults[i].UploadTime <= cResults[j].UploadTime) {
+	if (cResults[i].Delay < cResults[j].Delay) && (cResults[i].DownloadSpeed >= cResults[j].DownloadSpeed) && (cResults[i].UploadSpeed >= cResults[j].UploadSpeed) {
 		return true
-	} else if cResults[i].delay == cResults[j].delay {
-		return cResults[i].configLink < cResults[j].configLink
+	} else if cResults[i].Delay == cResults[j].Delay {
+		return cResults[i].ConfigLink < cResults[j].ConfigLink
 	}
 	return false
 }
@@ -68,8 +71,10 @@ var HttpCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		if configLinksFile != "" {
 			d := color.New(color.FgCyan, color.Bold)
+
 			// Limit the number of concurrent workers
 			semaphore := make(chan int, threadCount)
+
 			// Wait for all workers to finish
 			wg := sync.WaitGroup{}
 
@@ -135,17 +140,19 @@ var HttpCmd = &cobra.Command{
 
 					}
 					fmt.Printf("\n")
+
 					// Close xray conn after testing
 					_ = instance.Close()
 
+					r := &result{
+						ConfigLink:    links[configIndex],
+						TLS:           parsed.ConvertToGeneralConfig().TLS,
+						Delay:         delay,
+						DownloadSpeed: (float32((speedtestAmount*1000)*8) / float32(uint32(downloadTime)/1000.0)) / 1000000.0,
+						UploadSpeed:   (float32((speedtestAmount*1000)*8) / float32(uint32(uploadTime)/1000.0)) / 1000000.0,
+					}
 					validConfigsMu.Lock()
-					confRes = append(confRes, result{
-						configLink:   links[configIndex],
-						delay:        delay,
-						downloadTime: downloadTime,
-						UploadTime:   uploadTime,
-					})
-					//validConfigs = append(validConfigs, links[configIndex])
+					confRes = append(confRes, r)
 					validConfigsMu.Unlock()
 					return
 				}(i)
@@ -161,16 +168,40 @@ var HttpCmd = &cobra.Command{
 				sort.Sort(confRes)
 			}
 			for _, v := range confRes {
-				validConfigs = append(validConfigs, v.configLink)
+				validConfigs = append(validConfigs, v.ConfigLink)
 			}
 
-			// Save configs
-			err := utils.WriteIntoFile(saveFile, []byte(strings.Join(validConfigs, "\n\n")))
-			if err != nil {
-				customlog.Printf(customlog.Failure, "Config save configs due to file error!\n")
-				os.Exit(1)
+			if outputType == "txt" {
+				// Save configs
+				err := utils.WriteIntoFile(outputFile, []byte(strings.Join(validConfigs, "\n\n")))
+				if err != nil {
+					customlog.Printf(customlog.Failure, "Saving configs failed due to the error: %v\n", err)
+					os.Exit(1)
+				}
+			} else if outputType == "csv" {
+				if outputFile == "valid.txt" {
+					outputFile = "valid.csv"
+				}
+				//writer := csv.NewWriter(f)
+				//defer writer.Flush()
+
+				//writer.Write(headers)
+				//for _, row := range rows {
+				//	writer.Write(row)
+				//}
+				out, err := gocsv.MarshalString(&confRes)
+				if err != nil {
+					customlog.Printf(customlog.Failure, "Saving configs failed due to the error: %v\n", err)
+					os.Exit(1)
+				}
+				err = utils.WriteIntoFile(outputFile, []byte(out))
+				if err != nil {
+					customlog.Printf(customlog.Failure, "Saving configs failed due to the error: %v\n", err)
+					os.Exit(1)
+				}
 			}
-			customlog.Printf(customlog.Finished, "A total of %d configurations have been saved to %s\n", len(validConfigs), saveFile)
+
+			customlog.Printf(customlog.Finished, "A total of %d configurations have been saved to %s\n", len(validConfigs), outputFile)
 		} else {
 			parsed, err := xray.ParseXrayConfig(configLink)
 			if err != nil {
@@ -202,7 +233,7 @@ var HttpCmd = &cobra.Command{
 				} else {
 					downloadTime := time.Since(downloadStartTime).Milliseconds()
 
-					customlog.Printf(customlog.Success, "Downloaded %dKB - took: %dms\n", speedtestAmount, downloadTime)
+					customlog.Printf(customlog.Success, "Downloaded %dKB - Speed: %d mbps\n", speedtestAmount, (float32((speedtestAmount*1000)*8)/float32(uint32(downloadTime)/1000.0))/1000000.0)
 				}
 
 				uploadStartTime := time.Now()
@@ -213,7 +244,7 @@ var HttpCmd = &cobra.Command{
 				} else {
 					uploadTime := time.Since(uploadStartTime).Milliseconds()
 
-					customlog.Printf(customlog.Success, "Uploaded %dKB - took: %dms\n", speedtestAmount, uploadTime)
+					customlog.Printf(customlog.Success, "Uploaded %dKB - Speed: %d mbps\n", speedtestAmount, (float32((speedtestAmount*1000)*8)/float32(uint32(uploadTime)/1000.0))/1000000.0)
 				}
 
 			}
@@ -234,6 +265,7 @@ func init() {
 	HttpCmd.Flags().BoolVarP(&speedtest, "speedtest", "p", false, "Speed test with speed.cloudflare.com")
 	HttpCmd.Flags().Uint32VarP(&speedtestAmount, "amount", "a", 10000, "Download and upload amount (KB) default: 10000")
 	HttpCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose xray-core")
-	HttpCmd.Flags().StringVarP(&saveFile, "out", "o", "valid.txt", "Output file for valid config links")
+	HttpCmd.Flags().StringVarP(&outputType, "type", "x", "txt", "Output type (csv, txt)")
+	HttpCmd.Flags().StringVarP(&outputFile, "out", "o", "valid.txt", "Output file for valid config links")
 	HttpCmd.Flags().BoolVarP(&sortedByRealDelay, "sort", "s", true, "Sort config links by their delay (fast to slow)")
 }
