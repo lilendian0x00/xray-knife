@@ -21,7 +21,7 @@ var TcpCmd = &cobra.Command{
 			customlog.Printf(customlog.Failure, "Couldn't parse the config!\n")
 			os.Exit(1)
 		}
-		generalDetails, _ := parsed.ConvertToGeneralConfig()
+		generalDetails := parsed.ConvertToGeneralConfig()
 
 		tcpAddr, err := net.ResolveTCPAddr("tcp", generalDetails.Address+":"+generalDetails.Port)
 		if err != nil {

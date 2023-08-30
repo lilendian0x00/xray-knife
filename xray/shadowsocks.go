@@ -56,7 +56,7 @@ func (s *Shadowsocks) DetailsStr() string {
 	return info
 }
 
-func (s *Shadowsocks) ConvertToGeneralConfig() (GeneralConfig, error) {
+func (s *Shadowsocks) ConvertToGeneralConfig() GeneralConfig {
 	var g GeneralConfig
 	g.Protocol = "Shadowsocks"
 	g.Address = s.Address
@@ -65,7 +65,7 @@ func (s *Shadowsocks) ConvertToGeneralConfig() (GeneralConfig, error) {
 	g.Remark = s.Remark
 	g.OrigLink = s.OrigLink
 
-	return g, nil
+	return g
 }
 
 func (s *Shadowsocks) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {

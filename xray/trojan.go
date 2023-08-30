@@ -123,7 +123,7 @@ func (t *Trojan) DetailsStr() string {
 	return info
 }
 
-func (t *Trojan) ConvertToGeneralConfig() (GeneralConfig, error) {
+func (t *Trojan) ConvertToGeneralConfig() GeneralConfig {
 	var g GeneralConfig
 	g.Protocol = "trojan"
 	g.Address = t.Address
@@ -134,13 +134,18 @@ func (t *Trojan) ConvertToGeneralConfig() (GeneralConfig, error) {
 	g.Remark = t.Remark
 	g.SNI = t.SNI
 	g.ALPN = t.ALPN
+	if t.Security == "" {
+		g.TLS = "none"
+	} else {
+		g.TLS = t.Security
+	}
 	g.TlsFingerprint = t.TlsFingerprint
 	g.ServiceName = t.ServiceName
 	g.Mode = t.Mode
 	g.Type = t.Type
 	g.OrigLink = t.OrigLink
 
-	return g, nil
+	return g
 }
 
 func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {

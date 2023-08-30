@@ -6,7 +6,7 @@ type Protocol interface {
 	Parse(configLink string) error
 	BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error)
 	DetailsStr() string
-	ConvertToGeneralConfig() (GeneralConfig, error)
+	ConvertToGeneralConfig() GeneralConfig
 }
 
 type GeneralConfig struct {

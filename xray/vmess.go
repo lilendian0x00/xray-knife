@@ -156,7 +156,7 @@ func (v *Vmess) DetailsStr() string {
 	return info
 }
 
-func (v *Vmess) ConvertToGeneralConfig() (GeneralConfig, error) {
+func (v *Vmess) ConvertToGeneralConfig() GeneralConfig {
 	var g GeneralConfig
 	g.Protocol = "vmess"
 	g.Address = v.Address
@@ -167,6 +167,11 @@ func (v *Vmess) ConvertToGeneralConfig() (GeneralConfig, error) {
 	g.Path = v.Path
 	g.Port = v.Port
 	g.Remark = v.Remark
+	if v.TLS == "" {
+		g.TLS = "none"
+	} else {
+		g.TLS = v.TLS
+	}
 	g.TLS = v.TLS
 	g.SNI = v.SNI
 	g.ALPN = v.ALPN
@@ -174,7 +179,7 @@ func (v *Vmess) ConvertToGeneralConfig() (GeneralConfig, error) {
 	g.Type = v.Type
 	g.OrigLink = v.OrigLink
 
-	return g, nil
+	return g
 }
 
 func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {

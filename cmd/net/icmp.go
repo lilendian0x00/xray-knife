@@ -27,7 +27,7 @@ var IcmpCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		generalDetails, err := parsed.ConvertToGeneralConfig()
+		generalDetails := parsed.ConvertToGeneralConfig()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%v", err)
 			os.Exit(1)

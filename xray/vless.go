@@ -139,7 +139,7 @@ func (v *Vless) DetailsStr() string {
 	return info
 }
 
-func (v *Vless) ConvertToGeneralConfig() (GeneralConfig, error) {
+func (v *Vless) ConvertToGeneralConfig() GeneralConfig {
 	var g GeneralConfig
 	g.Protocol = "vless"
 	g.Address = v.Address
@@ -148,6 +148,11 @@ func (v *Vless) ConvertToGeneralConfig() (GeneralConfig, error) {
 	g.Path = v.Path
 	g.Port = v.Port
 	g.Remark = v.Remark
+	if v.Security == "" {
+		g.TLS = "none"
+	} else {
+		g.TLS = v.Security
+	}
 	g.SNI = v.SNI
 	g.ALPN = v.ALPN
 	g.TlsFingerprint = v.TlsFingerprint
@@ -156,7 +161,7 @@ func (v *Vless) ConvertToGeneralConfig() (GeneralConfig, error) {
 	g.Type = v.Type
 	g.OrigLink = v.OrigLink
 
-	return g, nil
+	return g
 }
 
 func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
