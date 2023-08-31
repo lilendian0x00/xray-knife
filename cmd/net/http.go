@@ -95,7 +95,6 @@ var HttpCmd = &cobra.Command{
 						wg.Done()
 					}()
 
-					d.Printf("Config Number: %d\n", configIndex+1)
 					parsed, err := xray.ParseXrayConfig(links[configIndex])
 					if err != nil {
 						customlog.Printf(customlog.Failure, "Couldn't parse the config!\n\n")
@@ -144,6 +143,7 @@ var HttpCmd = &cobra.Command{
 						//os.Exit(1)
 					}
 					r.Delay = delay
+					d.Printf("Config Number: %d\n", configIndex+1)
 					fmt.Printf("%v", parsed.DetailsStr())
 					customlog.Printf(customlog.Success, "Real Delay: %dms\n\n", delay)
 
