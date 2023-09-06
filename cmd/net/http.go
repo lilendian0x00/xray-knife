@@ -17,18 +17,20 @@ import (
 )
 
 var (
-	configLinksFile   string
-	outputFile        string
-	outputType        string
-	threadCount       uint16
-	destURL           string
-	httpMethod        string
-	showBody          bool
-	insecureTLS       bool
-	verbose           bool
-	sortedByRealDelay bool
-	speedtest         bool
-	speedtestAmount   uint32
+	configLinksFile     string
+	outputFile          string
+	outputType          string
+	threadCount         uint16
+	destURL             string
+	httpMethod          string
+	showBody            bool
+	insecureTLS         bool
+	verbose             bool
+	sortedByRealDelay   bool
+	speedtest           bool
+	getIPInfo           bool
+	speedtestAmount     uint32
+	maximumAllowedDelay uint16
 )
 
 var (
@@ -42,9 +44,11 @@ type result struct {
 	ConfigLink    string  `csv:"link"`     // vmess://... vless//..., etc
 	Status        string  `csv:"status"`   // passed, semi-passed, failed
 	TLS           string  `csv:"tls"`      // none, tls, reality
+	RealIPAddr    string  `csv:"ip"`       // Real ip address (req to cloudflare.com/cdn-cgi/trace)
 	Delay         int64   `csv:"delay"`    // millisecond
 	DownloadSpeed float32 `csv:"download"` // mbps
 	UploadSpeed   float32 `csv:"upload"`   // mbps
+	IpAddrLoc     string  `csv:"location"` // IP address location
 }
 
 type configResults []*result
@@ -103,12 +107,13 @@ var HttpCmd = &cobra.Command{
 					}
 					r := &result{
 						ConfigLink: links[configIndex],
-						Status:     "failed",
+						Status:     "passed",
 						TLS:        parsed.ConvertToGeneralConfig().TLS,
 						Delay:      failedDelay,
+						RealIPAddr: "null",
 					}
 					defer func() {
-						if r.Delay != failedDelay && (r.UploadSpeed == 0 || r.DownloadSpeed == 0) {
+						if r.Status == "passed" && r.Delay != failedDelay && (r.UploadSpeed == 0 || r.DownloadSpeed == 0) {
 							r.Status = "semi-passed"
 						}
 						if outputType == "csv" {
@@ -127,6 +132,7 @@ var HttpCmd = &cobra.Command{
 					instance, err1 := xray.StartXray(parsed, verbose, insecureTLS)
 					if err1 != nil {
 						customlog.Printf(customlog.Failure, "Couldn't start the xray! : %v\n\n", err1)
+						fmt.Println(links[configIndex])
 						return
 					}
 					// Close xray conn after testing
@@ -138,14 +144,40 @@ var HttpCmd = &cobra.Command{
 
 					delay, _, err = xray.MeasureDelay(instance, time.Duration(15)*time.Second, showBody, destURL, httpMethod)
 					if err != nil {
-						customlog.Printf(customlog.Failure, "Config didn't respond!\n\n")
+						//customlog.Printf(customlog.Failure, "Config didn't respond!\n\n")
+						r.Status = "failed"
 						return
 						//os.Exit(1)
 					}
 					r.Delay = delay
-					d.Printf("Config Number: %d\n", configIndex+1)
-					fmt.Printf("%v", parsed.DetailsStr())
-					customlog.Printf(customlog.Success, "Real Delay: %dms\n\n", delay)
+
+					if uint16(delay) > maximumAllowedDelay {
+						r.Status = "timeout"
+						return
+					} else {
+						d.Printf("Config Number: %d\n", configIndex+1)
+						fmt.Printf("%v", parsed.DetailsStr())
+						customlog.Printf(customlog.Success, "Real Delay: %dms\n\n", delay)
+					}
+
+					if getIPInfo {
+						_, body, err := xray.CoreHTTPRequestCustom(instance, time.Duration(20)*time.Second, cloudflare.Speedtest.MakeDebugRequest())
+						if err != nil {
+							//customlog.Printf(customlog.Failure, "Download failed!\n")
+							//return
+						} else {
+							for _, line := range strings.Split(string(body), "\n") {
+								s := strings.SplitN(line, "=", 2)
+								if s[0] == "ip" {
+									r.RealIPAddr = s[1]
+								} else if s[0] == "loc" {
+									r.IpAddrLoc = s[1]
+									break
+								}
+							}
+
+						}
+					}
 
 					if speedtest {
 						downloadStartTime := time.Now()
@@ -169,9 +201,7 @@ var HttpCmd = &cobra.Command{
 							r.UploadSpeed = (float32((speedtestAmount*1000)*8) / (float32(uploadTime) / float32(1000.0))) / float32(1000000.0)
 							//customlog.Printf(customlog.Success, "Upload took: %dms\n", uploadTime)
 						}
-
 					}
-					r.Status = "passed"
 
 					return
 				}(i)
@@ -285,8 +315,10 @@ func init() {
 	HttpCmd.Flags().StringVarP(&destURL, "url", "u", "https://google.com/", "The url to test config")
 	HttpCmd.Flags().StringVarP(&httpMethod, "method", "m", "GET", "Http method")
 	HttpCmd.Flags().BoolVarP(&showBody, "body", "b", false, "Show response body")
+	HttpCmd.Flags().Uint16VarP(&maximumAllowedDelay, "mdelay", "d", 3000, "Maximum allowed delay")
 	HttpCmd.Flags().BoolVarP(&insecureTLS, "insecure", "e", false, "Insecure tls connection (fake SNI)")
 	HttpCmd.Flags().BoolVarP(&speedtest, "speedtest", "p", false, "Speed test with speed.cloudflare.com")
+	HttpCmd.Flags().BoolVarP(&getIPInfo, "rip", "r", false, "Send request to XXXX/cdn-cgi/trace to receive config's IP details")
 	HttpCmd.Flags().Uint32VarP(&speedtestAmount, "amount", "a", 10000, "Download and upload amount (KB) default: 10000")
 	HttpCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose xray-core")
 	HttpCmd.Flags().StringVarP(&outputType, "type", "x", "txt", "Output type (csv, txt)")
