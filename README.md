@@ -14,7 +14,7 @@ Swiss army knife tool (cli) for [xray-core](https://github.com/XTLS/Xray-core).
 
 Get the latest version from [GitHub](https://github.com/lilendian0x00/xray-knife/releases/latest).
 
-# Build instruction
+## Build instruction
 Only tested on go version 1.20
 
 1. `Install golang`
@@ -22,6 +22,15 @@ Only tested on go version 1.20
 3. `cd xray-knife`
 4. `go build .`
     
+
+# Screenshots
+## http test CSV report
+<img src="./images/httpCSV.png" width="600" alt="sample1">
+
+
+## http test log
+<img src="./images/httpTest.png" width="1357" alt="sample2">
+
 
 # TODO
 ## protocols - parse
@@ -41,6 +50,7 @@ Only tested on go version 1.20
 - [X] ~~Add icmp (ping) tester~~
 - [X] ~~Add tcp connection delay tester~~
 - [X] ~~Add full connection delay (AKA real delay) tester~~
+- [X] ~~Add speed tester for http~~
 
 ## scan (under development)
 - [ ] Cloudflare best IP finder (whitelist scanner)
