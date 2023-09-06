@@ -20,7 +20,17 @@ func (v *Vless) Parse(configLink string) error {
 	uuid := secondPart[0]
 
 	thirdPart := strings.Split(secondPart[1], "?")
-	address := strings.Split(thirdPart[0], ":")
+	if thirdPart[0][0] == '[' {
+		// IPv6
+		parts := strings.SplitN(thirdPart[0], "]", 2)
+		v.Address = parts[0][1:]
+		v.Port = parts[1][1:]
+	} else {
+		// IPv4
+		address := strings.Split(thirdPart[0], ":")
+		v.Address = address[0]
+		v.Port = address[1]
+	}
 
 	queryPart := strings.Join(thirdPart[1:], "?")
 	lastIndex := strings.LastIndex(queryPart, "#")
@@ -65,14 +75,12 @@ func (v *Vless) Parse(configLink string) error {
 		v.Remark = remarkStr
 	}
 	v.ID = uuid
-	v.Address = address[0]
 	//portUint, err := strconv.ParseUint(address[1], 10, 16)
 	//if err != nil {
 	//	fmt.Fprintf(os.Stderr, "%v", err)
 	//	os.Exit(1)
 	//}
 	//v.Port = uint16(portUint)
-	v.Port = address[1]
 	v.OrigLink = configLink
 
 	return nil

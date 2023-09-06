@@ -21,9 +21,18 @@ func (t *Trojan) Parse(configLink string) error {
 	t.Password = uuid
 
 	thirdPart := strings.Split(secondPart[1], "?")
-	address := strings.Split(thirdPart[0], ":")
-	t.Address = address[0]
-	t.Port = address[1]
+
+	if thirdPart[0][0] == '[' {
+		// IPv6
+		parts := strings.SplitN(thirdPart[0], "]", 2)
+		t.Address = parts[0][1:]
+		t.Port = parts[1][1:]
+	} else {
+		// IPv4
+		address := strings.Split(thirdPart[0], ":")
+		t.Address = address[0]
+		t.Port = address[1]
+	}
 
 	queryPart := strings.Join(thirdPart[1:], "?")
 	lastIndex := strings.LastIndex(queryPart, "#")

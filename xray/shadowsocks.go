@@ -28,18 +28,38 @@ func (s *Shadowsocks) Parse(configLink string) error {
 	s.Encryption = secretPart[0] // Encryption Type
 	s.Password = secretPart[1]   // Encryption Password
 
-	hostPortRemark := strings.SplitN(secondPart[1], ":", 2)
-	s.Address = hostPortRemark[0]
-
-	PortRemark := strings.SplitN(hostPortRemark[1], "#", 2)
-	s.Port = PortRemark[0]
-
-	remarkStr, _, _ := strings.Cut(PortRemark[1], "\n")
-
-	s.Remark, err = url.PathUnescape(remarkStr)
-	if err != nil {
-		s.Remark = remarkStr
+	//hostPortRemark := strings.SplitN(secondPart[1], ":", 2)
+	if secondPart[1][0] == '[' {
+		// IPv6
+		parts := strings.SplitN(secondPart[1], "]", 2)
+		s.Address = parts[0][1:]
+		portRemark := strings.SplitN(parts[1][1:], "#", 2)
+		s.Port = portRemark[0]
+		s.Remark, err = url.PathUnescape(portRemark[1])
+		if err != nil {
+			s.Remark = portRemark[1]
+		}
+	} else {
+		parts := strings.Split(secondPart[1], ":")
+		s.Address = parts[0]
+		portRemark := strings.SplitN(parts[1][1:], "#", 2)
+		s.Port = portRemark[0]
+		s.Remark, err = url.PathUnescape(portRemark[1])
+		if err != nil {
+			s.Remark = portRemark[1]
+		}
 	}
+	//s.Address = hostPortRemark[0]
+	//
+	//PortRemark := strings.SplitN(hostPortRemark[1], "#", 2)
+	//s.Port = PortRemark[0]
+
+	//remarkStr, _, _ := strings.Cut(PortRemark[1], "\n")
+
+	//s.Remark, err = url.PathUnescape(remarkStr)
+	//if err != nil {
+	//	s.Remark = remarkStr
+	//}
 	s.OrigLink = configLink
 
 	return nil
