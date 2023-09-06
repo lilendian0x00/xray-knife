@@ -12,6 +12,7 @@ type SpeedTester struct {
 	SNI              string
 	DownloadEndpoint string
 	UploadEndpoint   string
+	DebugEndpoint    string
 }
 
 func (c *SpeedTester) MakeDownloadHTTPRequest(noTLS bool, amount uint32) *http.Request {
@@ -52,8 +53,22 @@ func (c *SpeedTester) MakeUploadHTTPRequest(noTLS bool, amount uint32) *http.Req
 	}
 }
 
+func (c *SpeedTester) MakeDebugRequest() *http.Request {
+	return &http.Request{
+		Method: "GET",
+		URL: &url.URL{
+			Path:   c.DebugEndpoint,
+			Scheme: "https",
+			Host:   c.SNI,
+		},
+		Header: make(http.Header),
+		Host:   c.SNI,
+	}
+}
+
 var Speedtest = &SpeedTester{
 	SNI:              "speed.cloudflare.com",
+	DebugEndpoint:    "/cdn-cgi/trace",
 	DownloadEndpoint: "/__down",
 	UploadEndpoint:   "/__up",
 }
