@@ -99,10 +99,17 @@ func (v *Vmess) Parse(configLink string) error {
 
 	v.OrigLink = configLink
 
+	if v.Type == "http" || v.Network == "ws" || v.Network == "h2" {
+		if v.Path == "" {
+			v.Path = "/"
+		}
+	}
+
 	return nil
 }
 
 func (v *Vmess) DetailsStr() string {
+	fmt.Println(*v)
 	copyV := *v
 	info := fmt.Sprintf("%s: Vmess\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n",
 		color.RedString("Protocol"),
@@ -114,7 +121,7 @@ func (v *Vmess) DetailsStr() string {
 
 	if copyV.Network == "" {
 
-	} else if copyV.Network == "http" || copyV.Network == "ws" || copyV.Network == "h2" {
+	} else if copyV.Type == "http" || copyV.Network == "ws" || copyV.Network == "h2" {
 		if copyV.Type == "" {
 			copyV.Type = "none"
 		}

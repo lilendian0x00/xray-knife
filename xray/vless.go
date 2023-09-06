@@ -83,6 +83,12 @@ func (v *Vless) Parse(configLink string) error {
 	//v.Port = uint16(portUint)
 	v.OrigLink = configLink
 
+	if v.HeaderType == "http" || v.Type == "ws" || v.Type == "h2" {
+		if v.Path == "" {
+			v.Path = "/"
+		}
+	}
+
 	return nil
 }
 
@@ -101,7 +107,7 @@ func (v *Vless) DetailsStr() string {
 		color.RedString("Flow"), copyV.Flow)
 	if copyV.Type == "" {
 
-	} else if copyV.Type == "http" || copyV.Type == "ws" || copyV.Type == "h2" {
+	} else if copyV.HeaderType == "http" || copyV.Type == "ws" || copyV.Type == "h2" {
 		info += fmt.Sprintf("%s: %s\n%s: %s\n",
 			color.RedString("Host"), copyV.Host,
 			color.RedString("Path"), copyV.Path)

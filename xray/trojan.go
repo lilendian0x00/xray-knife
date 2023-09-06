@@ -78,6 +78,12 @@ func (t *Trojan) Parse(configLink string) error {
 	}
 	t.OrigLink = configLink
 
+	if t.HeaderType == "http" || t.Type == "ws" || t.Type == "h2" {
+		if t.Path == "" {
+			t.Path = "/"
+		}
+	}
+
 	return nil
 }
 
