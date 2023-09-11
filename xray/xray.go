@@ -19,16 +19,47 @@ import (
 	"strings"
 )
 
-func StartXray(conf Protocol, verbose, allowInsecure bool) (*core.Instance, error) {
+type Service struct {
+	// Log
+	Verbose  bool
+	LogType  applog.LogType
+	LogLevel commlog.Severity
 
-	loglevel := commlog.Severity_Unknown
-	logType := applog.LogType_None
-	if verbose {
-		logType = applog.LogType_Console
-		loglevel = commlog.Severity_Debug
+	AllowInsecure bool
+}
+
+type ServiceOption = func(c *Service)
+
+func WithCustomLogLevel(logType applog.LogType, LogLevel commlog.Severity) ServiceOption {
+	return func(c *Service) {
+		c.LogType = logType
+		c.LogLevel = LogLevel
+	}
+}
+
+func NewXrayService(verbose bool, allowInsecure bool, opts ...ServiceOption) *Service {
+	s := &Service{
+		Verbose:       verbose,
+		LogType:       applog.LogType_None,
+		LogLevel:      commlog.Severity_Unknown,
+		AllowInsecure: allowInsecure,
 	}
 
-	ob, err := conf.BuildOutboundDetourConfig(allowInsecure)
+	if verbose {
+		s.LogType = applog.LogType_Console
+		s.LogLevel = commlog.Severity_Debug
+		commlog.RegisterHandler(commlog.NewLogger(commlog.CreateStderrLogWriter()))
+	}
+
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	return s
+}
+
+func (x *Service) StartXray(conf Protocol) (*core.Instance, error) {
+	ob, err := conf.BuildOutboundDetourConfig(x.AllowInsecure)
 	if err != nil {
 		return nil, err
 	}
@@ -40,9 +71,9 @@ func StartXray(conf Protocol, verbose, allowInsecure bool) (*core.Instance, erro
 	clientConfig := &core.Config{
 		App: []*serial.TypedMessage{
 			serial.ToTypedMessage(&applog.Config{
-				ErrorLogType:  logType,
-				AccessLogType: logType,
-				ErrorLogLevel: loglevel,
+				ErrorLogType:  x.LogType,
+				AccessLogType: x.LogType,
+				ErrorLogLevel: x.LogLevel,
 				EnableDnsLog:  false,
 			}),
 			serial.ToTypedMessage(&dispatcher.Config{}),
@@ -50,8 +81,6 @@ func StartXray(conf Protocol, verbose, allowInsecure bool) (*core.Instance, erro
 			serial.ToTypedMessage(&proxyman.OutboundConfig{}),
 		},
 	}
-
-	commlog.RegisterHandler(commlog.NewLogger(commlog.CreateStderrLogWriter()))
 	//config.Inbound = []*core.InboundHandlerConfig{}
 	clientConfig.Outbound = []*core.OutboundHandlerConfig{built}
 

@@ -78,6 +78,8 @@ var HttpCmd = &cobra.Command{
 	Short: "Examine config[s] real delay using http request",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
+		xs := xray.NewXrayService(verbose, insecureTLS)
+
 		if configLinksFile != "" {
 			d := color.New(color.FgCyan, color.Bold)
 
@@ -113,7 +115,7 @@ var HttpCmd = &cobra.Command{
 						RealIPAddr: "null",
 					}
 					defer func() {
-						if r.Status == "passed" && r.Delay != failedDelay && (r.UploadSpeed == 0 || r.DownloadSpeed == 0) {
+						if speedtest && r.Status == "passed" && /*r.Delay != failedDelay &&*/ (r.UploadSpeed == 0 || r.DownloadSpeed == 0) {
 							r.Status = "semi-passed"
 						}
 						if outputType == "csv" {
@@ -123,13 +125,14 @@ var HttpCmd = &cobra.Command{
 							validConfigsMu.Unlock()
 						} else if r.Status == "passed" {
 							// Only save working configs
+
 							validConfigsMu.Lock()
 							confRes = append(confRes, r)
 							validConfigsMu.Unlock()
 						}
 					}()
 
-					instance, err1 := xray.StartXray(parsed, verbose, insecureTLS)
+					instance, err1 := xs.StartXray(parsed)
 					if err1 != nil {
 						customlog.Printf(customlog.Failure, "Couldn't start the xray! : %v\n\n", err1)
 						fmt.Println(links[configIndex])
@@ -265,7 +268,7 @@ var HttpCmd = &cobra.Command{
 
 			fmt.Println("\n" + parsed.DetailsStr())
 
-			instance, err := xray.StartXray(parsed, verbose, true)
+			instance, err := xs.StartXray(parsed)
 			if err != nil {
 				customlog.Printf(customlog.Failure, "Couldn't start the xray! : %v\n\n", err)
 				os.Exit(1)
