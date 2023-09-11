@@ -7,7 +7,6 @@ import (
 	"github.com/xtls/xray-core/app/dispatcher"
 	applog "github.com/xtls/xray-core/app/log"
 	"github.com/xtls/xray-core/app/proxyman"
-	"github.com/xtls/xray-core/common"
 	commlog "github.com/xtls/xray-core/common/log"
 	"github.com/xtls/xray-core/common/serial"
 	"github.com/xtls/xray-core/core"
@@ -57,7 +56,9 @@ func StartXray(conf Protocol, verbose, allowInsecure bool) (*core.Instance, erro
 	clientConfig.Outbound = []*core.OutboundHandlerConfig{built}
 
 	server, err2 := core.New(clientConfig)
-	common.Must(err2)
+	if err2 != nil {
+		return nil, err2
+	}
 	return server, nil
 }
 
@@ -84,10 +85,9 @@ func ParseXrayConfig(configLink string) (Protocol, error) {
 		return protocol, errors.New("Invalid protocol type! ")
 	}
 
-	rm1 := strings.TrimSuffix(configLink, "\r\n")
-	rm2 := strings.TrimSuffix(rm1, "\n")
+	trimmed := strings.TrimSpace(configLink)
 
-	err := protocol.Parse(rm2)
+	err := protocol.Parse(trimmed)
 	if err != nil {
 		return protocol, err
 	}
