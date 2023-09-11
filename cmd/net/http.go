@@ -58,7 +58,7 @@ func (cResults configResults) Len() int {
 }
 
 func (cResults configResults) Less(i, j int) bool {
-	if (cResults[i].Delay < cResults[j].Delay) && (cResults[i].DownloadSpeed >= cResults[j].DownloadSpeed) && (cResults[i].UploadSpeed >= cResults[j].UploadSpeed) {
+	if cResults[i].Delay < cResults[j].Delay /*&& (cResults[i].DownloadSpeed >= cResults[j].DownloadSpeed) && (cResults[i].UploadSpeed >= cResults[j].UploadSpeed)*/ {
 		return true
 	} /*else if cResults[i].Delay == cResults[j].Delay {
 		return cResults[i].ConfigLink < cResults[j].ConfigLink
@@ -107,6 +107,7 @@ var HttpCmd = &cobra.Command{
 						return
 						//os.Exit(1)
 					}
+
 					r := &result{
 						ConfigLink: links[configIndex],
 						Status:     "passed",
@@ -118,6 +119,7 @@ var HttpCmd = &cobra.Command{
 						if speedtest && r.Status == "passed" && /*r.Delay != failedDelay &&*/ (r.UploadSpeed == 0 || r.DownloadSpeed == 0) {
 							r.Status = "semi-passed"
 						}
+
 						if outputType == "csv" {
 							// Save both passed and failed configs
 							validConfigsMu.Lock()
@@ -125,7 +127,6 @@ var HttpCmd = &cobra.Command{
 							validConfigsMu.Unlock()
 						} else if r.Status == "passed" {
 							// Only save working configs
-
 							validConfigsMu.Lock()
 							confRes = append(confRes, r)
 							validConfigsMu.Unlock()
@@ -135,7 +136,6 @@ var HttpCmd = &cobra.Command{
 					instance, err1 := xs.StartXray(parsed)
 					if err1 != nil {
 						customlog.Printf(customlog.Failure, "Couldn't start the xray! : %v\n\n", err1)
-						fmt.Println(links[configIndex])
 						return
 					}
 					// Close xray conn after testing
