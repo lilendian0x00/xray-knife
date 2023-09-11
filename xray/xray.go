@@ -33,9 +33,9 @@ func StartXray(conf Protocol, verbose, allowInsecure bool) (*core.Instance, erro
 	if err != nil {
 		return nil, err
 	}
-	built, err := ob.Build()
-	if err != nil {
-		return nil, err
+	built, err1 := ob.Build()
+	if err1 != nil {
+		return nil, err1
 	}
 
 	clientConfig := &core.Config{
@@ -56,8 +56,8 @@ func StartXray(conf Protocol, verbose, allowInsecure bool) (*core.Instance, erro
 	//config.Inbound = []*core.InboundHandlerConfig{}
 	clientConfig.Outbound = []*core.OutboundHandlerConfig{built}
 
-	server, err1 := core.New(clientConfig)
-	common.Must(err1)
+	server, err2 := core.New(clientConfig)
+	common.Must(err2)
 	return server, nil
 }
 

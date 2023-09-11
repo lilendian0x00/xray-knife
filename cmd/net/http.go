@@ -267,7 +267,7 @@ var HttpCmd = &cobra.Command{
 
 			instance, err := xray.StartXray(parsed, verbose, true)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "%v", err)
+				customlog.Printf(customlog.Failure, "Couldn't start the xray! : %v\n\n", err)
 				os.Exit(1)
 				return
 			}
