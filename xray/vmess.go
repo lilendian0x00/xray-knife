@@ -109,7 +109,6 @@ func (v *Vmess) Parse(configLink string) error {
 }
 
 func (v *Vmess) DetailsStr() string {
-	fmt.Println(*v)
 	copyV := *v
 	info := fmt.Sprintf("%s: Vmess\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n",
 		color.RedString("Protocol"),
