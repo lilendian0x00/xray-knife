@@ -58,7 +58,7 @@ func (cResults configResults) Len() int {
 }
 
 func (cResults configResults) Less(i, j int) bool {
-	if cResults[i].Delay < cResults[j].Delay /*&& (cResults[i].DownloadSpeed >= cResults[j].DownloadSpeed) && (cResults[i].UploadSpeed >= cResults[j].UploadSpeed)*/ {
+	if (cResults[i].Delay < cResults[j].Delay) && (cResults[i].DownloadSpeed >= cResults[j].DownloadSpeed) && (cResults[i].UploadSpeed >= cResults[j].UploadSpeed) {
 		return true
 	} /*else if cResults[i].Delay == cResults[j].Delay {
 		return cResults[i].ConfigLink < cResults[j].ConfigLink
