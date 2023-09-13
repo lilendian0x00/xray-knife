@@ -14,34 +14,16 @@ func (t *Trojan) Parse(configLink string) error {
 	if !strings.HasPrefix(configLink, "trojan://") {
 		return fmt.Errorf("vmess unreconized: %s", configLink)
 	}
-	nonProtocolPart := configLink[9:]
-
-	secondPart := strings.SplitN(nonProtocolPart, "@", 2)
-	uuid := secondPart[0]
-	t.Password = uuid
-
-	thirdPart := strings.Split(secondPart[1], "?")
-
-	if thirdPart[0][0] == '[' {
-		// IPv6
-		parts := strings.SplitN(thirdPart[0], "]", 2)
-		t.Address = parts[0][1:]
-		t.Port = parts[1][1:]
-	} else {
-		// IPv4
-		address := strings.Split(thirdPart[0], ":")
-		t.Address = address[0]
-		t.Port = address[1]
-	}
-
-	queryPart := strings.Join(thirdPart[1:], "?")
-	lastIndex := strings.LastIndex(queryPart, "#")
-	rmRemark := queryPart[0:lastIndex]
-
-	queryValues, err := url.ParseQuery(rmRemark)
+	uri, err := url.Parse(configLink)
 	if err != nil {
 		return err
 	}
+
+	t.Password = uri.User.String()
+	host := strings.Split(uri.Host, ":")
+	t.Address = host[0]
+	t.Port = host[1]
+
 	// Get the type of the struct
 	structType := reflect.TypeOf(*t)
 
@@ -54,7 +36,7 @@ func (t *Trojan) Parse(configLink string) error {
 		tag := field.Tag.Get("json")
 
 		// If the query value exists for the field, set it
-		if values, ok := queryValues[tag]; ok {
+		if values, ok := uri.Query()[tag]; ok {
 			value := values[0]
 			v := reflect.ValueOf(t).Elem().FieldByName(field.Name)
 
@@ -69,12 +51,9 @@ func (t *Trojan) Parse(configLink string) error {
 		}
 	}
 
-	remarkIndex := strings.LastIndex(configLink, "#")
-	remarkStr, _, _ := strings.Cut(configLink[remarkIndex+1:], "\n")
-
-	t.Remark, err = url.PathUnescape(remarkStr)
+	t.Remark, err = url.PathUnescape(uri.Fragment)
 	if err != nil {
-		t.Remark = remarkStr
+		t.Remark = uri.Fragment
 	}
 	t.OrigLink = configLink
 

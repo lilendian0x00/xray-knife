@@ -14,32 +14,17 @@ func (v *Vless) Parse(configLink string) error {
 	if !strings.HasPrefix(configLink, "vless://") {
 		return fmt.Errorf("vmess unreconized: %s", configLink)
 	}
-	nonProtocolPart := configLink[8:]
 
-	secondPart := strings.SplitN(nonProtocolPart, "@", 2)
-	uuid := secondPart[0]
-
-	thirdPart := strings.Split(secondPart[1], "?")
-	if thirdPart[0][0] == '[' {
-		// IPv6
-		parts := strings.SplitN(thirdPart[0], "]", 2)
-		v.Address = parts[0][1:]
-		v.Port = parts[1][1:]
-	} else {
-		// IPv4
-		address := strings.Split(thirdPart[0], ":")
-		v.Address = address[0]
-		v.Port = address[1]
-	}
-
-	queryPart := strings.Join(thirdPart[1:], "?")
-	lastIndex := strings.LastIndex(queryPart, "#")
-	rmRemark := queryPart[0:lastIndex]
-
-	queryValues, err := url.ParseQuery(rmRemark)
+	uri, err := url.Parse(configLink)
 	if err != nil {
 		return err
 	}
+
+	v.ID = uri.User.String()
+	host := strings.Split(uri.Host, ":")
+	v.Address = host[0]
+	v.Port = host[1]
+
 	// Get the type of the struct
 	t := reflect.TypeOf(*v)
 
@@ -52,7 +37,7 @@ func (v *Vless) Parse(configLink string) error {
 		tag := field.Tag.Get("json")
 
 		// If the query value exists for the field, set it
-		if values, ok := queryValues[tag]; ok {
+		if values, ok := uri.Query()[tag]; ok {
 			value := values[0]
 			v := reflect.ValueOf(v).Elem().FieldByName(field.Name)
 
@@ -67,14 +52,10 @@ func (v *Vless) Parse(configLink string) error {
 		}
 	}
 
-	remarkIndex := strings.LastIndex(configLink, "#")
-	remarkStr, _, _ := strings.Cut(configLink[remarkIndex+1:], "\n")
-
-	v.Remark, err = url.PathUnescape(remarkStr)
+	v.Remark, err = url.PathUnescape(uri.Fragment)
 	if err != nil {
-		v.Remark = remarkStr
+		v.Remark = uri.Fragment
 	}
-	v.ID = uuid
 	//portUint, err := strconv.ParseUint(address[1], 10, 16)
 	//if err != nil {
 	//	fmt.Fprintf(os.Stderr, "%v", err)
