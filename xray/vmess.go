@@ -195,7 +195,8 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 
 	p := conf.TransportProtocol(v.Network)
 	s := &conf.StreamConfig{
-		Network: &p,
+		Network:  &p,
+		Security: v.TLS,
 	}
 
 	switch v.Network {
