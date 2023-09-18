@@ -277,7 +277,7 @@ var HttpCmd = &cobra.Command{
 
 			delay, _, err := xray.MeasureDelay(instance, time.Duration(15)*time.Second, showBody, destURL, httpMethod)
 			if err != nil {
-				customlog.Printf(customlog.Failure, "Config didn't respond!")
+				customlog.Printf(customlog.Failure, "Config didn't respond!\n")
 				os.Exit(1)
 			}
 			customlog.Printf(customlog.Success, "Real Delay: %dms\n", delay)
