@@ -2,7 +2,6 @@ package xray
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"github.com/fatih/color"
 	"github.com/xtls/xray-core/infra/conf"
@@ -24,32 +23,35 @@ func method1(v *Vmess, link string) error {
 }
 
 func method2(v *Vmess, link string) error {
-	fullUrl, err := url.Parse(link)
+	uri, err := url.Parse(link)
 	if err != nil {
 		return err
 	}
-	b64encodedPart := fullUrl.Host
-	decoded, err := utils.Base64Decode(b64encodedPart)
+	decoded, err := utils.Base64Decode(uri.Host)
 	if err != nil {
 		return err
 	}
-	suhp := strings.Split(string(decoded), ":") // security, uuid, address, port
-	if len(suhp) != 3 {
-		return errors.New(fmt.Sprintf("vmess unreconized: security:addr:port -> %s", suhp))
+	link = "vmess://" + string(decoded) + "?" + uri.RawQuery
+
+	uri, err = url.Parse(link)
+	if err != nil {
+		return err
 	}
-	v.Security = suhp[0]
-	comb := strings.Split(suhp[1], "@") // ID@ADDR
-	v.ID = comb[0]
-	v.Address = comb[1]
+
+	v.Security = uri.User.Username()
+	v.ID, _ = uri.User.Password()
+
+	host := strings.Split(uri.Host, ":")
+	v.Address = host[0]
 	//parseUint, err := strconv.ParseUint(suhp[2], 10, 16)
 	//if err != nil {
 	//	return err
 	//}
-	v.Port = suhp[2]
+	v.Port = host[1]
 
 	v.Aid = "0"
 
-	queryValues := fullUrl.Query()
+	queryValues := uri.Query()
 	if value := queryValues.Get("remarks"); value != "" {
 		v.Remark = value
 	}
@@ -91,7 +93,9 @@ func (v *Vmess) Parse(configLink string) error {
 		return fmt.Errorf("vmess unreconized: %s", configLink)
 	}
 
-	if err := method1(v, configLink); err == nil {
+	var err error = nil
+
+	if err = method1(v, configLink); err == nil {
 
 	} else if err = method2(v, configLink); err == nil {
 
@@ -105,7 +109,7 @@ func (v *Vmess) Parse(configLink string) error {
 		}
 	}
 
-	return nil
+	return err
 }
 
 func (v *Vmess) DetailsStr() string {
@@ -213,7 +217,8 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 				"request": {
 					"path": %s,
 					"headers": {
-						"Host": %s
+						"Host": %s,
+						"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"
 					}
 				}
 			}
@@ -226,7 +231,8 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 		s.WSSettings = &conf.WebSocketConfig{}
 		s.WSSettings.Path = v.Path
 		s.WSSettings.Headers = map[string]string{
-			"Host": v.Host,
+			"Host":       v.Host,
+			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36",
 		}
 	case "h2", "http":
 		s.HTTPSettings = &conf.HTTPConfig{

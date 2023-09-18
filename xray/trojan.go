@@ -167,7 +167,8 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 				"request": {
 					"path": %s,
 					"headers": {
-						"Host": %s
+						"Host": %s,
+						"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36",
 					}
 				}
 			}
@@ -182,7 +183,8 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 		s.WSSettings = &conf.WebSocketConfig{}
 		s.WSSettings.Path = t.Path
 		s.WSSettings.Headers = map[string]string{
-			"Host": t.Host,
+			"Host":       t.Host,
+			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36",
 		}
 		break
 	case "h2", "http":

@@ -184,7 +184,8 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 				"request": {
 					"path": %s,
 					"headers": {
-						"Host": %s
+						"Host": %s,
+						"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36",
 					}
 				}
 			}
@@ -197,7 +198,8 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 		s.WSSettings = &conf.WebSocketConfig{}
 		s.WSSettings.Path = v.Path
 		s.WSSettings.Headers = map[string]string{
-			"Host": v.Host,
+			"Host":       v.Host,
+			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36",
 		}
 	case "h2", "http":
 		s.HTTPSettings = &conf.HTTPConfig{
