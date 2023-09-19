@@ -34,7 +34,7 @@ func (s *Shadowsocks) Parse(configLink string) error {
 	} else {
 		return errors.New("Invalid config link ")
 	}
-	fmt.Println(string(decoded))
+
 	link := "ss://" + string(decoded) + "@" + secondPart[1]
 	uri, err = url.Parse(link)
 	if err != nil {
