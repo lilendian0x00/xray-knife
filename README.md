@@ -24,11 +24,11 @@ Only tested on go version 1.20
     
 
 # Screenshots
-## http test CSV report
+### http test CSV report
 <img src="./images/httpCSV.png" width="600" alt="sample1">
 
 
-## http test log
+### http test log
 <img src="./images/httpTest.png" width="1357" alt="sample2">
 
 
@@ -44,7 +44,6 @@ Only tested on go version 1.20
 ## subs
 - [X] ~~Fetch config links inside subscription~~
 - [X] ~~Sort config links based on their real delay test when saving them into a file~~
-- [ ] Database for managing subscriptions
 
 ## net
 - [X] ~~Add icmp (ping) tester~~
