@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/fatih/color"
 	"github.com/xtls/xray-core/infra/conf"
+	"net"
 	"net/url"
 	"strings"
 	"xray-knife/utils"
@@ -15,40 +16,46 @@ func (s *Shadowsocks) Parse(configLink string) error {
 	if !strings.HasPrefix(configLink, "ss://") {
 		return fmt.Errorf("vmess unreconized: %s", configLink)
 	}
-	nonProtocolPart := configLink[5:]
 
-	secondPart := strings.SplitN(nonProtocolPart, "@", 2)
-
-	// Encryption part - b64 encoded (EncryptionType : Password)
-	encryption, err := utils.Base64Decode(secondPart[0])
+	uri, err := url.Parse(configLink)
 	if err != nil {
-		return errors.New("Error when decoding secret part ")
+		return err
 	}
-	secretPart := strings.SplitN(string(encryption), ":", 2)
-	s.Encryption = secretPart[0] // Encryption Type
-	s.Password = secretPart[1]   // Encryption Password
+
+	secondPart := strings.SplitN(configLink[5:], "@", 2)
+
+	var decoded []byte
+	// Encryption part - b64 encoded (EncryptionType : Password)
+	if len(secondPart) > 1 {
+		decoded, err = utils.Base64Decode(secondPart[0])
+		if err != nil {
+			return errors.New("Error when decoding secret part ")
+		}
+	} else {
+		return errors.New("Invalid config link ")
+	}
+	fmt.Println(string(decoded))
+	link := "ss://" + string(decoded) + "@" + secondPart[1]
+	uri, err = url.Parse(link)
+	if err != nil {
+		return err
+	}
+
+	s.Encryption = uri.User.Username()  // Encryption Type
+	s.Password, _ = uri.User.Password() // Encryption Password
 
 	//hostPortRemark := strings.SplitN(secondPart[1], ":", 2)
-	var parts []string
 
-	if secondPart[1][0] == '[' {
-		// IPv6
-		parts = strings.SplitN(secondPart[1], "]", 2)
-		s.Address = parts[0][1:]
-
-	} else {
-		parts = strings.Split(secondPart[1], ":")
-		s.Address = parts[0]
+	s.Address, s.Port, err = net.SplitHostPort(uri.Host)
+	if err != nil {
+		return err
 	}
 
-	portRemark := strings.SplitN(parts[1][1:], "#", 2)
-	s.Port = portRemark[0]
-	if len(portRemark) > 1 {
-		s.Remark, err = url.PathUnescape(portRemark[1])
-		if err != nil {
-			s.Remark = portRemark[1]
-		}
+	s.Remark, err = url.PathUnescape(uri.Fragment)
+	if err != nil {
+		s.Remark = uri.Fragment
 	}
+
 	//s.Address = hostPortRemark[0]
 	//
 	//PortRemark := strings.SplitN(hostPortRemark[1], "#", 2)
