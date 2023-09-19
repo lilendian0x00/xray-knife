@@ -88,7 +88,7 @@ type Trojan struct {
 	Password       string // Password
 	Address        string `json:"add"` // HOST:PORT
 	Flow           string `json:"flow"`
-	Security       string `json:"security"`   // reality or tls
+	Security       string `json:"security"`   // tls
 	HeaderType     string `json:"headerType"` // TCP HTTP Obfuscation
 	Host           string `json:"host"`       // HTTP, WS
 	Path           string `json:"path"`
