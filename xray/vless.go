@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/fatih/color"
 	"github.com/xtls/xray-core/infra/conf"
+	"net"
 	"net/url"
 	"reflect"
 	"strings"
@@ -21,9 +22,11 @@ func (v *Vless) Parse(configLink string) error {
 	}
 
 	v.ID = uri.User.String()
-	host := strings.Split(uri.Host, ":")
-	v.Address = host[0]
-	v.Port = host[1]
+
+	v.Address, v.Port, err = net.SplitHostPort(uri.Host)
+	if err != nil {
+		return err
+	}
 
 	// Get the type of the struct
 	t := reflect.TypeOf(*v)

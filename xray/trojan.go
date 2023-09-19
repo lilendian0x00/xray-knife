@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/fatih/color"
 	"github.com/xtls/xray-core/infra/conf"
+	"net"
 	"net/url"
 	"reflect"
 	"strings"
@@ -20,9 +21,10 @@ func (t *Trojan) Parse(configLink string) error {
 	}
 
 	t.Password = uri.User.String()
-	host := strings.Split(uri.Host, ":")
-	t.Address = host[0]
-	t.Port = host[1]
+	t.Address, t.Port, err = net.SplitHostPort(uri.Host)
+	if err != nil {
+		return err
+	}
 
 	// Get the type of the struct
 	structType := reflect.TypeOf(*t)
