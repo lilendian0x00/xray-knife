@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/fatih/color"
 	"github.com/xtls/xray-core/infra/conf"
+	"net"
 	"net/url"
 	"strings"
 	"xray-knife/utils"
@@ -41,13 +42,14 @@ func method2(v *Vmess, link string) error {
 	v.Security = uri.User.Username()
 	v.ID, _ = uri.User.Password()
 
-	host := strings.Split(uri.Host, ":")
-	v.Address = host[0]
+	v.Address, v.Port, err = net.SplitHostPort(uri.Host)
+	if err != nil {
+		return err
+	}
 	//parseUint, err := strconv.ParseUint(suhp[2], 10, 16)
 	//if err != nil {
 	//	return err
 	//}
-	v.Port = host[1]
 
 	v.Aid = "0"
 
