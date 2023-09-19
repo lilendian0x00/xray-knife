@@ -65,6 +65,16 @@ func (t *Trojan) Parse(configLink string) error {
 		}
 	}
 
+	if t.Type == "" {
+		t.Type = "tcp"
+	}
+	if t.Security == "" {
+		t.Security = "tls"
+	}
+	if t.TlsFingerprint == "" {
+		t.TlsFingerprint = "chrome"
+	}
+
 	return nil
 }
 
@@ -101,7 +111,11 @@ func (t *Trojan) DetailsStr() string {
 	if copyV.Security == "tls" {
 		info += fmt.Sprintf("%s: tls\n", color.RedString("TLS"))
 		if len(copyV.SNI) == 0 {
-			copyV.SNI = copyV.Host
+			if copyV.Host != "" {
+				copyV.SNI = copyV.Host
+			} else {
+				copyV.SNI = "none"
+			}
 		}
 		if len(copyV.ALPN) == 0 {
 			copyV.ALPN = "none"
