@@ -119,7 +119,11 @@ func (v *Vless) DetailsStr() string {
 	} else if copyV.Security == "tls" {
 		info += fmt.Sprintf("%s: tls\n", color.RedString("TLS"))
 		if len(copyV.SNI) == 0 {
-			copyV.SNI = copyV.Host
+			if copyV.Host != "" {
+				copyV.SNI = copyV.Host
+			} else {
+				copyV.SNI = "none"
+			}
 		}
 		if len(copyV.ALPN) == 0 {
 			copyV.ALPN = "none"
@@ -213,18 +217,18 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 			s.HTTPSettings.Host = &h
 		}
 	case "grpc":
-		multiMode := false
-		if v.Mode != "gun" {
-			multiMode = true
-		}
 		s.GRPCConfig = &conf.GRPCConfig{
-			InitialWindowsSize: 65536,
-			HealthCheckTimeout: 20,
-			MultiMode:          multiMode,
-			IdleTimeout:        60,
-			ServiceName:        v.ServiceName,
+			ServiceName:         v.ServiceName,
+			MultiMode:           false,
+			IdleTimeout:         60,
+			HealthCheckTimeout:  20,
+			PermitWithoutStream: false,
+			InitialWindowsSize:  65536,
+			UserAgent:           "",
 		}
-
+		if v.Mode != "gun" {
+			s.GRPCConfig.MultiMode = true
+		}
 		v.Flow = ""
 	}
 

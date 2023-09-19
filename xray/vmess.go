@@ -151,7 +151,11 @@ func (v *Vmess) DetailsStr() string {
 	}
 	if len(copyV.TLS) != 0 {
 		if len(copyV.SNI) == 0 {
-			copyV.SNI = copyV.Host
+			if copyV.Host != "" {
+				copyV.SNI = copyV.Host
+			} else {
+				copyV.SNI = "none"
+			}
 		}
 		if len(copyV.ALPN) == 0 {
 			copyV.ALPN = "none"
