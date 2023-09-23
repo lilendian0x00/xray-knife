@@ -237,6 +237,10 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 			Fingerprint: t.TlsFingerprint,
 			Insecure:    allowInsecure,
 		}
+		if t.AllowInsecure == "1" {
+			s.TLSSettings.Insecure = true
+		}
+
 		if t.SNI != "" {
 			s.TLSSettings.ServerName = t.SNI
 		} else {
