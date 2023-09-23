@@ -40,7 +40,7 @@ func ParseFileByNewline(fileName string) []string {
 		if line == "" {
 			continue
 		}
-		lines = append(lines, line)
+		lines = append(lines, strings.TrimSpace(line))
 	}
 
 	if scanner.Err() != nil {
