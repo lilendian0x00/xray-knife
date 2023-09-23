@@ -7,8 +7,8 @@ Swiss army knife tool (cli) for [xray-core](https://github.com/XTLS/Xray-core).
 - `parse`: Detailed info about given xray config link.
 - `subs`: Subscription management tool.
 - `net`: Network testing tools for one or multiple xray configs.
-- `scan`: Scanning tools needed for bypassing GFW (CF Scanner, REALITY Scanner)
-- `bot`: Automation bot for switching outbound connection automatically.
+- `scan`: Scanning tools needed for bypassing GFW (CF Scanner, REALITY Scanner).
+- `proxy`: Creates proxy server to work as a client for xray-core configs.
 
 ## Download
 
@@ -55,6 +55,6 @@ Only tested on go version 1.20
 - [ ] Cloudflare best IP finder (whitelist scanner)
 - [ ] Xray REALITY scanner (TLS, H2)
 
-## bot (under development)
+## proxy (under development)
 - [ ] Initialization
 

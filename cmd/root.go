@@ -3,9 +3,9 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 	"os"
-	"xray-knife/cmd/bot"
 	"xray-knife/cmd/net"
 	"xray-knife/cmd/parse"
+	"xray-knife/cmd/proxy"
 	"xray-knife/cmd/scan"
 	"xray-knife/cmd/subs"
 )
@@ -39,7 +39,7 @@ func addSubcommandPalettes() {
 	rootCmd.AddCommand(subs.SubsCmd)
 	rootCmd.AddCommand(net.NetCmd)
 	rootCmd.AddCommand(scan.ScanCmd)
-	rootCmd.AddCommand(bot.BotCmd)
+	rootCmd.AddCommand(proxy.ProxyCmd)
 }
 
 func init() {
