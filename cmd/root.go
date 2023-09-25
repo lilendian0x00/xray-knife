@@ -12,9 +12,10 @@ import (
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "xray-knife",
-	Short: "Swiss Army Knife for xray-core",
-	Long:  ``,
+	Use:     "xray-knife",
+	Short:   "Swiss Army Knife for xray-core",
+	Long:    ``,
+	Version: "1.5.11",
 	// Main Tools:
 	//1. parse: Parses xray config link.
 	//2. net: Multiple network tests for xray configs.
