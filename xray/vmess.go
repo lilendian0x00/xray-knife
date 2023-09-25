@@ -7,6 +7,7 @@ import (
 	"github.com/xtls/xray-core/infra/conf"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 	"xray-knife/utils"
 )
@@ -176,12 +177,22 @@ func (v *Vmess) ConvertToGeneralConfig() GeneralConfig {
 	var g GeneralConfig
 	g.Protocol = "vmess"
 	g.Address = v.Address
-	g.Aid = v.Aid
+	aid, ok := v.Aid.(int)
+	if ok {
+		g.Aid = strconv.Itoa(aid)
+	} else {
+		g.Aid = v.Port.(string)
+	}
 	g.Host = v.Host
 	g.ID = v.ID
 	g.Network = v.Network
 	g.Path = v.Path
-	g.Port = v.Port
+	port, ok := v.Port.(int)
+	if ok {
+		g.Port = strconv.Itoa(port)
+	} else {
+		g.Port = v.Port.(string)
+	}
 	g.Remark = v.Remark
 	if v.TLS == "" {
 		g.TLS = "none"

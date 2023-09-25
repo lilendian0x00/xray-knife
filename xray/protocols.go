@@ -31,23 +31,23 @@ type GeneralConfig struct {
 }
 
 type Vmess struct {
-	Version        string `json:"v"`
-	Address        string `json:"add"`
-	Aid            string `json:"aid"` // AlterID
-	Port           string `json:"port"`
-	Security       string `json:"scy"`
-	Host           string `json:"host"`
-	ID             string `json:"id"`
-	Network        string `json:"net"`
-	Path           string `json:"path"`
-	Remark         string `json:"ps"` // Config's name
-	TLS            string `json:"tls"`
-	AllowInsecure  string `json:"allowinsecure"`
-	SNI            string `json:"sni"`  // Server name indication
-	ALPN           string `json:"alpn"` // Application-Layer Protocol Negotiation
-	TlsFingerprint string `json:"fp"`   // TLS fingerprint
-	Type           string `json:"type"` // Used for HTTP Obfuscation
-	OrigLink       string `json:"-"`    // Original link
+	Version        string      `json:"v"`
+	Address        string      `json:"add"`
+	Aid            interface{} `json:"aid"` // AlterID
+	Port           interface{} `json:"port"`
+	Security       string      `json:"scy"`
+	Host           string      `json:"host"`
+	ID             string      `json:"id"`
+	Network        string      `json:"net"`
+	Path           string      `json:"path"`
+	Remark         string      `json:"ps"` // Config's name
+	TLS            string      `json:"tls"`
+	AllowInsecure  string      `json:"allowinsecure"`
+	SNI            string      `json:"sni"`  // Server name indication
+	ALPN           string      `json:"alpn"` // Application-Layer Protocol Negotiation
+	TlsFingerprint string      `json:"fp"`   // TLS fingerprint
+	Type           string      `json:"type"` // Used for HTTP Obfuscation
+	OrigLink       string      `json:"-"`    // Original link
 }
 
 type Vless struct {
