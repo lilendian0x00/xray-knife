@@ -35,14 +35,14 @@ func (s *Shadowsocks) Parse(configLink string) error {
 		return errors.New("Invalid config link ")
 	}
 
-	link := "ss://" + string(decoded) + "@" + secondPart[1]
-	uri, err = url.Parse(link)
-	if err != nil {
-		return err
-	}
-
-	s.Encryption = uri.User.Username()  // Encryption Type
-	s.Password, _ = uri.User.Password() // Encryption Password
+	//link := "ss://" + string(decoded) + "@" + secondPart[1]
+	//uri, err := url.Parse(link)
+	//if err != nil {
+	//	return err
+	//}
+	creds := strings.SplitN(string(decoded), ":", 2)
+	s.Encryption = creds[0] // Encryption Type
+	s.Password = creds[1]   // Encryption Password
 
 	//hostPortRemark := strings.SplitN(secondPart[1], ":", 2)
 
