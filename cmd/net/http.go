@@ -96,7 +96,8 @@ var HttpCmd = &cobra.Command{
 
 					res, err := examiner.ExamineConfig(links[configIndex])
 					if err != nil {
-						customlog.Printf(customlog.Failure, "%s\n", res)
+						fmt.Println(links[configIndex])
+						customlog.Printf(customlog.Failure, "%s\n", err)
 						return
 					}
 
@@ -168,7 +169,7 @@ var HttpCmd = &cobra.Command{
 			examiner.Logs = true
 			res, err := examiner.ExamineConfig(configLink)
 			if err != nil {
-				customlog.Printf(customlog.Failure, "%s\n", res)
+				customlog.Printf(customlog.Failure, "%s\n", err)
 				return
 			}
 
