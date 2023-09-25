@@ -217,9 +217,18 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 			s.HTTPSettings.Host = &h
 		}
 	case "grpc":
+		if len(v.ServiceName) > 0 {
+			if v.ServiceName[0] == '/' {
+				v.ServiceName = v.ServiceName[1:]
+			}
+		}
+		multiMode := false
+		if v.Type != "gun" {
+			multiMode = true
+		}
 		s.GRPCConfig = &conf.GRPCConfig{
 			ServiceName:         v.ServiceName,
-			MultiMode:           false,
+			MultiMode:           multiMode,
 			IdleTimeout:         60,
 			HealthCheckTimeout:  20,
 			PermitWithoutStream: false,

@@ -213,6 +213,11 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 		}
 		break
 	case "grpc":
+		if len(t.ServiceName) > 0 {
+			if t.ServiceName[0] == '/' {
+				t.ServiceName = t.ServiceName[1:]
+			}
+		}
 		multiMode := false
 		if t.Mode != "gun" {
 			multiMode = true
