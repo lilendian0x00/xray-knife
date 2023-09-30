@@ -3,6 +3,8 @@ Swiss army knife tool (cli) for [xray-core](https://github.com/XTLS/Xray-core).
 
 **I DEDICATE THIS TOOL TO MY DEAR PERSIAN PEOPLE.**
 
+**استفاده از این نرم افزار برای حمایت کنندگان جمهوری اسلامی حرام است.**
+
 ## Features (main flags)
 - `parse`: Detailed info about given xray config link.
 - `subs`: Subscription management tool.
