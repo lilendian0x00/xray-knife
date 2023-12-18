@@ -150,7 +150,8 @@ func (v *Vmess) DetailsStr() string {
 		}
 		info += fmt.Sprintf("%s: %s\n", color.RedString("ServiceName"), copyV.Path)
 	}
-	if len(copyV.TLS) != 0 {
+
+	if len(copyV.TLS) != 0 && copyV.TLS != "none" {
 		if len(copyV.SNI) == 0 {
 			if copyV.Host != "" {
 				copyV.SNI = copyV.Host
