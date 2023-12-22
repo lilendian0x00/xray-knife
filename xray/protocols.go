@@ -5,6 +5,7 @@ import "github.com/xtls/xray-core/infra/conf"
 type Protocol interface {
 	Parse(configLink string) error
 	BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error)
+	BuildInboundDetourConfig() (*conf.InboundDetourConfig, error)
 	DetailsStr() string
 	ConvertToGeneralConfig() GeneralConfig
 }
@@ -102,4 +103,13 @@ type Trojan struct {
 	ServiceName    string `json:"serviceName"` // GRPC
 	Mode           string `json:"mode"`        // GRPC
 	OrigLink       string `json:"-"`           // Original link
+}
+
+type Socks struct {
+	Remark   string
+	Address  string // HOST:PORT
+	Port     string
+	Username string // Username
+	Password string // Password
+	OrigLink string // Original link
 }
