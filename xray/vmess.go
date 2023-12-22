@@ -17,10 +17,11 @@ func method1(v *Vmess, link string) error {
 	if err != nil {
 		return err
 	}
-	//fmt.Println(string(decoded))
+
 	if err = json.Unmarshal(decoded, v); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -305,4 +306,8 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 }`, v.Address, v.Port, v.ID, v.Aid, v.Security)))
 	out.Settings = &oset
 	return out, nil
+}
+
+func (v *Vmess) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
+	return nil, nil
 }
