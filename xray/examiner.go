@@ -60,7 +60,7 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 	r.Protocol = parsed
 	r.TLS = parsed.ConvertToGeneralConfig().TLS
 
-	instance, err1 := e.Xs.StartXray(parsed)
+	instance, err1 := e.Xs.MakeXrayInstance(nil)
 	if err1 != nil {
 		r.Status = "broken"
 		return r, nil
