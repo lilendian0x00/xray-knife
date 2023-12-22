@@ -20,6 +20,8 @@ import (
 )
 
 type Service struct {
+	Inbound Protocol
+
 	// Log
 	Verbose  bool
 	LogType  applog.LogType
@@ -37,8 +39,15 @@ func WithCustomLogLevel(logType applog.LogType, LogLevel commlog.Severity) Servi
 	}
 }
 
+func WithInbound(inbound Protocol) ServiceOption {
+	return func(c *Service) {
+		c.Inbound = inbound
+	}
+}
+
 func NewXrayService(verbose bool, allowInsecure bool, opts ...ServiceOption) *Service {
 	s := &Service{
+		Inbound:       nil,
 		Verbose:       verbose,
 		LogType:       applog.LogType_None,
 		LogLevel:      commlog.Severity_Unknown,
@@ -58,8 +67,8 @@ func NewXrayService(verbose bool, allowInsecure bool, opts ...ServiceOption) *Se
 	return s
 }
 
-func (x *Service) StartXray(conf Protocol) (*core.Instance, error) {
-	ob, err := conf.BuildOutboundDetourConfig(x.AllowInsecure)
+func (x *Service) MakeXrayInstance(outbound Protocol) (*core.Instance, error) {
+	ob, err := outbound.BuildOutboundDetourConfig(x.AllowInsecure)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +90,17 @@ func (x *Service) StartXray(conf Protocol) (*core.Instance, error) {
 			serial.ToTypedMessage(&proxyman.OutboundConfig{}),
 		},
 	}
-	//config.Inbound = []*core.InboundHandlerConfig{}
+	if x.Inbound != nil {
+		ibc, err := x.Inbound.BuildInboundDetourConfig()
+		if err != nil {
+			return nil, err
+		}
+		ibcBuilt, err1 := ibc.Build()
+		if err1 != nil {
+			return nil, err1
+		}
+		clientConfig.Inbound = []*core.InboundHandlerConfig{ibcBuilt}
+	}
 	clientConfig.Outbound = []*core.OutboundHandlerConfig{built}
 
 	server, err2 := core.New(clientConfig)
@@ -110,6 +129,8 @@ func ParseXrayConfig(configLink string) (Protocol, error) {
 		protocol = &Shadowsocks{}
 	} else if strings.HasPrefix(configLink, "trojan://") {
 		protocol = &Trojan{}
+	} else if strings.HasPrefix(configLink, "socks://") {
+		protocol = &Socks{}
 	} else {
 		return protocol, errors.New("Invalid protocol type! ")
 	}
