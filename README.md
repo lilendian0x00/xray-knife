@@ -41,6 +41,7 @@ Only tested on go version 1.20
 - [X] ~~Add Vless link support (`vless://...`)~~
 - [X] ~~Add Shadowsocks support (`ss://...`)~~
 - [X] ~~Add Trojan support (`trojan://...`)~~
+- [X] ~~Add Socks support (`socks://...`)~~
 - [ ] Load config from json file
 
 ## subs
