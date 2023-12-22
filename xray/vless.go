@@ -13,7 +13,7 @@ import (
 
 func (v *Vless) Parse(configLink string) error {
 	if !strings.HasPrefix(configLink, "vless://") {
-		return fmt.Errorf("vmess unreconized: %s", configLink)
+		return fmt.Errorf("vless unreconized: %s", configLink)
 	}
 
 	uri, err := url.Parse(configLink)
@@ -288,4 +288,8 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 }`, v.Address, v.Port, v.ID, v.Flow)))
 	out.Settings = &oset
 	return out, nil
+}
+
+func (v *Vless) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
+	return nil, nil
 }

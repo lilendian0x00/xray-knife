@@ -13,7 +13,7 @@ import (
 
 func (t *Trojan) Parse(configLink string) error {
 	if !strings.HasPrefix(configLink, "trojan://") {
-		return fmt.Errorf("vmess unreconized: %s", configLink)
+		return fmt.Errorf("trojan unreconized: %s", configLink)
 	}
 	uri, err := url.Parse(configLink)
 	if err != nil {
@@ -271,4 +271,8 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 }`, t.Address, t.Port, t.Password, t.Flow)))
 	out.Settings = &oset
 	return out, nil
+}
+
+func (v *Trojan) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
+	return nil, nil
 }

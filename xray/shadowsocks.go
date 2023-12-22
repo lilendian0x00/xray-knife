@@ -14,7 +14,7 @@ import (
 
 func (s *Shadowsocks) Parse(configLink string) error {
 	if !strings.HasPrefix(configLink, "ss://") {
-		return fmt.Errorf("vmess unreconized: %s", configLink)
+		return fmt.Errorf("shadowsocks unreconized: %s", configLink)
 	}
 
 	uri, err := url.Parse(configLink)
@@ -116,4 +116,8 @@ func (s *Shadowsocks) BuildOutboundDetourConfig(allowInsecure bool) (*conf.Outbo
 }`, s.Address, s.Port, s.Password, s.Encryption)))
 	out.Settings = &oset
 	return out, nil
+}
+
+func (s *Shadowsocks) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
+	return nil, nil
 }
