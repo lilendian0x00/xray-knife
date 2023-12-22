@@ -53,10 +53,9 @@ Only tested on go version 1.20
 - [X] ~~Add full connection delay (AKA real delay) tester~~
 - [X] ~~Add speed tester for http~~
 
+## proxy
+- [X] ~~Added CLI client feature~~
+
 ## scan (under development)
 - [ ] Cloudflare best IP finder (whitelist scanner)
 - [ ] Xray REALITY scanner (TLS, H2)
-
-## proxy (under development)
-- [ ] Initialization
-
