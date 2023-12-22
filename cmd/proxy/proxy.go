@@ -64,8 +64,7 @@ var ProxyCmd = &cobra.Command{
 		// Make xray instance
 		xrayInstance, err := xs.MakeXrayInstance(outboundParsed)
 		if err != nil {
-			fmt.Println("Error:", err.Error())
-			return
+			log.Fatalln(err.Error())
 		}
 
 		// Create a channel to receive signals.
@@ -95,7 +94,7 @@ var ProxyCmd = &cobra.Command{
 		// Start xray instance
 		err = xrayInstance.Start()
 		if err != nil {
-			return
+			log.Fatalln(err.Error())
 		}
 		fmt.Println(color.GreenString("\nStarted listening for new connections..."))
 		fmt.Printf("\n")
