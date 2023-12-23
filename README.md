@@ -56,7 +56,7 @@ Only tested on go version 1.20
 
 ## proxy
 - [X] ~~Added CLI client feature~~
-- [ ] Option to switch outbound connection automatically based on passed parameter (E.g. time, availability)
+- [X] ~~Option to switch outbound connection automatically based on passed parameter (E.g. interval, availability) (rotating proxy)~~
 
 ## scan (under development)
 - [ ] Cloudflare best IP finder (whitelist scanner)
