@@ -10,9 +10,11 @@ import (
 	"math/rand"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"syscall"
 	"time"
+	"xray-knife/cmd/net"
 	"xray-knife/utils"
 	"xray-knife/utils/customlog"
 	"xray-knife/xray"
@@ -27,6 +29,7 @@ var (
 	link                string
 	verbose             bool
 	insecureTLS         bool
+	maximumAllowedDelay uint16
 )
 
 // ProxyCmd BotCmd represents the bot command
@@ -74,6 +77,16 @@ var ProxyCmd = &cobra.Command{
 		utils.ClearTerminal()
 		// Make a new xray service
 		xs := xray.NewXrayService(verbose, insecureTLS, xray.WithInbound(inbound))
+		examiner := xray.Examiner{
+			Xs:                     xray.NewXrayService(verbose, insecureTLS),
+			MaxDelay:               2000,
+			Logs:                   false,
+			ShowBody:               false,
+			DoSpeedtest:            false,
+			DoIPInfo:               false,
+			TestEndpoint:           "https://google.com/",
+			TestEndpointHttpMethod: "GET",
+		}
 
 		fmt.Println(color.RedString("\n==========INBOUND=========="))
 		fmt.Printf("%v", inbound.DetailsStr())
@@ -111,40 +124,94 @@ var ProxyCmd = &cobra.Command{
 		}()
 
 		if len(configs) > 1 {
-			var currentIndex int
-			var lastIndex int
+			//var currentIndex int
+			//var lastIndex int
+
+			customlog.Printf(customlog.Processing, "Looking for a working outbound config...\n")
 
 			connect := func() {
-				// Check for config availability
-				if len(configs) > 1 {
-					// If we have more have 1, then select another inside
-					for currentIndex == lastIndex {
-						currentIndex = r.Intn(len(configs))
+				var lastConfig string
+				var currentConfig xray.Protocol = nil
+
+				// Decide how many configs we are going to test
+				var testCount int = 25
+				if len(links) < 25 {
+					testCount = len(links)
+				}
+				for currentConfig == nil {
+					// Shuffle all links
+					r.Shuffle(len(links), func(i, j int) { links[i], links[j] = links[j], links[i] })
+					results := net.HttpTestMultipleConfigs(examiner, links[0:testCount-1], 50, false)
+					sort.Sort(results)
+					for _, v := range results {
+						if v.ConfigLink != lastConfig {
+							currentConfig = v.Protocol
+							lastConfig = v.ConfigLink
+							break
+						}
 					}
-					lastIndex = currentIndex
-				} else {
-					// If we have 1 config then set the index to 0
-					currentIndex = 0
 				}
 
+				// Check for config availability
+				//if len(configs) > 1 {
+				//	// If we have more have 1, then select another inside
+				//	lastIndex = currentIndex
+				//	for currentIndex == lastIndex {
+				//		currentIndex = r.Intn(len(configs))
+				//	}
+				//} else {
+				//	// If we have 1 config then set the index to 0
+				//	currentIndex = 0
+				//}
+
+				//var examinerErr error
+				//var res xray.Result
+				//
+				//for len(configs) > 1 {
+				//	res, examinerErr = examiner.ExamineConfig(links[currentIndex])
+				//	if examinerErr != nil {
+				//		//customlog.Printf(customlog.Failure, "%s\n", err)
+				//		//configs = append(configs[:currentIndex], configs[currentIndex+1:]...)
+				//	}
+				//	if res.Status == "passed" {
+				//		break
+				//	}
+				//	fmt.Println(res.Status)
+				//	configs = append(configs[:currentIndex], configs[currentIndex+1:]...)
+				//	// Select a new index
+				//	lastIndex = currentIndex
+				//	for currentIndex == lastIndex {
+				//		currentIndex = r.Intn(len(configs))
+				//	}
+				//}
+				//fmt.Println(res.Status)
+
+				//if len(configs) == 1 {
+				//	res, examinerErr = examiner.ExamineConfig(links[currentIndex])
+				//	if examinerErr != nil {
+				//		customlog.Printf(customlog.Failure, "There is no functional outbound config remaining!\n")
+				//		os.Exit(1)
+				//	}
+				//}
+
 				fmt.Println(color.RedString("==========OUTBOUND=========="))
-				fmt.Printf("%v", configs[currentIndex].DetailsStr())
+				fmt.Printf("%v", currentConfig.DetailsStr())
 				fmt.Println(color.RedString("============================"))
 
 				// Make xray instance
-				xrayInstance, err = xs.MakeXrayInstance(configs[currentIndex])
+				xrayInstance, err = xs.MakeXrayInstance(currentConfig)
 				if err != nil {
-					log.Println(err.Error())
+					customlog.Printf(customlog.Failure, "Error making a xray instance: %s\n", err.Error())
 					// Remove config from slice if it doesn't work
-					configs = append(configs[:currentIndex], configs[currentIndex+1:]...)
+					//configs = append(configs[:currentIndex], configs[currentIndex+1:]...)
 				}
 
 				// Start the xray instance
 				err = xrayInstance.Start()
 				if err != nil {
-					log.Println(err.Error())
+					customlog.Printf(customlog.Failure, "Error starting xray instance: %s\n", err.Error())
 					// Remove config from slice if it doesn't work
-					configs = append(configs[:currentIndex], configs[currentIndex+1:]...)
+					//configs = append(configs[:currentIndex], configs[currentIndex+1:]...)
 				}
 				customlog.Printf(customlog.Success, "Started listening for new connections...")
 				fmt.Printf("\n")
@@ -161,7 +228,7 @@ var ProxyCmd = &cobra.Command{
 				if xrayInstance != nil {
 					err = xrayInstance.Close()
 					if err != nil {
-						log.Fatalf(err.Error())
+						//log.Fatalf(err.Error())
 					}
 				}
 
@@ -202,6 +269,7 @@ func init() {
 	ProxyCmd.Flags().BoolVarP(&readConfigFromSTDIN, "stdin", "i", false, "Read config link from STDIN")
 	ProxyCmd.Flags().StringVarP(&configLinksFile, "file", "f", "", "Read config links from a file")
 	ProxyCmd.Flags().Uint32VarP(&interval, "interval", "t", 300, "Interval to change outbound connection in seconds")
+	ProxyCmd.Flags().Uint16VarP(&maximumAllowedDelay, "mdelay", "d", 3000, "Maximum allowed delay")
 
 	ProxyCmd.Flags().StringVarP(&listenAddr, "addr", "a", "127.0.0.1", "Listen ip address")
 	ProxyCmd.Flags().Uint16VarP(&listenPort, "port", "p", 9999, "Listen port number")
