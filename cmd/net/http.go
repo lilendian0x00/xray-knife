@@ -53,7 +53,60 @@ func (cResults ConfigResults) Swap(i, j int) {
 	cResults[i], cResults[j] = cResults[j], cResults[i]
 }
 
-var confRes ConfigResults
+func HttpTestMultipleConfigs(examiner xray.Examiner, links []string, threadCount uint16, verbose bool) ConfigResults {
+	d := color.New(color.FgCyan, color.Bold)
+
+	// Limit the number of concurrent workers
+	semaphore := make(chan int, threadCount)
+
+	// Wait for all workers to finish
+	wg := sync.WaitGroup{}
+
+	var confRes ConfigResults
+
+	for i := 0; i < len(links); i++ {
+		semaphore <- 1
+		wg.Add(1)
+		go func(configIndex int) {
+			defer func() {
+				// Free the worker at the end
+				<-semaphore
+				wg.Done()
+			}()
+
+			res, err := examiner.ExamineConfig(links[configIndex])
+			if err != nil {
+				if verbose {
+					customlog.Printf(customlog.Failure, "Error: %s - broken config: %s\n", err.Error(), links[configIndex])
+				}
+				return
+			}
+
+			if res.Status == "passed" {
+				if verbose {
+					d.Printf("Config Number: %d\n", configIndex+1)
+					fmt.Printf("%v", res.Protocol.DetailsStr())
+					customlog.Printf(customlog.Success, "Real Delay: %dms\n\n", res.Delay)
+				}
+			}
+
+			if outputType == "csv" || res.Status == "passed" {
+				// Save both passed and failed configs if we save as csv
+				validConfigsMu.Lock()
+				confRes = append(confRes, &res)
+				validConfigsMu.Unlock()
+			}
+			return
+		}(i)
+	}
+	// Wait for all goroutines to finish
+	wg.Wait()
+
+	// Close semaphore channel
+	close(semaphore)
+
+	return confRes
+}
 
 // HttpCmd represents the http command
 var HttpCmd = &cobra.Command{
@@ -74,58 +127,9 @@ var HttpCmd = &cobra.Command{
 		}
 
 		if configLinksFile != "" {
-			d := color.New(color.FgCyan, color.Bold)
-
-			// Limit the number of concurrent workers
-			semaphore := make(chan int, threadCount)
-
-			// Wait for all workers to finish
-			wg := sync.WaitGroup{}
-
 			links := utils.ParseFileByNewline(configLinksFile)
 
-			for i := 0; i < len(links); i++ {
-				semaphore <- 1
-				wg.Add(1)
-				go func(configIndex int) {
-					defer func() {
-						// Free the worker at the end
-						<-semaphore
-						wg.Done()
-					}()
-
-					res, err := examiner.ExamineConfig(links[configIndex])
-					if err != nil {
-						fmt.Println(links[configIndex])
-						customlog.Printf(customlog.Failure, "%s\n", err)
-						return
-					}
-
-					if res.Status == "passed" {
-						d.Printf("Config Number: %d\n", configIndex+1)
-						fmt.Printf("%v", res.Protocol.DetailsStr())
-						customlog.Printf(customlog.Success, "Real Delay: %dms\n\n", res.Delay)
-					}
-
-					if outputType == "csv" {
-						// Save both passed and failed configs
-						validConfigsMu.Lock()
-						confRes = append(confRes, &res)
-						validConfigsMu.Unlock()
-					} else if res.Status == "passed" {
-						// Only save working configs
-						validConfigsMu.Lock()
-						confRes = append(confRes, &res)
-						validConfigsMu.Unlock()
-					}
-					return
-				}(i)
-			}
-			// Wait for all goroutines to finish
-			wg.Wait()
-
-			// Close semaphore channel
-			close(semaphore)
+			confRes := HttpTestMultipleConfigs(examiner, links, threadCount, true)
 
 			// Sort configs based on their delay
 			if sortedByRealDelay {
