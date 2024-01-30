@@ -5,6 +5,12 @@ Swiss army knife tool (cli) for [xray-core](https://github.com/XTLS/Xray-core).
 
 **استفاده از این نرم افزار برای حمایت کنندگان جمهوری اسلامی حرام است.**
 
+## Description
+Since there was no existing program capable of directly checking xray-core config links in bulk, I took it upon myself to develop such a tool. I have now made it publicly available, enabling everyone to benefit from and enjoy its functionality. (`net http` command).
+You can also benefit from other key features of this program, such as its rotating proxy functionality (`proxy` command).
+
+You can view the flags of each command by using the `-h` or `--help` option.
+
 ## Features (main commands)
 - `parse`: Detailed info about given xray config link.
 - `subs`: Subscription management tool.
@@ -17,7 +23,7 @@ Swiss army knife tool (cli) for [xray-core](https://github.com/XTLS/Xray-core).
 Get the latest version from [GitHub](https://github.com/lilendian0x00/xray-knife/releases/latest).
 
 ## Build instruction
-Only tested on go version 1.20
+Only works on golang version 1.21
 
 1. `Install golang`
 2. `git clone https://github.com/lilendian0x00/xray-knife.git`
