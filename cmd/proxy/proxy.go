@@ -215,26 +215,24 @@ var ProxyCmd = &cobra.Command{
 				}
 				customlog.Printf(customlog.Success, "Started listening for new connections...")
 				fmt.Printf("\n")
-			}
-			// The procedure of selecting a new outbound and starting it
-			connect()
 
-			// A ticker for the interval in which the outbound changes
-			ticker := time.NewTicker(time.Duration(interval) * time.Second)
-			for range ticker.C {
+				time.Sleep(time.Duration(interval) * time.Second)
+			}
+
+			for {
+				// The procedure of selecting a new outbound and starting it
+				// Do it for the first time before first tick starts
+				connect()
+
 				customlog.Printf(customlog.Processing, "Switching outbound connection...\n")
 
 				// Check if any xrayInstance is running
 				if xrayInstance != nil {
 					err = xrayInstance.Close()
 					if err != nil {
-						//log.Fatalf(err.Error())
+						log.Fatalf(err.Error())
 					}
 				}
-
-				// The procedure of selecting a new outbound and starting it
-				// Do it for the first time before first tick starts
-				connect()
 			}
 		} else {
 			// Configuring outbound
