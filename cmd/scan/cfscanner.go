@@ -3,8 +3,9 @@ package scan
 import (
 	"os"
 	"strings"
-	"xray-knife/utils"
-	"xray-knife/utils/customlog"
+
+	"github.com/lilendian0x00/xray-knife/utils"
+	"github.com/lilendian0x00/xray-knife/utils/customlog"
 
 	"github.com/spf13/cobra"
 )

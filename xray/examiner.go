@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"xray-knife/speedtester/cloudflare"
+
+	"github.com/lilendian0x00/xray-knife/speedtester/cloudflare"
 )
 
 type Result struct {

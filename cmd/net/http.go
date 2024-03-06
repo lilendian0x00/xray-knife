@@ -2,16 +2,17 @@ package net
 
 import (
 	"fmt"
-	"github.com/fatih/color"
-	"github.com/gocarina/gocsv"
-	"github.com/spf13/cobra"
 	"os"
 	"sort"
 	"strings"
 	"sync"
-	"xray-knife/utils"
-	"xray-knife/utils/customlog"
-	"xray-knife/xray"
+
+	"github.com/fatih/color"
+	"github.com/gocarina/gocsv"
+	"github.com/lilendian0x00/xray-knife/utils"
+	"github.com/lilendian0x00/xray-knife/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/xray"
+	"github.com/spf13/cobra"
 )
 
 var (

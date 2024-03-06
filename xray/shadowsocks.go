@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/fatih/color"
-	"github.com/xtls/xray-core/infra/conf"
 	"net"
 	"net/url"
 	"strings"
-	"xray-knife/utils"
+
+	"github.com/fatih/color"
+	"github.com/lilendian0x00/xray-knife/utils"
+	"github.com/xtls/xray-core/infra/conf"
 )
 
 func (s *Shadowsocks) Parse(configLink string) error {

@@ -6,8 +6,9 @@ import (
 	"net"
 	"net/http"
 	"time"
-	"xray-knife/network/customtls"
-	"xray-knife/speedtester/custom"
+
+	"github.com/lilendian0x00/xray-knife/network/customtls"
+	"github.com/lilendian0x00/xray-knife/speedtester/custom"
 )
 
 type SpeedTester struct {

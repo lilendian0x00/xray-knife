@@ -1,4 +1,4 @@
-module xray-knife
+module github.com/lilendian0x00/xray-knife
 
 go 1.21.4
 

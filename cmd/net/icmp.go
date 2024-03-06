@@ -2,12 +2,14 @@ package net
 
 import (
 	"fmt"
-	"github.com/spf13/cobra"
 	"net"
 	"os"
-	"xray-knife/network"
-	"xray-knife/utils/customlog"
-	"xray-knife/xray"
+
+	"github.com/lilendian0x00/xray-knife/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/xray"
+
+	"github.com/lilendian0x00/xray-knife/network"
+	"github.com/spf13/cobra"
 )
 
 var (

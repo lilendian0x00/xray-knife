@@ -5,13 +5,14 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"golang.org/x/net/icmp"
-	"golang.org/x/net/ipv4"
 	"math/rand"
 	"net"
 	"os"
 	"time"
-	"xray-knife/utils/customlog"
+
+	"github.com/lilendian0x00/xray-knife/utils/customlog"
+	"golang.org/x/net/icmp"
+	"golang.org/x/net/ipv4"
 )
 
 type IcmpPacket struct {

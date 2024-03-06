@@ -1,18 +1,19 @@
 package cmd
 
 import (
-	"github.com/spf13/cobra"
 	"os"
-	"xray-knife/cmd/net"
-	"xray-knife/cmd/parse"
-	"xray-knife/cmd/proxy"
-	"xray-knife/cmd/scan"
-	"xray-knife/cmd/subs"
+
+	"github.com/lilendian0x00/xray-knife/cmd/net"
+	"github.com/lilendian0x00/xray-knife/cmd/parse"
+	"github.com/lilendian0x00/xray-knife/cmd/proxy"
+	"github.com/lilendian0x00/xray-knife/cmd/scan"
+	"github.com/lilendian0x00/xray-knife/cmd/subs"
+	"github.com/spf13/cobra"
 )
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:     "xray-knife",
+	Use:     "github.com/lilendian0x00/xray-knife",
 	Short:   "Swiss Army Knife for xray-core",
 	Long:    ``,
 	Version: "2.8.16",
