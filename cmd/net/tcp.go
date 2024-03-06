@@ -4,8 +4,9 @@ import (
 	"net"
 	"os"
 	"time"
-	"xray-knife/utils/customlog"
-	"xray-knife/xray"
+
+	"github.com/lilendian0x00/xray-knife/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/xray"
 
 	"github.com/spf13/cobra"
 )

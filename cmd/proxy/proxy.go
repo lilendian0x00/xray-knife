@@ -3,9 +3,6 @@ package proxy
 import (
 	"bufio"
 	"fmt"
-	"github.com/fatih/color"
-	"github.com/spf13/cobra"
-	"github.com/xtls/xray-core/core"
 	"log"
 	"math/rand"
 	"os"
@@ -14,10 +11,14 @@ import (
 	"strconv"
 	"syscall"
 	"time"
-	"xray-knife/cmd/net"
-	"xray-knife/utils"
-	"xray-knife/utils/customlog"
-	"xray-knife/xray"
+
+	"github.com/fatih/color"
+	"github.com/lilendian0x00/xray-knife/cmd/net"
+	"github.com/lilendian0x00/xray-knife/utils"
+	"github.com/lilendian0x00/xray-knife/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/xray"
+	"github.com/spf13/cobra"
+	"github.com/xtls/xray-core/core"
 )
 
 var (

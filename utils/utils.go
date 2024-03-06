@@ -8,7 +8,8 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
-	"xray-knife/utils/customlog"
+
+	"github.com/lilendian0x00/xray-knife/utils/customlog"
 )
 
 func Base64Decode(b64 string) ([]byte, error) {

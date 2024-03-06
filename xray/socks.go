@@ -3,15 +3,16 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/fatih/color"
-	net2 "github.com/xtls/xray-core/common/net"
-	"github.com/xtls/xray-core/infra/conf"
 	"log"
 	"net"
 	"net/url"
 	"strconv"
 	"strings"
-	"xray-knife/utils"
+
+	"github.com/fatih/color"
+	"github.com/lilendian0x00/xray-knife/utils"
+	net2 "github.com/xtls/xray-core/common/net"
+	"github.com/xtls/xray-core/infra/conf"
 )
 
 func (s *Socks) Parse(configLink string) error {
