@@ -9,7 +9,7 @@ require (
 	github.com/gocarina/gocsv v0.0.0-20231116093920-b87c2d0e983a
 	github.com/refraction-networking/utls v1.6.2
 	github.com/spf13/cobra v1.8.0
-	github.com/xtls/xray-core v1.8.7
+	github.com/xtls/xray-core v1.8.10
 	golang.org/x/net v0.20.0
 )
 
