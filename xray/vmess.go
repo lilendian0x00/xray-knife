@@ -23,6 +23,7 @@ func method1(v *Vmess, link string) error {
 		return err
 	}
 
+	fmt.Println(string(decoded))
 	return nil
 }
 
@@ -129,7 +130,7 @@ func (v *Vmess) DetailsStr() string {
 
 	if copyV.Network == "" {
 
-	} else if copyV.Type == "http" || copyV.Network == "ws" || copyV.Network == "h2" {
+	} else if copyV.Type == "http" || copyV.Network == "httpupgrade" || copyV.Network == "ws" || copyV.Network == "h2" {
 		if copyV.Type == "" {
 			copyV.Type = "none"
 		}
@@ -251,6 +252,11 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 		if v.Host != "" {
 			h := conf.StringList(strings.Split(v.Host, ","))
 			s.HTTPSettings.Host = &h
+		}
+	case "httpupgrade":
+		s.HTTPUPGRADESettings = &conf.HttpUpgradeConfig{
+			Host: v.Host,
+			Path: v.Path,
 		}
 	case "grpc":
 		if len(v.Path) > 0 {

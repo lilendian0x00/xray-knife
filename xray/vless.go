@@ -91,7 +91,7 @@ func (v *Vless) DetailsStr() string {
 		color.RedString("Flow"), copyV.Flow)
 	if copyV.Type == "" {
 
-	} else if copyV.HeaderType == "http" || copyV.Type == "ws" || copyV.Type == "h2" {
+	} else if copyV.HeaderType == "http" || copyV.Type == "httpupgrade" || copyV.Type == "ws" || copyV.Type == "h2" {
 		info += fmt.Sprintf("%s: %s\n%s: %s\n",
 			color.RedString("Host"), copyV.Host,
 			color.RedString("Path"), copyV.Path)
@@ -198,9 +198,11 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 			}
 			`, string(pathb), string(hostb))))
 		}
+		break
 	case "kcp":
 		s.KCPSettings = &conf.KCPConfig{}
 		s.KCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, v.Type)))
+		break
 	case "ws":
 		s.WSSettings = &conf.WebSocketConfig{}
 		s.WSSettings.Path = v.Path
@@ -208,6 +210,7 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 			"Host":       v.Host,
 			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36",
 		}
+		break
 	case "h2", "http":
 		s.HTTPSettings = &conf.HTTPConfig{
 			Path: v.Path,
@@ -216,6 +219,13 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 			h := conf.StringList(strings.Split(v.Host, ","))
 			s.HTTPSettings.Host = &h
 		}
+		break
+	case "httpupgrade":
+		s.HTTPUPGRADESettings = &conf.HttpUpgradeConfig{
+			Host: v.Host,
+			Path: v.Path,
+		}
+		break
 	case "grpc":
 		if len(v.ServiceName) > 0 {
 			if v.ServiceName[0] == '/' {
@@ -239,6 +249,7 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 			s.GRPCConfig.MultiMode = true
 		}
 		v.Flow = ""
+		break
 	}
 
 	if v.Security == "tls" {

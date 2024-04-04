@@ -95,7 +95,7 @@ func (t *Trojan) DetailsStr() string {
 
 	if copyV.Type == "" {
 
-	} else if copyV.Type == "http" || copyV.Type == "ws" || copyV.Type == "h2" {
+	} else if copyV.Type == "http" || copyV.Type == "httpupgrade" || copyV.Type == "ws" || copyV.Type == "h2" {
 		info += fmt.Sprintf("%s: %s\n%s: %s\n",
 			color.RedString("Host"), copyV.Host,
 			color.RedString("Path"), copyV.Path)
@@ -212,6 +212,11 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 			s.HTTPSettings.Host = &h
 		}
 		break
+	case "httpupgrade":
+		s.HTTPUPGRADESettings = &conf.HttpUpgradeConfig{
+			Host: t.Host,
+			Path: t.Path,
+		}
 	case "grpc":
 		if len(t.ServiceName) > 0 {
 			if t.ServiceName[0] == '/' {
