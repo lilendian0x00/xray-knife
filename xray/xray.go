@@ -111,6 +111,7 @@ func (x *Service) MakeXrayInstance(outbound Protocol) (*core.Instance, error) {
 }
 
 func ParseXrayConfig(configLink string) (Protocol, error) {
+	// Read config from STDIN if it's not passed to the function
 	if configLink == "" {
 		reader := bufio.NewReader(os.Stdin)
 		fmt.Println("Reading config from STDIN:")
@@ -118,6 +119,8 @@ func ParseXrayConfig(configLink string) (Protocol, error) {
 		configLink = text
 		fmt.Printf("\n")
 	}
+	// Remove any space
+	configLink = strings.TrimSpace(configLink)
 
 	var protocol Protocol
 
@@ -135,9 +138,7 @@ func ParseXrayConfig(configLink string) (Protocol, error) {
 		return protocol, errors.New("Invalid protocol type! ")
 	}
 
-	trimmed := strings.TrimSpace(configLink)
-
-	err := protocol.Parse(trimmed)
+	err := protocol.Parse(configLink)
 	if err != nil {
 		return protocol, err
 	}
