@@ -237,6 +237,18 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 
 		t.Flow = ""
 		break
+	case "quic":
+		tp := "none"
+		if t.HeaderType != "" {
+			tp = t.HeaderType
+		}
+		fmt.Println(t.HeaderType)
+		s.QUICSettings = &conf.QUICConfig{
+			Header:   json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, tp))),
+			Security: t.QuicSecurity,
+			Key:      t.Key,
+		}
+		break
 	}
 
 	if t.Security == "tls" {

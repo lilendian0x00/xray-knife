@@ -250,6 +250,18 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 		}
 		v.Flow = ""
 		break
+	case "quic":
+		t := "none"
+		if v.HeaderType != "" {
+			t = v.HeaderType
+		}
+		fmt.Println(v.HeaderType)
+		s.QUICSettings = &conf.QUICConfig{
+			Header:   json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, t))),
+			Security: v.QuicSecurity,
+			Key:      v.Key,
+		}
+		break
 	}
 
 	if v.Security == "tls" {

@@ -57,6 +57,8 @@ type Vless struct {
 	Address        string `json:"add"` // HOST:PORT
 	Encryption     string `json:"encryption"`
 	Flow           string `json:"flow"`
+	QuicSecurity   string `json:"quicSecurity"`
+	Key            string `json:"key"`      // Quic key
 	Security       string `json:"security"` // reality or tls
 	PublicKey      string `json:"pbk"`
 	ShortIds       string `json:"sid"`        // Mandatory, the shortId list available to the client, which can be used to distinguish different clients
@@ -89,6 +91,8 @@ type Trojan struct {
 	Password       string // Password
 	Address        string `json:"add"` // HOST:PORT
 	Flow           string `json:"flow"`
+	QuicSecurity   string `json:"quicSecurity"`
+	Key            string `json:"key"`        // Quic key
 	Security       string `json:"security"`   // tls
 	HeaderType     string `json:"headerType"` // TCP HTTP Obfuscation
 	Host           string `json:"host"`       // HTTP, WS
@@ -103,6 +107,15 @@ type Trojan struct {
 	ServiceName    string `json:"serviceName"` // GRPC
 	Mode           string `json:"mode"`        // GRPC
 	OrigLink       string `json:"-"`           // Original link
+}
+
+type Wireguard struct {
+	Remark       string
+	PublicKey    string `json:"publickey"`
+	SecretKey    string `json:"secretkey"`
+	Endpoint     string
+	LocalAddress string `json:"address"` // Local address IPv4/IPv6 seperated by commas
+	Mtu          int32  `json:"mtu"`
 }
 
 type Socks struct {

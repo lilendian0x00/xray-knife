@@ -134,6 +134,8 @@ func ParseXrayConfig(configLink string) (Protocol, error) {
 		protocol = &Trojan{}
 	} else if strings.HasPrefix(configLink, "socks://") {
 		protocol = &Socks{}
+	} else if strings.HasPrefix(configLink, "wireguard://") {
+		protocol = &Wireguard{}
 	} else {
 		return protocol, errors.New("Invalid protocol type! ")
 	}

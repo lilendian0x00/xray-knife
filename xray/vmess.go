@@ -18,12 +18,9 @@ func method1(v *Vmess, link string) error {
 	if err != nil {
 		return err
 	}
-
 	if err = json.Unmarshal(decoded, v); err != nil {
 		return err
 	}
-
-	fmt.Println(string(decoded))
 	return nil
 }
 
@@ -275,6 +272,17 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 			IdleTimeout:        60,
 			ServiceName:        v.Path,
 		}
+	case "quic":
+		t := "none"
+		if v.Type != "" {
+			t = v.Type
+		}
+		s.QUICSettings = &conf.QUICConfig{
+			Header:   json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, t))),
+			Security: v.Host,
+			Key:      v.Path,
+		}
+		break
 	}
 
 	if v.TLS == "tls" {
