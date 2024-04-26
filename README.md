@@ -48,6 +48,7 @@ Only works on golang version 1.21
 - [X] ~~Add Shadowsocks support (`ss://...`)~~
 - [X] ~~Add Trojan support (`trojan://...`)~~
 - [X] ~~Add Socks support (`socks://...`)~~
+- [X] ~~Add Wireguard support (`wireguard://...`)~~
 - [ ] Load config from json file
 
 ## subs
