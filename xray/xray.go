@@ -86,11 +86,11 @@ func (x *Service) MakeXrayInstance(outbound Protocol) (*core.Instance, error) {
 				EnableDnsLog:  false,
 			}),
 			serial.ToTypedMessage(&dispatcher.Config{}),
-			serial.ToTypedMessage(&proxyman.InboundConfig{}),
 			serial.ToTypedMessage(&proxyman.OutboundConfig{}),
 		},
 	}
 	if x.Inbound != nil {
+		clientConfig.App = append(clientConfig.App, serial.ToTypedMessage(&proxyman.InboundConfig{}))
 		ibc, err := x.Inbound.BuildInboundDetourConfig()
 		if err != nil {
 			return nil, err

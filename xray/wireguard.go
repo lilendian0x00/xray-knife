@@ -20,7 +20,12 @@ func (w *Wireguard) Parse(configLink string) error {
 		return err
 	}
 
-	w.SecretKey = uri.User.String()
+	unescapedSecretKey, err0 := url.PathUnescape(uri.User.String())
+	if err0 != nil {
+		return err0
+	}
+
+	w.SecretKey = unescapedSecretKey
 
 	w.Endpoint = uri.Host
 
