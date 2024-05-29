@@ -2,6 +2,8 @@ module github.com/lilendian0x00/xray-knife
 
 go 1.22
 
+toolchain go1.22.1
+
 require (
 	github.com/fatih/color v1.16.0
 	github.com/gocarina/gocsv v0.0.0-20231116093920-b87c2d0e983a
