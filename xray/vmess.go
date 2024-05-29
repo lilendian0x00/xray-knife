@@ -21,6 +21,10 @@ func method1(v *Vmess, link string) error {
 	if err = json.Unmarshal(decoded, v); err != nil {
 		return err
 	}
+
+	if utils.IsIPv6(v.Address) {
+		v.Address = "[" + v.Address + "]"
+	}
 	return nil
 }
 
@@ -46,6 +50,10 @@ func method2(v *Vmess, link string) error {
 	v.Address, v.Port, err = net.SplitHostPort(uri.Host)
 	if err != nil {
 		return err
+	}
+
+	if utils.IsIPv6(v.Address) {
+		v.Address = "[" + v.Address + "]"
 	}
 	//parseUint, err := strconv.ParseUint(suhp[2], 10, 16)
 	//if err != nil {

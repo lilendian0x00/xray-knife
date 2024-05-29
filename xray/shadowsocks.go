@@ -52,6 +52,10 @@ func (s *Shadowsocks) Parse(configLink string) error {
 		return err
 	}
 
+	if utils.IsIPv6(s.Address) {
+		s.Address = "[" + s.Address + "]"
+	}
+
 	s.Remark, err = url.PathUnescape(uri.Fragment)
 	if err != nil {
 		s.Remark = uri.Fragment

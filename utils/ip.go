@@ -30,3 +30,11 @@ func CIDRtoListIP(cidr string) ([]string, error) {
 	}
 	return IPs, nil
 }
+
+func IsIPv6(ipStr string) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false // not a valid IP address
+	}
+	return ip.To4() == nil // if To4() returns nil, it's not an IPv4 address, hence it's IPv6
+}

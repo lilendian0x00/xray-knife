@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/fatih/color"
+	"github.com/lilendian0x00/xray-knife/utils"
 	"github.com/xtls/xray-core/infra/conf"
 	"net"
 	"net/url"
@@ -26,6 +27,9 @@ func (t *Trojan) Parse(configLink string) error {
 		return err
 	}
 
+	if utils.IsIPv6(t.Address) {
+		t.Address = "[" + t.Address + "]"
+	}
 	// Get the type of the struct
 	structType := reflect.TypeOf(*t)
 
@@ -242,7 +246,7 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 		if t.HeaderType != "" {
 			tp = t.HeaderType
 		}
-		fmt.Println(t.HeaderType)
+
 		s.QUICSettings = &conf.QUICConfig{
 			Header:   json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, tp))),
 			Security: t.QuicSecurity,

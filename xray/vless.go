@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/fatih/color"
+	"github.com/lilendian0x00/xray-knife/utils"
 	"github.com/xtls/xray-core/infra/conf"
 	"net"
 	"net/url"
@@ -26,6 +27,10 @@ func (v *Vless) Parse(configLink string) error {
 	v.Address, v.Port, err = net.SplitHostPort(uri.Host)
 	if err != nil {
 		return err
+	}
+
+	if utils.IsIPv6(v.Address) {
+		v.Address = "[" + v.Address + "]"
 	}
 
 	// Get the type of the struct
@@ -255,7 +260,7 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 		if v.HeaderType != "" {
 			t = v.HeaderType
 		}
-		fmt.Println(v.HeaderType)
+
 		s.QUICSettings = &conf.QUICConfig{
 			Header:   json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, t))),
 			Security: v.QuicSecurity,
