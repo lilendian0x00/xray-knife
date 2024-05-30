@@ -66,5 +66,4 @@ Only works on golang version 1.21
 - [X] ~~Option to switch outbound connection automatically based on passed parameter (E.g. interval, availability) (rotating proxy)~~
 
 ## scan (under development)
-- [ ] Cloudflare best IP finder (whitelist scanner)
-- [ ] Xray REALITY scanner (TLS, H2)
+- [ ] Cloudflare white-list IP scanner
