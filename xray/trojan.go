@@ -99,7 +99,7 @@ func (t *Trojan) DetailsStr() string {
 
 	if copyV.Type == "" {
 
-	} else if copyV.Type == "http" || copyV.Type == "httpupgrade" || copyV.Type == "ws" || copyV.Type == "h2" {
+	} else if copyV.Type == "http" || copyV.Type == "httpupgrade" || copyV.Type == "ws" || copyV.Type == "h2" || copyV.Type == "splithttp" {
 		info += fmt.Sprintf("%s: %s\n%s: %s\n",
 			color.RedString("Host"), copyV.Host,
 			color.RedString("Path"), copyV.Path)
@@ -218,6 +218,11 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 		break
 	case "httpupgrade":
 		s.HTTPUPGRADESettings = &conf.HttpUpgradeConfig{
+			Host: t.Host,
+			Path: t.Path,
+		}
+	case "splithttp":
+		s.SplitHTTPSettings = &conf.SplitHTTPConfig{
 			Host: t.Host,
 			Path: t.Path,
 		}
