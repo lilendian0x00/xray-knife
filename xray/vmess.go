@@ -263,6 +263,11 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 			Host: v.Host,
 			Path: v.Path,
 		}
+	case "splithttp":
+		s.SplitHTTPSettings = &conf.SplitHTTPConfig{
+			Host: v.Host,
+			Path: v.Path,
+		}
 	case "grpc":
 		if len(v.Path) > 0 {
 			if v.Path[0] == '/' {
