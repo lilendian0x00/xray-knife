@@ -74,8 +74,10 @@ var ProxyCmd = &cobra.Command{
 			Address: listenAddr,
 			Port:    strconv.Itoa(int(listenPort)),
 		}
+
 		// Clear the terminal
 		utils.ClearTerminal()
+
 		// Make a new xray service
 		xs := xray.NewXrayService(verbose, insecureTLS, xray.WithInbound(inbound))
 		examiner := xray.Examiner{
@@ -153,48 +155,6 @@ var ProxyCmd = &cobra.Command{
 					}
 				}
 
-				// Check for config availability
-				//if len(configs) > 1 {
-				//	// If we have more have 1, then select another inside
-				//	lastIndex = currentIndex
-				//	for currentIndex == lastIndex {
-				//		currentIndex = r.Intn(len(configs))
-				//	}
-				//} else {
-				//	// If we have 1 config then set the index to 0
-				//	currentIndex = 0
-				//}
-
-				//var examinerErr error
-				//var res xray.Result
-				//
-				//for len(configs) > 1 {
-				//	res, examinerErr = examiner.ExamineConfig(links[currentIndex])
-				//	if examinerErr != nil {
-				//		//customlog.Printf(customlog.Failure, "%s\n", err)
-				//		//configs = append(configs[:currentIndex], configs[currentIndex+1:]...)
-				//	}
-				//	if res.Status == "passed" {
-				//		break
-				//	}
-				//	fmt.Println(res.Status)
-				//	configs = append(configs[:currentIndex], configs[currentIndex+1:]...)
-				//	// Select a new index
-				//	lastIndex = currentIndex
-				//	for currentIndex == lastIndex {
-				//		currentIndex = r.Intn(len(configs))
-				//	}
-				//}
-				//fmt.Println(res.Status)
-
-				//if len(configs) == 1 {
-				//	res, examinerErr = examiner.ExamineConfig(links[currentIndex])
-				//	if examinerErr != nil {
-				//		customlog.Printf(customlog.Failure, "There is no functional outbound config remaining!\n")
-				//		os.Exit(1)
-				//	}
-				//}
-
 				fmt.Println(color.RedString("==========OUTBOUND=========="))
 				fmt.Printf("%v", currentConfig.DetailsStr())
 				fmt.Println(color.RedString("============================"))
@@ -217,7 +177,65 @@ var ProxyCmd = &cobra.Command{
 				customlog.Printf(customlog.Success, "Started listening for new connections...")
 				fmt.Printf("\n")
 
-				time.Sleep(time.Duration(interval) * time.Second)
+				//time.Sleep(time.Duration(interval) * time.Second)
+
+				clickChan := make(chan bool)
+				defer close(clickChan)
+
+				finishChan := make(chan bool)
+				defer close(finishChan)
+
+				timeout := time.Duration(interval) * time.Second
+
+				go func() {
+					// Timer
+					ticker := time.NewTicker(time.Second)
+					defer ticker.Stop()
+
+					endTime := time.Now().Add(time.Duration(interval) * time.Second)
+
+					for {
+						select {
+						case <-finishChan:
+							return
+						case <-ticker.C:
+							remaining := endTime.Sub(time.Now())
+							if remaining < 0 {
+								remaining = 0
+							}
+							fmt.Printf("\r%s", color.YellowString("[>] Enter to load the next config [Reloading in %v] >>> ", remaining.Round(time.Second)))
+
+							break
+						}
+					}
+				}()
+
+				go func() {
+					for {
+						consoleReader := bufio.NewReaderSize(os.Stdin, 1)
+						select {
+						case <-time.After(timeout):
+							return
+						default:
+							input, _ := consoleReader.ReadByte()
+							ascii := input
+							if ascii == 13 { // Enter => 13
+								finishChan <- true
+								clickChan <- true
+								return
+							}
+						}
+					}
+				}()
+
+				select {
+				case <-clickChan:
+					return
+				case <-time.After(timeout):
+					finishChan <- true
+					fmt.Printf("\n") // Need new line coz we got input
+					return
+				}
 			}
 
 			for {
