@@ -13,8 +13,16 @@ import (
 	"github.com/xtls/xray-core/infra/conf"
 )
 
+func NewShadowsocks() Protocol {
+	return &Shadowsocks{}
+}
+
+func (s *Shadowsocks) Name() string {
+	return "shadowsocks"
+}
+
 func (s *Shadowsocks) Parse(configLink string) error {
-	if !strings.HasPrefix(configLink, "ss://") {
+	if !strings.HasPrefix(configLink, ShadowsocksIdentifier) {
 		return fmt.Errorf("shadowsocks unreconized: %s", configLink)
 	}
 
@@ -78,8 +86,8 @@ func (s *Shadowsocks) Parse(configLink string) error {
 }
 
 func (s *Shadowsocks) DetailsStr() string {
-	info := fmt.Sprintf("%s: Shadowsocks\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n%s: %s\n",
-		color.RedString("Protocol"),
+	info := fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n%s: %s\n",
+		color.RedString("Protocol"), s.Name(),
 		color.RedString("Remark"), s.Remark,
 		color.RedString("IP"), s.Address,
 		color.RedString("Port"), s.Port,
@@ -90,7 +98,7 @@ func (s *Shadowsocks) DetailsStr() string {
 
 func (s *Shadowsocks) ConvertToGeneralConfig() GeneralConfig {
 	var g GeneralConfig
-	g.Protocol = "Shadowsocks"
+	g.Protocol = s.Name()
 	g.Address = s.Address
 	g.ID = s.Password
 	g.Port = s.Port
@@ -103,7 +111,7 @@ func (s *Shadowsocks) ConvertToGeneralConfig() GeneralConfig {
 func (s *Shadowsocks) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
 	out := &conf.OutboundDetourConfig{}
 	out.Tag = "proxy"
-	out.Protocol = "shadowsocks"
+	out.Protocol = s.Name()
 
 	streamConf := &conf.StreamConfig{}
 

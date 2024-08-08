@@ -1,6 +1,19 @@
 package xray
 
-import "github.com/xtls/xray-core/infra/conf"
+import (
+	"errors"
+	"github.com/xtls/xray-core/infra/conf"
+	"strings"
+)
+
+const (
+	vmessIdentifier       = "vmess://"
+	vlessIdentifier       = "vless://"
+	trojanIdentifier      = "trojan://"
+	ShadowsocksIdentifier = "ss://"
+	wireguardIdentifier   = "wireguard://"
+	socksIdentifier       = "socks://"
+)
 
 type Protocol interface {
 	Parse(configLink string) error
@@ -8,6 +21,25 @@ type Protocol interface {
 	BuildInboundDetourConfig() (*conf.InboundDetourConfig, error)
 	DetailsStr() string
 	ConvertToGeneralConfig() GeneralConfig
+}
+
+func CreateProtocol(configLink string) (Protocol, error) {
+	switch {
+	case strings.HasPrefix(configLink, vmessIdentifier):
+		return NewVmess(), nil
+	case strings.HasPrefix(configLink, vlessIdentifier):
+		return NewVless(), nil
+	case strings.HasPrefix(configLink, ShadowsocksIdentifier):
+		return NewShadowsocks(), nil
+	case strings.HasPrefix(configLink, trojanIdentifier):
+		return NewTrojan(), nil
+	case strings.HasPrefix(configLink, socksIdentifier):
+		return NewSocks(), nil
+	case strings.HasPrefix(configLink, wireguardIdentifier):
+		return NewWireguard(), nil
+	default:
+		return nil, errors.New("invalid protocol type")
+	}
 }
 
 type GeneralConfig struct {
@@ -106,7 +138,13 @@ type Trojan struct {
 	Remark         string // Config's name
 	ServiceName    string `json:"serviceName"` // GRPC
 	Mode           string `json:"mode"`        // GRPC
-	OrigLink       string `json:"-"`           // Original link
+
+	// Yes, Trojan can have reality too xD
+	PublicKey string `json:"pbk"`
+	ShortIds  string `json:"sid"` // Mandatory, the shortId list available to the client, which can be used to distinguish different clients
+	SpiderX   string `json:"spx"` // Reality path
+
+	OrigLink string `json:"-"` // Original link
 }
 
 type Wireguard struct {

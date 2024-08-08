@@ -10,8 +10,16 @@ import (
 	"strings"
 )
 
+func NewWireguard() Protocol {
+	return &Wireguard{}
+}
+
+func (w *Wireguard) Name() string {
+	return "wireguard"
+}
+
 func (w *Wireguard) Parse(configLink string) error {
-	if !strings.HasPrefix(configLink, "wireguard://") {
+	if !strings.HasPrefix(configLink, wireguardIdentifier) {
 		return fmt.Errorf("wireguard unreconized: %s", configLink)
 	}
 
@@ -66,7 +74,7 @@ func (w *Wireguard) Parse(configLink string) error {
 }
 
 func (w *Wireguard) DetailsStr() string {
-	info := fmt.Sprintf("%s: Wireguard\n%s: %s\n%s: %s\n%s: %d\n%s: %s\n%s: %v\n%s: %s\n",
+	info := fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %d\n%s: %s\n%s: %v\n%s: %s\n", w.Name(),
 		color.RedString("Protocol"),
 		color.RedString("Remark"), w.Remark,
 		color.RedString("Endpoint"), w.Endpoint,
@@ -81,7 +89,7 @@ func (w *Wireguard) DetailsStr() string {
 
 func (w *Wireguard) ConvertToGeneralConfig() GeneralConfig {
 	var g GeneralConfig
-	g.Protocol = "wireguard"
+	g.Protocol = w.Name()
 	g.Address = w.Endpoint
 
 	return g
@@ -90,7 +98,7 @@ func (w *Wireguard) ConvertToGeneralConfig() GeneralConfig {
 func (w *Wireguard) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
 	out := &conf.OutboundDetourConfig{}
 	out.Tag = "proxy"
-	out.Protocol = "wireguard"
+	out.Protocol = w.Name()
 
 	//c := conf.WireGuardConfig{
 	//	IsClient:   true,

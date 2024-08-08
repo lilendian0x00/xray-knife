@@ -12,6 +12,14 @@ import (
 	"github.com/xtls/xray-core/infra/conf"
 )
 
+func NewVmess() Protocol {
+	return &Vmess{}
+}
+
+func (v *Vmess) Name() string {
+	return "vmess"
+}
+
 func method1(v *Vmess, link string) error {
 	b64encoded := link[8:]
 	decoded, err := utils.Base64Decode(b64encoded)
@@ -37,7 +45,7 @@ func method2(v *Vmess, link string) error {
 	if err != nil {
 		return err
 	}
-	link = "vmess://" + string(decoded) + "?" + uri.RawQuery
+	link = vmessIdentifier + string(decoded) + "?" + uri.RawQuery
 
 	uri, err = url.Parse(link)
 	if err != nil {
@@ -100,7 +108,7 @@ func method2(v *Vmess, link string) error {
 }
 
 func (v *Vmess) Parse(configLink string) error {
-	if !strings.HasPrefix(configLink, "vmess://") {
+	if !strings.HasPrefix(configLink, vmessIdentifier) {
 		return fmt.Errorf("vmess unreconized: %s", configLink)
 	}
 
@@ -125,8 +133,8 @@ func (v *Vmess) Parse(configLink string) error {
 
 func (v *Vmess) DetailsStr() string {
 	copyV := *v
-	info := fmt.Sprintf("%s: Vmess\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n",
-		color.RedString("Protocol"),
+	info := fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n",
+		color.RedString("Protocol"), v.Name(),
 		color.RedString("Remark"), copyV.Remark,
 		color.RedString("Network"), copyV.Network,
 		color.RedString("Address"), copyV.Address,
@@ -184,7 +192,7 @@ func (v *Vmess) DetailsStr() string {
 
 func (v *Vmess) ConvertToGeneralConfig() GeneralConfig {
 	var g GeneralConfig
-	g.Protocol = "vmess"
+	g.Protocol = v.Name()
 	g.Address = v.Address
 	g.Aid = fmt.Sprintf("%v", v.Aid)
 	g.Host = v.Host
@@ -211,7 +219,7 @@ func (v *Vmess) ConvertToGeneralConfig() GeneralConfig {
 func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
 	out := &conf.OutboundDetourConfig{}
 	out.Tag = "proxy"
-	out.Protocol = "vmess"
+	out.Protocol = v.Name()
 
 	p := conf.TransportProtocol(v.Network)
 	s := &conf.StreamConfig{

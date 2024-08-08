@@ -12,8 +12,16 @@ import (
 	"strings"
 )
 
+func NewTrojan() Protocol {
+	return &Trojan{}
+}
+
+func (t *Trojan) Name() string {
+	return "trojan"
+}
+
 func (t *Trojan) Parse(configLink string) error {
-	if !strings.HasPrefix(configLink, "trojan://") {
+	if !strings.HasPrefix(configLink, trojanIdentifier) {
 		return fmt.Errorf("trojan unreconized: %s", configLink)
 	}
 	uri, err := url.Parse(configLink)
@@ -87,8 +95,8 @@ func (t *Trojan) DetailsStr() string {
 	if copyV.Flow == "" || copyV.Type == "grpc" {
 		copyV.Flow = "none"
 	}
-	info := fmt.Sprintf("%s: Trojan\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n%s: %s\n",
-		color.RedString("Protocol"),
+	info := fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n%s: %s\n",
+		color.RedString("Protocol"), t.Name(),
 		color.RedString("Remark"), t.Remark,
 		color.RedString("Network"), t.Type,
 		color.RedString("Address"), t.Address,
@@ -112,7 +120,19 @@ func (t *Trojan) DetailsStr() string {
 		info += fmt.Sprintf("%s: %s\n", color.RedString("ServiceName"), copyV.ServiceName)
 	}
 
-	if copyV.Security == "tls" {
+	if copyV.Security == "reality" {
+		info += fmt.Sprintf("%s: reality\n", color.RedString("TLS"))
+		if copyV.SpiderX == "" {
+			copyV.SpiderX = "none"
+		}
+		info += fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %s\n%s: %s\n",
+			color.RedString("Public key"), copyV.PublicKey,
+			color.RedString("SNI"), copyV.SNI,
+			color.RedString("ShortID"), copyV.ShortIds,
+			color.RedString("SpiderX"), copyV.SpiderX,
+			color.RedString("Fingerprint"), copyV.TlsFingerprint,
+		)
+	} else if copyV.Security == "tls" {
 		info += fmt.Sprintf("%s: tls\n", color.RedString("TLS"))
 		if len(copyV.SNI) == 0 {
 			if copyV.Host != "" {
@@ -139,7 +159,7 @@ func (t *Trojan) DetailsStr() string {
 
 func (t *Trojan) ConvertToGeneralConfig() GeneralConfig {
 	var g GeneralConfig
-	g.Protocol = "trojan"
+	g.Protocol = t.Name()
 	g.Address = t.Address
 	g.Host = t.Host
 	g.ID = t.Password
@@ -165,7 +185,7 @@ func (t *Trojan) ConvertToGeneralConfig() GeneralConfig {
 func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
 	out := &conf.OutboundDetourConfig{}
 	out.Tag = "proxy"
-	out.Protocol = "trojan"
+	out.Protocol = t.Name()
 
 	p := conf.TransportProtocol(t.Type)
 	s := &conf.StreamConfig{
@@ -280,6 +300,15 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 		if t.ALPN != "" {
 			s.TLSSettings.ALPN = &conf.StringList{t.ALPN}
 		}
+	} else if t.Security == "reality" {
+		s.REALITYSettings = &conf.REALITYConfig{
+			Show:        false,
+			Fingerprint: t.TlsFingerprint,
+			ServerName:  t.SNI,
+			PublicKey:   t.PublicKey,
+			ShortId:     t.ShortIds,
+			SpiderX:     t.SpiderX,
+		}
 	}
 
 	out.StreamSetting = s
@@ -299,6 +328,6 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 	return out, nil
 }
 
-func (v *Trojan) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
+func (t *Trojan) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
 	return nil, nil
 }

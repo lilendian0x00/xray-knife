@@ -15,8 +15,16 @@ import (
 	"github.com/xtls/xray-core/infra/conf"
 )
 
+func NewSocks() Protocol {
+	return &Socks{}
+}
+
+func (s *Socks) Name() string {
+	return "socks"
+}
+
 func (s *Socks) Parse(configLink string) error {
-	if !strings.HasPrefix(configLink, "socks://") {
+	if !strings.HasPrefix(configLink, socksIdentifier) {
 		return fmt.Errorf("socks unreconized: %s", configLink)
 	}
 
@@ -47,8 +55,8 @@ func (s *Socks) Parse(configLink string) error {
 func (s *Socks) DetailsStr() string {
 	copyV := *s
 
-	info := fmt.Sprintf("%s: Socks\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n",
-		color.RedString("Protocol"),
+	info := fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n",
+		color.RedString("Protocol"), s.Name(),
 		color.RedString("Remark"), copyV.Remark,
 		color.RedString("Network"), "tcp",
 		color.RedString("Address"), copyV.Address,
@@ -66,7 +74,7 @@ func (s *Socks) DetailsStr() string {
 
 func (s *Socks) ConvertToGeneralConfig() GeneralConfig {
 	var g GeneralConfig
-	g.Protocol = "socks"
+	g.Protocol = s.Name()
 	g.Address = s.Address
 	g.Port = fmt.Sprintf("%v", s.Port)
 	g.Remark = s.Remark
@@ -112,8 +120,8 @@ func (s *Socks) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 func (s *Socks) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
 	p := conf.TransportProtocol("tcp")
 	in := &conf.InboundDetourConfig{
-		Protocol: "socks",
-		Tag:      "socks",
+		Protocol: s.Name(),
+		Tag:      s.Name(),
 		Settings: nil,
 		StreamSetting: &conf.StreamConfig{
 			Network: &p,

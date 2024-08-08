@@ -119,30 +119,21 @@ func ParseXrayConfig(configLink string) (Protocol, error) {
 		configLink = text
 		fmt.Printf("\n")
 	}
+
 	// Remove any space
 	configLink = strings.TrimSpace(configLink)
 
-	var protocol Protocol
-
-	if strings.HasPrefix(configLink, "vmess://") {
-		protocol = &Vmess{}
-	} else if strings.HasPrefix(configLink, "vless://") {
-		protocol = &Vless{}
-	} else if strings.HasPrefix(configLink, "ss://") {
-		protocol = &Shadowsocks{}
-	} else if strings.HasPrefix(configLink, "trojan://") {
-		protocol = &Trojan{}
-	} else if strings.HasPrefix(configLink, "socks://") {
-		protocol = &Socks{}
-	} else if strings.HasPrefix(configLink, "wireguard://") {
-		protocol = &Wireguard{}
-	} else {
-		return protocol, errors.New("Invalid protocol type! ")
+	// Factory method to create protocol
+	protocol, err := CreateProtocol(configLink)
+	if err != nil {
+		return nil, errors.New("invalid protocol type")
 	}
 
-	err := protocol.Parse(configLink)
+	// Parse protocol from link
+	err = protocol.Parse(configLink)
 	if err != nil {
 		return protocol, err
 	}
+
 	return protocol, nil
 }

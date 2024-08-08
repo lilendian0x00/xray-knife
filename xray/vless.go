@@ -12,8 +12,16 @@ import (
 	"strings"
 )
 
+func NewVless() Protocol {
+	return &Vless{}
+}
+
+func (v *Vless) Name() string {
+	return "vless"
+}
+
 func (v *Vless) Parse(configLink string) error {
-	if !strings.HasPrefix(configLink, "vless://") {
+	if !strings.HasPrefix(configLink, vlessIdentifier) {
 		return fmt.Errorf("vless unreconized: %s", configLink)
 	}
 
@@ -86,8 +94,8 @@ func (v *Vless) DetailsStr() string {
 	if copyV.Flow == "" || copyV.Type == "grpc" {
 		copyV.Flow = "none"
 	}
-	info := fmt.Sprintf("%s: Vless\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n%s: %s\n",
-		color.RedString("Protocol"),
+	info := fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n%s: %s\n",
+		color.RedString("Protocol"), v.Name(),
 		color.RedString("Remark"), v.Remark,
 		color.RedString("Network"), v.Type,
 		color.RedString("Address"), v.Address,
@@ -148,7 +156,7 @@ func (v *Vless) DetailsStr() string {
 
 func (v *Vless) ConvertToGeneralConfig() GeneralConfig {
 	var g GeneralConfig
-	g.Protocol = "vless"
+	g.Protocol = v.Name()
 	g.Address = v.Address
 	g.Host = v.Host
 	g.ID = v.ID
@@ -174,7 +182,7 @@ func (v *Vless) ConvertToGeneralConfig() GeneralConfig {
 func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
 	out := &conf.OutboundDetourConfig{}
 	out.Tag = "proxy"
-	out.Protocol = "vless"
+	out.Protocol = v.Name()
 
 	p := conf.TransportProtocol(v.Type)
 	s := &conf.StreamConfig{
