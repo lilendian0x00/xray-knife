@@ -36,6 +36,8 @@ func method1(v *Vmess, link string) error {
 	return nil
 }
 
+// Example:
+// vmess://YXV0bzpjYmI0OTM1OC00NGQxLTQ4MmYtYWExNC02ODA3NzNlNWNjMzdAc25hcHBmb29kLmlyOjQ0Mw?remarks=sth&obfsParam=huhierg.com&path=/&obfs=websocket&tls=1&peer=gdfgreg.com&alterId=0
 func method2(v *Vmess, link string) error {
 	uri, err := url.Parse(link)
 	if err != nil {
@@ -107,6 +109,10 @@ func method2(v *Vmess, link string) error {
 	return nil
 }
 
+//func method3(v *Vmess, link string) error {
+//
+//}
+
 func (v *Vmess) Parse(configLink string) error {
 	if !strings.HasPrefix(configLink, vmessIdentifier) {
 		return fmt.Errorf("vmess unreconized: %s", configLink)
@@ -114,10 +120,10 @@ func (v *Vmess) Parse(configLink string) error {
 
 	var err error = nil
 
-	if err = method1(v, configLink); err == nil {
-
-	} else if err = method2(v, configLink); err == nil {
-
+	if err = method1(v, configLink); err != nil {
+		if err = method2(v, configLink); err != nil {
+			return err
+		}
 	}
 
 	v.OrigLink = configLink

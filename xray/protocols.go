@@ -80,7 +80,13 @@ type Vmess struct {
 	ALPN           string      `json:"alpn"` // Application-Layer Protocol Negotiation
 	TlsFingerprint string      `json:"fp"`   // TLS fingerprint
 	Type           string      `json:"type"` // Used for HTTP Obfuscation
-	OrigLink       string      `json:"-"`    // Original link
+
+	//// It's also possible for Vmess to have REALITY...
+	//PublicKey string `json:"pbk"`
+	//ShortIds  string `json:"sid"` // Mandatory, the shortId list available to the client, which can be used to distinguish different clients
+	//SpiderX   string `json:"spx"` // Reality path
+
+	OrigLink string `json:"-"` // Original link
 }
 
 type Vless struct {
