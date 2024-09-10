@@ -1,67 +1,20 @@
-package xray
+package singbox
 
 import (
-	"errors"
-	"github.com/xtls/xray-core/infra/conf"
-	"strings"
-)
-
-const (
-	vmessIdentifier       = "vmess://"
-	vlessIdentifier       = "vless://"
-	trojanIdentifier      = "trojan://"
-	ShadowsocksIdentifier = "ss://"
-	wireguardIdentifier   = "wireguard://"
-	socksIdentifier       = "socks://"
+	"context"
+	"github.com/lilendian0x00/xray-knife/internal/protocol"
+	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/common/logger"
 )
 
 type Protocol interface {
-	Parse(configLink string) error
-	BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error)
-	BuildInboundDetourConfig() (*conf.InboundDetourConfig, error)
+	Parse() error
 	DetailsStr() string
-	ConvertToGeneralConfig() GeneralConfig
-}
-
-func CreateProtocol(configLink string) (Protocol, error) {
-	switch {
-	case strings.HasPrefix(configLink, vmessIdentifier):
-		return NewVmess(), nil
-	case strings.HasPrefix(configLink, vlessIdentifier):
-		return NewVless(), nil
-	case strings.HasPrefix(configLink, ShadowsocksIdentifier):
-		return NewShadowsocks(), nil
-	case strings.HasPrefix(configLink, trojanIdentifier):
-		return NewTrojan(), nil
-	case strings.HasPrefix(configLink, socksIdentifier):
-		return NewSocks(), nil
-	case strings.HasPrefix(configLink, wireguardIdentifier):
-		return NewWireguard(), nil
-	default:
-		return nil, errors.New("invalid protocol type")
-	}
-}
-
-type GeneralConfig struct {
-	Protocol       string
-	Address        string
-	Security       string
-	Aid            string
-	Host           string
-	ID             string
-	Network        string
-	Path           string
-	Port           string
-	Remark         string
-	TLS            string
-	SNI            string
-	ALPN           string
-	TlsFingerprint string
-	Authority      string
-	ServiceName    string
-	Mode           string
-	Type           string
-	OrigLink       string
+	ConvertToGeneralConfig() protocol.GeneralConfig
+	CraftOutboundOptions() (*option.Outbound, error)
+	CraftInboundOptions() *option.Inbound
+	CraftOutbound(ctx context.Context, l logger.ContextLogger) (adapter.Outbound, error)
 }
 
 type Vmess struct {
@@ -111,7 +64,6 @@ type Vless struct {
 	TlsFingerprint string `json:"fp"`          // TLS fingerprint
 	Type           string `json:"type"`        // Network
 	Remark         string `json:"ps"`          // Config's name
-	Authority      string `json:"authority"`   // GRPC
 	ServiceName    string `json:"serviceName"` // GRPC
 	Mode           string `json:"mode"`        // GRPC
 	OrigLink       string `json:"-"`           // Original link
@@ -144,7 +96,6 @@ type Trojan struct {
 	AllowInsecure  string `json:"allowInsecure"` // Insecure TLS
 	Type           string `json:"type"`          // Network
 	Remark         string // Config's name
-	Authority      string `json:"authority"`   // GRPC
 	ServiceName    string `json:"serviceName"` // GRPC
 	Mode           string `json:"mode"`        // GRPC
 
@@ -163,6 +114,8 @@ type Wireguard struct {
 	Endpoint     string
 	LocalAddress string `json:"address"` // Local address IPv4/IPv6 seperated by commas
 	Mtu          int32  `json:"mtu"`
+
+	OrigLink string `json:"-"` // Original link
 }
 
 type Socks struct {
@@ -172,4 +125,16 @@ type Socks struct {
 	Username string // Username
 	Password string // Password
 	OrigLink string // Original link
+}
+
+type Hysteria2 struct {
+	Remark        string
+	Address       string
+	Port          string
+	Password      string
+	ObfusType     string      `json:"obfs"`
+	ObfusPassword string      `json:"obfs-password"`
+	SNI           string      `json:"sni"`
+	Insecure      interface{} `json:"insecure"`
+	OrigLink      string      // Original link
 }

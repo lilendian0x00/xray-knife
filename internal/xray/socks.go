@@ -3,6 +3,7 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/lilendian0x00/xray-knife/internal/protocol"
 	"log"
 	"net"
 	"net/url"
@@ -15,22 +16,22 @@ import (
 	"github.com/xtls/xray-core/infra/conf"
 )
 
-func NewSocks() Protocol {
-	return &Socks{}
+func NewSocks(link string) Protocol {
+	return &Socks{OrigLink: link}
 }
 
 func (s *Socks) Name() string {
 	return "socks"
 }
 
-func (s *Socks) Parse(configLink string) error {
-	if !strings.HasPrefix(configLink, socksIdentifier) {
-		return fmt.Errorf("socks unreconized: %s", configLink)
+func (s *Socks) Parse() error {
+	if !strings.HasPrefix(s.OrigLink, protocol.SocksIdentifier) {
+		return fmt.Errorf("socks unreconized: %s", s.OrigLink)
 	}
 
 	var err error = nil
 
-	uri, err := url.Parse(configLink)
+	uri, err := url.Parse(s.OrigLink)
 	if err != nil {
 		return err
 	}
@@ -47,7 +48,7 @@ func (s *Socks) Parse(configLink string) error {
 		s.Password = creds[1]
 	}
 
-	s.OrigLink = configLink
+	s.OrigLink = s.OrigLink
 
 	return err
 }
@@ -72,8 +73,7 @@ func (s *Socks) DetailsStr() string {
 	return info
 }
 
-func (s *Socks) ConvertToGeneralConfig() GeneralConfig {
-	var g GeneralConfig
+func (s *Socks) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Protocol = s.Name()
 	g.Address = s.Address
 	g.Port = fmt.Sprintf("%v", s.Port)

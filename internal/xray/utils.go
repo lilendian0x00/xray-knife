@@ -25,11 +25,27 @@ func MeasureDelay(inst *core.Instance, timeout time.Duration, showBody bool, des
 	return time.Since(start).Milliseconds(), code, nil
 }
 
+func CoreHTTPRequest(inst *core.Instance, timeout time.Duration, method, dest string) (int, []byte, error) {
+	client, err := httpClient(inst, timeout)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	req, _ := http.NewRequest(method, dest, nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		return -1, nil, err
+	}
+	defer resp.Body.Close()
+
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, b, nil
+}
+
 func httpClient(inst *core.Instance, timeout time.Duration) (*http.Client, error) {
 	if inst == nil {
 		return nil, errors.New("core instance nil")
 	}
-
 	tr := &http.Transport{
 		DisableKeepAlives: true,
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -47,23 +63,6 @@ func httpClient(inst *core.Instance, timeout time.Duration) (*http.Client, error
 	}
 
 	return c, nil
-}
-
-func CoreHTTPRequest(inst *core.Instance, timeout time.Duration, method, dest string) (int, []byte, error) {
-	c, err := httpClient(inst, timeout)
-	if err != nil {
-		return 0, nil, err
-	}
-
-	req, _ := http.NewRequest(method, dest, nil)
-	resp, err := c.Do(req)
-	if err != nil {
-		return -1, nil, err
-	}
-	defer resp.Body.Close()
-
-	b, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, b, nil
 }
 
 func CoreHTTPRequestCustom(inst *core.Instance, timeout time.Duration, req *http.Request) (int, []byte, error) {

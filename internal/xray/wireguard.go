@@ -4,26 +4,27 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/fatih/color"
+	"github.com/lilendian0x00/xray-knife/internal/protocol"
 	"github.com/xtls/xray-core/infra/conf"
 	"net/url"
 	"reflect"
 	"strings"
 )
 
-func NewWireguard() Protocol {
-	return &Wireguard{}
+func NewWireguard(link string) Protocol {
+	return &Wireguard{OrigLink: link}
 }
 
 func (w *Wireguard) Name() string {
 	return "wireguard"
 }
 
-func (w *Wireguard) Parse(configLink string) error {
-	if !strings.HasPrefix(configLink, wireguardIdentifier) {
-		return fmt.Errorf("wireguard unreconized: %s", configLink)
+func (w *Wireguard) Parse() error {
+	if !strings.HasPrefix(w.OrigLink, protocol.WireguardIdentifier) {
+		return fmt.Errorf("wireguard unreconized: %s", w.OrigLink)
 	}
 
-	uri, err := url.Parse(configLink)
+	uri, err := url.Parse(w.OrigLink)
 	if err != nil {
 		return err
 	}
@@ -87,8 +88,7 @@ func (w *Wireguard) DetailsStr() string {
 	return info
 }
 
-func (w *Wireguard) ConvertToGeneralConfig() GeneralConfig {
-	var g GeneralConfig
+func (w *Wireguard) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Protocol = w.Name()
 	g.Address = w.Endpoint
 

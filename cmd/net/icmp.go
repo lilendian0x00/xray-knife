@@ -2,13 +2,13 @@ package net
 
 import (
 	"fmt"
+	"github.com/lilendian0x00/xray-knife/internal/xray"
 	"net"
 	"os"
 
-	"github.com/lilendian0x00/xray-knife/v2/utils/customlog"
-	"github.com/lilendian0x00/xray-knife/v2/xray"
+	"github.com/lilendian0x00/xray-knife/utils/customlog"
 
-	"github.com/lilendian0x00/xray-knife/v2/network"
+	"github.com/lilendian0x00/xray-knife/network"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +23,9 @@ var IcmpCmd = &cobra.Command{
 	Short: "PING or ICMP test config's host",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		parsed, err := xray.ParseXrayConfig(configLink)
+		x := xray.NewXrayService(false, false)
+
+		parsed, err := x.CreateProtocol(configLink)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%v", err)
 			os.Exit(1)

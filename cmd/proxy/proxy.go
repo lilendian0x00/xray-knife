@@ -3,30 +3,32 @@ package proxy
 import (
 	"bufio"
 	"fmt"
+	"github.com/lilendian0x00/xray-knife/internal"
+	"github.com/lilendian0x00/xray-knife/internal/protocol"
+	"github.com/lilendian0x00/xray-knife/internal/singbox"
+	"github.com/lilendian0x00/xray-knife/internal/xray"
 	"log"
 	"math/rand"
 	"os"
 	"os/signal"
 	"sort"
-	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/lilendian0x00/xray-knife/v2/cmd/net"
-	"github.com/lilendian0x00/xray-knife/v2/utils"
-	"github.com/lilendian0x00/xray-knife/v2/utils/customlog"
-	"github.com/lilendian0x00/xray-knife/v2/xray"
+	"github.com/lilendian0x00/xray-knife/cmd/net"
+	"github.com/lilendian0x00/xray-knife/utils"
+	"github.com/lilendian0x00/xray-knife/utils/customlog"
 	"github.com/spf13/cobra"
-	"github.com/xtls/xray-core/core"
 )
 
 var (
+	CoreType            string
 	interval            uint32
 	configLinksFile     string
 	readConfigFromSTDIN bool
 	listenAddr          string
-	listenPort          uint16
+	listenPort          string
 	link                string
 	verbose             bool
 	insecureTLS         bool
@@ -43,9 +45,41 @@ var ProxyCmd = &cobra.Command{
 			cmd.Help()
 			return
 		}
+
+		var core internal.Core
+		var inbound protocol.Protocol
+
+		switch CoreType {
+		case "xray":
+			core = internal.CoreFactory(internal.XrayCoreType)
+
+			inbound = &xray.Socks{
+				Remark:  "Listener",
+				Address: listenAddr,
+				Port:    listenPort,
+			}
+			break
+		case "singbox":
+			core = internal.CoreFactory(internal.SingboxCoreType)
+
+			inbound = &singbox.Socks{
+				Remark:  "Listener",
+				Address: listenAddr,
+				Port:    listenPort,
+			}
+			break
+		default:
+			log.Fatalln("Allowed core types: (xray, singbox)")
+		}
+
+		inErr := core.SetInbound(inbound)
+		if inErr != nil {
+			log.Fatalln(inErr)
+		}
+
 		r := rand.New(rand.NewSource(time.Now().Unix()))
 		var links []string
-		var configs []xray.Protocol
+		var configs []protocol.Protocol
 
 		if configLinksFile != "" {
 			// Get configs from file
@@ -61,41 +95,33 @@ var ProxyCmd = &cobra.Command{
 
 		// Parse all the links
 		for _, c := range links {
-			conf, err := xray.ParseXrayConfig(c)
+			conf, err := core.CreateProtocol(c)
 			if err != nil {
 				log.Println(color.RedString("Couldn't parse the config : %v", err))
 			}
 			configs = append(configs, conf)
 		}
 
-		// Make the inbound
-		inbound := &xray.Socks{
-			Remark:  "Listener",
-			Address: listenAddr,
-			Port:    strconv.Itoa(int(listenPort)),
-		}
-
 		// Clear the terminal
 		utils.ClearTerminal()
 
-		// Make a new xray service
-		xs := xray.NewXrayService(verbose, insecureTLS, xray.WithInbound(inbound))
-		examiner := xray.Examiner{
-			Xs:                     xray.NewXrayService(verbose, insecureTLS),
-			MaxDelay:               2000,
-			Logs:                   false,
-			ShowBody:               false,
-			DoSpeedtest:            false,
-			DoIPInfo:               false,
-			TestEndpoint:           "https://google.com/",
-			TestEndpointHttpMethod: "GET",
+		// Make an examiner
+		examiner, err1 := internal.NewExaminer(internal.Options{
+			// TODO: Variable core
+			CoreInstance: core,
+			MaxDelay:     2000,
+		})
+		if err1 != nil {
+			customlog.Printf(customlog.Failure, "%v", err1)
+			os.Exit(1)
 		}
 
 		fmt.Println(color.RedString("\n==========INBOUND=========="))
 		fmt.Printf("%v", inbound.DetailsStr())
 		fmt.Println(color.RedString("============================\n"))
 
-		var xrayInstance *core.Instance = nil
+		var instance protocol.Instance = nil
+
 		var err error
 
 		// Create a channel to receive signals.
@@ -116,8 +142,8 @@ var ProxyCmd = &cobra.Command{
 			customlog.Printf(customlog.Processing, "Closing xray service...")
 
 			// Close xray service
-			if xrayInstance != nil {
-				err := xrayInstance.Close()
+			if instance != nil {
+				err := instance.Close()
 				if err != nil {
 
 				}
@@ -134,7 +160,7 @@ var ProxyCmd = &cobra.Command{
 
 			connect := func() {
 				var lastConfig string
-				var currentConfig xray.Protocol = nil
+				var currentConfig protocol.Protocol = nil
 
 				// Decide how many configs we are going to test
 				var testCount int = 25
@@ -160,7 +186,7 @@ var ProxyCmd = &cobra.Command{
 				fmt.Println(color.RedString("============================"))
 
 				// Make xray instance
-				xrayInstance, err = xs.MakeXrayInstance(currentConfig)
+				instance, err = core.MakeInstance(currentConfig)
 				if err != nil {
 					customlog.Printf(customlog.Failure, "Error making a xray instance: %s\n", err.Error())
 					// Remove config from slice if it doesn't work
@@ -168,7 +194,7 @@ var ProxyCmd = &cobra.Command{
 				}
 
 				// Start the xray instance
-				err = xrayInstance.Start()
+				err = instance.Start()
 				if err != nil {
 					customlog.Printf(customlog.Failure, "Error starting xray instance: %s\n", err.Error())
 					// Remove config from slice if it doesn't work
@@ -219,7 +245,7 @@ var ProxyCmd = &cobra.Command{
 						default:
 							input, _ := consoleReader.ReadByte()
 							ascii := input
-							if ascii == 13 { // Enter => 13
+							if ascii == 13 || ascii == 10 { // Enter => 13 || 10 MacOS Return
 								finishChan <- true
 								clickChan <- true
 								return
@@ -245,9 +271,9 @@ var ProxyCmd = &cobra.Command{
 
 				customlog.Printf(customlog.Processing, "Switching outbound connection...\n")
 
-				// Check if any xrayInstance is running
-				if xrayInstance != nil {
-					err = xrayInstance.Close()
+				// Check if any core is running
+				if instance != nil {
+					err = instance.Close()
 					if err != nil {
 						log.Fatalf(err.Error())
 					}
@@ -255,7 +281,7 @@ var ProxyCmd = &cobra.Command{
 			}
 		} else {
 			// Configuring outbound
-			outboundParsed, err := xray.ParseXrayConfig(link)
+			outboundParsed, err := core.CreateProtocol(link)
 			if err != nil {
 				log.Fatalf("Couldn't parse the config : %v", err)
 			}
@@ -263,14 +289,13 @@ var ProxyCmd = &cobra.Command{
 			fmt.Printf("%v", outboundParsed.DetailsStr())
 			fmt.Println(color.RedString("============================"))
 
-			// Make xray instance
-			xrayInstance, err = xs.MakeXrayInstance(outboundParsed)
+			instance, err = core.MakeInstance(outboundParsed)
 			if err != nil {
 				log.Fatalln(err.Error())
 			}
 
 			// Start the xray instance
-			err = xrayInstance.Start()
+			err = instance.Start()
 			if err != nil {
 				log.Fatalln(err.Error())
 			}
@@ -288,8 +313,10 @@ func init() {
 	ProxyCmd.Flags().Uint32VarP(&interval, "interval", "t", 300, "Interval to change outbound connection in seconds")
 	ProxyCmd.Flags().Uint16VarP(&maximumAllowedDelay, "mdelay", "d", 3000, "Maximum allowed delay")
 
+	ProxyCmd.Flags().StringVarP(&CoreType, "core", "z", "singbox", "Core types: (xray, singbox)")
+
 	ProxyCmd.Flags().StringVarP(&listenAddr, "addr", "a", "127.0.0.1", "Listen ip address")
-	ProxyCmd.Flags().Uint16VarP(&listenPort, "port", "p", 9999, "Listen port number")
+	ProxyCmd.Flags().StringVarP(&listenPort, "port", "p", "9999", "Listen port number")
 	ProxyCmd.Flags().StringVarP(&link, "config", "c", "", "The xray config link")
 
 	ProxyCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose xray-core")

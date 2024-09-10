@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/lilendian0x00/xray-knife/internal/protocol"
 	"net"
 	"net/url"
 	"strings"
@@ -13,25 +14,25 @@ import (
 	"github.com/xtls/xray-core/infra/conf"
 )
 
-func NewShadowsocks() Protocol {
-	return &Shadowsocks{}
+func NewShadowsocks(link string) Protocol {
+	return &Shadowsocks{OrigLink: link}
 }
 
 func (s *Shadowsocks) Name() string {
 	return "shadowsocks"
 }
 
-func (s *Shadowsocks) Parse(configLink string) error {
-	if !strings.HasPrefix(configLink, ShadowsocksIdentifier) {
-		return fmt.Errorf("shadowsocks unreconized: %s", configLink)
+func (s *Shadowsocks) Parse() error {
+	if !strings.HasPrefix(s.OrigLink, protocol.ShadowsocksIdentifier) {
+		return fmt.Errorf("shadowsocks unreconized: %s", s.OrigLink)
 	}
 
-	uri, err := url.Parse(configLink)
+	uri, err := url.Parse(s.OrigLink)
 	if err != nil {
 		return err
 	}
 
-	secondPart := strings.SplitN(configLink[5:], "@", 2)
+	secondPart := strings.SplitN(s.OrigLink[5:], "@", 2)
 
 	var decoded []byte
 	// Encryption part - b64 encoded (EncryptionType : Password)
@@ -84,7 +85,6 @@ func (s *Shadowsocks) Parse(configLink string) error {
 	//if err != nil {
 	//	s.Remark = remarkStr
 	//}
-	s.OrigLink = configLink
 
 	return nil
 }
@@ -100,8 +100,7 @@ func (s *Shadowsocks) DetailsStr() string {
 	return info
 }
 
-func (s *Shadowsocks) ConvertToGeneralConfig() GeneralConfig {
-	var g GeneralConfig
+func (s *Shadowsocks) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Protocol = s.Name()
 	g.Address = s.Address
 	g.ID = s.Password

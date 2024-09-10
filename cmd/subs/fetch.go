@@ -1,13 +1,11 @@
 package subs
 
 import (
-	"fmt"
-	"os"
+	"log"
 	"strings"
 
-	"github.com/lilendian0x00/xray-knife/v2/utils"
-	"github.com/lilendian0x00/xray-knife/v2/utils/customlog"
-	"github.com/lilendian0x00/xray-knife/v2/xray"
+	"github.com/lilendian0x00/xray-knife/utils"
+	"github.com/lilendian0x00/xray-knife/utils/customlog"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +27,7 @@ var FetchCmd = &cobra.Command{
 --useragent, -x: useragent to be used
 `,
 	Run: func(cmd *cobra.Command, args []string) {
-		sub := xray.Subscription{
+		sub := Subscription{
 			Url:         subscriptionURL,
 			UserAgent:   userAgent,
 			Method:      httpMethod,
@@ -37,13 +35,12 @@ var FetchCmd = &cobra.Command{
 		}
 		configs, err := sub.FetchAll()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%v", err)
-			os.Exit(1)
+			log.Fatal(err.Error())
 		}
+
 		err = utils.WriteIntoFile(outputFile, []byte(strings.Join(configs[:], "\n\n")))
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%v", err)
-			os.Exit(1)
+			log.Fatal(err.Error())
 		}
 		customlog.Printf(customlog.Success, "%d Configs have been saved into %s file\n", len(configs), outputFile)
 	},
