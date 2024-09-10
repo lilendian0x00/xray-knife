@@ -17,7 +17,7 @@ import (
 func makeUTlsConn(hostname string) (*tls.UConn, string, error) {
 	config := tls.Config{
 		ServerName:         strings.Split(hostname, ":")[0],
-		InsecureSkipVerify: false,
+		InsecureSkipVerify: true,
 	}
 	dialConn, err := net.DialTimeout("tcp", hostname, time.Duration(15)*time.Second)
 	if err != nil {

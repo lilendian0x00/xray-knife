@@ -3,12 +3,16 @@ package parse
 import (
 	"bufio"
 	"fmt"
+	"github.com/lilendian0x00/xray-knife/internal"
+	"github.com/lilendian0x00/xray-knife/internal/protocol"
+	"log"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/fatih/color"
 	"github.com/lilendian0x00/xray-knife/utils"
-	"github.com/lilendian0x00/xray-knife/xray"
 	"github.com/spf13/cobra"
 )
 
@@ -28,6 +32,22 @@ var ParseCmd = &cobra.Command{
 			cmd.Help()
 			return
 		}
+
+		xrayCore := internal.CoreFactory(internal.XrayCoreType)
+		singboxCore := internal.CoreFactory(internal.SingboxCoreType)
+		SelectedCore := map[string]internal.Core{
+			protocol.VmessIdentifier:       xrayCore,
+			protocol.VlessIdentifier:       xrayCore,
+			protocol.ShadowsocksIdentifier: xrayCore,
+			protocol.TrojanIdentifier:      xrayCore,
+			protocol.SocksIdentifier:       singboxCore,
+			protocol.WireguardIdentifier:   singboxCore,
+			protocol.Hysteria2Identifier:   singboxCore,
+			"hy2":                          singboxCore,
+		}
+
+		var core internal.Core
+
 		if readFromSTDIN {
 			reader := bufio.NewReader(os.Stdin)
 			fmt.Println("Reading config from STDIN:")
@@ -40,7 +60,7 @@ var ParseCmd = &cobra.Command{
 			d := color.New(color.FgCyan, color.Bold)
 			for i, link := range links {
 				d.Printf("Config Number: %d\n", i+1)
-				protocol, err := xray.ParseXrayConfig(link)
+				protocol, err := core.CreateProtocol(link)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "%v", err)
 					os.Exit(1)
@@ -53,13 +73,32 @@ var ParseCmd = &cobra.Command{
 		}
 
 		if readFromSTDIN || configLink != "" {
+			// Remove any spaces
+			configLink = strings.TrimSpace(configLink)
+
+			uri, err := url.Parse(configLink)
+			if err != nil {
+				log.Fatalf("Couldn't parse the config: %v\n", err)
+			}
+
+			coreAuto, ok := SelectedCore[uri.Scheme]
+			if !ok {
+				log.Fatalln("Couldn't parse the config: invalid protocol")
+			}
+
 			fmt.Printf("\n")
-			protocol, err := xray.ParseXrayConfig(configLink)
+			p, err := coreAuto.CreateProtocol(configLink)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%v", err)
 				os.Exit(1)
 			}
-			fmt.Println(protocol.DetailsStr())
+			err = p.Parse()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%v", err)
+				os.Exit(1)
+			}
+
+			fmt.Println(p.DetailsStr())
 		}
 	},
 }

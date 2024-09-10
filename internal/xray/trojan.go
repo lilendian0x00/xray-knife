@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/fatih/color"
+	"github.com/lilendian0x00/xray-knife/internal/protocol"
 	"github.com/lilendian0x00/xray-knife/utils"
 	"github.com/xtls/xray-core/infra/conf"
 	"net"
@@ -12,19 +13,19 @@ import (
 	"strings"
 )
 
-func NewTrojan() Protocol {
-	return &Trojan{}
+func NewTrojan(link string) Protocol {
+	return &Trojan{OrigLink: link}
 }
 
 func (t *Trojan) Name() string {
 	return "trojan"
 }
 
-func (t *Trojan) Parse(configLink string) error {
-	if !strings.HasPrefix(configLink, trojanIdentifier) {
-		return fmt.Errorf("trojan unreconized: %s", configLink)
+func (t *Trojan) Parse() error {
+	if !strings.HasPrefix(t.OrigLink, protocol.TrojanIdentifier) {
+		return fmt.Errorf("trojan unreconized: %s", t.OrigLink)
 	}
-	uri, err := url.Parse(configLink)
+	uri, err := url.Parse(t.OrigLink)
 	if err != nil {
 		return err
 	}
@@ -69,7 +70,7 @@ func (t *Trojan) Parse(configLink string) error {
 	if err != nil {
 		t.Remark = uri.Fragment
 	}
-	t.OrigLink = configLink
+	t.OrigLink = t.OrigLink
 
 	if t.HeaderType == "http" || t.Type == "ws" || t.Type == "h2" {
 		if t.Path == "" {
@@ -157,8 +158,7 @@ func (t *Trojan) DetailsStr() string {
 	return info
 }
 
-func (t *Trojan) ConvertToGeneralConfig() GeneralConfig {
-	var g GeneralConfig
+func (t *Trojan) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Protocol = t.Name()
 	g.Address = t.Address
 	g.Host = t.Host

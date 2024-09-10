@@ -2,6 +2,7 @@ package net
 
 import (
 	"fmt"
+	"github.com/lilendian0x00/xray-knife/internal"
 	"os"
 	"sort"
 	"strings"
@@ -11,7 +12,6 @@ import (
 	"github.com/gocarina/gocsv"
 	"github.com/lilendian0x00/xray-knife/utils"
 	"github.com/lilendian0x00/xray-knife/utils/customlog"
-	"github.com/lilendian0x00/xray-knife/xray"
 	"github.com/spf13/cobra"
 )
 
@@ -20,6 +20,7 @@ var (
 	outputFile          string
 	outputType          string
 	threadCount         uint16
+	CoreType            string
 	destURL             string
 	httpMethod          string
 	showBody            bool
@@ -35,7 +36,7 @@ var (
 var validConfigs []string
 var validConfigsMu sync.Mutex
 
-type ConfigResults []*xray.Result
+type ConfigResults []*internal.Result
 
 func (cResults ConfigResults) Len() int {
 	return len(cResults)
@@ -54,7 +55,7 @@ func (cResults ConfigResults) Swap(i, j int) {
 	cResults[i], cResults[j] = cResults[j], cResults[i]
 }
 
-func HttpTestMultipleConfigs(examiner xray.Examiner, links []string, threadCount uint16, verbose bool) ConfigResults {
+func HttpTestMultipleConfigs(examiner *internal.Examiner, links []string, threadCount uint16, verbose bool) ConfigResults {
 	d := color.New(color.FgCyan, color.Bold)
 
 	// Limit the number of concurrent workers
@@ -115,16 +116,32 @@ var HttpCmd = &cobra.Command{
 	Short: "Examine config[s] real delay using http request",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		examiner := xray.Examiner{
-			Xs:                     xray.NewXrayService(verbose, insecureTLS),
+		switch CoreType {
+		case "auto":
+			break
+		case "xray":
+			break
+		case "singbox":
+			break
+		default:
+			customlog.Printf(customlog.Failure, "Invalid core type!\nAvailable cores: (auto, xray, singbox)")
+			os.Exit(1)
+		}
+
+		examiner, err := internal.NewExaminer(internal.Options{
+			Core:                   CoreType,
 			MaxDelay:               maximumAllowedDelay,
-			Logs:                   false,
-			ShowBody:               false,
+			Verbose:                verbose,
+			ShowBody:               showBody,
 			DoSpeedtest:            speedtest,
 			DoIPInfo:               getIPInfo,
 			TestEndpoint:           destURL,
 			TestEndpointHttpMethod: httpMethod,
-			SpeedtestAmount:        speedtestAmount,
+			SpeedtestKbAmount:      speedtestAmount,
+		})
+		if err != nil {
+			customlog.Printf(customlog.Failure, "%v", err)
+			os.Exit(1)
 		}
 
 		if configLinksFile != "" {
@@ -171,7 +188,7 @@ var HttpCmd = &cobra.Command{
 			}
 
 		} else {
-			examiner.Logs = true
+			examiner.Verbose = true
 			res, err := examiner.ExamineConfig(configLink)
 			if err != nil {
 				customlog.Printf(customlog.Failure, "%s\n", err)
@@ -196,15 +213,16 @@ func init() {
 	HttpCmd.Flags().StringVarP(&configLink, "config", "c", "", "The xray config link")
 	HttpCmd.Flags().StringVarP(&configLinksFile, "file", "f", "", "Read config links from a file")
 	HttpCmd.Flags().Uint16VarP(&threadCount, "thread", "t", 5, "Number of threads to be used for checking links from file")
-	HttpCmd.Flags().StringVarP(&destURL, "url", "u", "https://google.com/", "The url to test config")
+	HttpCmd.Flags().StringVarP(&CoreType, "core", "z", "auto", "Core type (auto, singbox, xray)")
+	HttpCmd.Flags().StringVarP(&destURL, "url", "u", "https://cloudflare.com/cdn-cgi/trace", "The url to test config")
 	HttpCmd.Flags().StringVarP(&httpMethod, "method", "m", "GET", "Http method")
 	HttpCmd.Flags().BoolVarP(&showBody, "body", "b", false, "Show response body")
-	HttpCmd.Flags().Uint16VarP(&maximumAllowedDelay, "mdelay", "d", 10000, "Maximum allowed delay")
+	HttpCmd.Flags().Uint16VarP(&maximumAllowedDelay, "mdelay", "d", 10000, "Maximum allowed delay (ms)")
 	HttpCmd.Flags().BoolVarP(&insecureTLS, "insecure", "e", false, "Insecure tls connection (fake SNI)")
 	HttpCmd.Flags().BoolVarP(&speedtest, "speedtest", "p", false, "Speed test with speed.cloudflare.com")
 	HttpCmd.Flags().BoolVarP(&getIPInfo, "rip", "r", false, "Send request to XXXX/cdn-cgi/trace to receive config's IP details")
 	HttpCmd.Flags().Uint32VarP(&speedtestAmount, "amount", "a", 10000, "Download and upload amount (KB)")
-	HttpCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose xray-core")
+	HttpCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose")
 	HttpCmd.Flags().StringVarP(&outputType, "type", "x", "txt", "Output type (csv, txt)")
 	HttpCmd.Flags().StringVarP(&outputFile, "out", "o", "valid.txt", "Output file for valid config links")
 	HttpCmd.Flags().BoolVarP(&sortedByRealDelay, "sort", "s", true, "Sort config links by their delay (fast to slow)")

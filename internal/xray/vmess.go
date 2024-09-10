@@ -3,6 +3,7 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/lilendian0x00/xray-knife/internal/protocol"
 	"net"
 	"net/url"
 	"strings"
@@ -12,8 +13,8 @@ import (
 	"github.com/xtls/xray-core/infra/conf"
 )
 
-func NewVmess() Protocol {
-	return &Vmess{}
+func NewVmess(link string) Protocol {
+	return &Vmess{OrigLink: link}
 }
 
 func (v *Vmess) Name() string {
@@ -47,7 +48,7 @@ func method2(v *Vmess, link string) error {
 	if err != nil {
 		return err
 	}
-	link = vmessIdentifier + string(decoded) + "?" + uri.RawQuery
+	link = protocol.VmessIdentifier + "://" + string(decoded) + "?" + uri.RawQuery
 
 	uri, err = url.Parse(link)
 	if err != nil {
@@ -113,20 +114,18 @@ func method2(v *Vmess, link string) error {
 //
 //}
 
-func (v *Vmess) Parse(configLink string) error {
-	if !strings.HasPrefix(configLink, vmessIdentifier) {
-		return fmt.Errorf("vmess unreconized: %s", configLink)
+func (v *Vmess) Parse() error {
+	if !strings.HasPrefix(v.OrigLink, protocol.VmessIdentifier) {
+		return fmt.Errorf("vmess unreconized: %s", v.OrigLink)
 	}
 
 	var err error = nil
 
-	if err = method1(v, configLink); err != nil {
-		if err = method2(v, configLink); err != nil {
+	if err = method1(v, v.OrigLink); err != nil {
+		if err = method2(v, v.OrigLink); err != nil {
 			return err
 		}
 	}
-
-	v.OrigLink = configLink
 
 	if v.Type == "http" || v.Network == "ws" || v.Network == "h2" {
 		if v.Path == "" {
@@ -196,8 +195,7 @@ func (v *Vmess) DetailsStr() string {
 	return info
 }
 
-func (v *Vmess) ConvertToGeneralConfig() GeneralConfig {
-	var g GeneralConfig
+func (v *Vmess) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Protocol = v.Name()
 	g.Address = v.Address
 	g.Aid = fmt.Sprintf("%v", v.Aid)

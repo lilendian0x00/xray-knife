@@ -1,12 +1,12 @@
 package net
 
 import (
+	"github.com/lilendian0x00/xray-knife/internal/xray"
 	"net"
 	"os"
 	"time"
 
 	"github.com/lilendian0x00/xray-knife/utils/customlog"
-	"github.com/lilendian0x00/xray-knife/xray"
 
 	"github.com/spf13/cobra"
 )
@@ -17,7 +17,9 @@ var TcpCmd = &cobra.Command{
 	Short: "Examine TCP Connection delay to config's host",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		parsed, err := xray.ParseXrayConfig(configLink)
+		x := xray.NewXrayService(false, false)
+
+		parsed, err := x.CreateProtocol(configLink)
 		if err != nil {
 			customlog.Printf(customlog.Failure, "Couldn't parse the config!\n")
 			os.Exit(1)

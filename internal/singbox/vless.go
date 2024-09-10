@@ -1,31 +1,38 @@
-package xray
+package singbox
 
 import (
-	"encoding/json"
+	"context"
+	"errors"
 	"fmt"
 	"github.com/fatih/color"
+	"github.com/lilendian0x00/xray-knife/internal/protocol"
 	"github.com/lilendian0x00/xray-knife/utils"
+	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/outbound"
+	"github.com/sagernet/sing/common/logger"
 	"github.com/xtls/xray-core/infra/conf"
 	"net"
 	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 )
 
-func NewVless() Protocol {
-	return &Vless{}
+func NewVless(link string) Protocol {
+	return &Vless{OrigLink: link}
 }
 
 func (v *Vless) Name() string {
-	return "vless"
+	return protocol.VlessIdentifier
 }
 
-func (v *Vless) Parse(configLink string) error {
-	if !strings.HasPrefix(configLink, vlessIdentifier) {
-		return fmt.Errorf("vless unreconized: %s", configLink)
+func (v *Vless) Parse() error {
+	if !strings.HasPrefix(v.OrigLink, protocol.VlessIdentifier) {
+		return fmt.Errorf("vless unreconized: %s", v.OrigLink)
 	}
 
-	uri, err := url.Parse(configLink)
+	uri, err := url.Parse(v.OrigLink)
 	if err != nil {
 		return err
 	}
@@ -78,7 +85,6 @@ func (v *Vless) Parse(configLink string) error {
 	//	os.Exit(1)
 	//}
 	//v.Port = uint16(portUint)
-	v.OrigLink = configLink
 
 	if v.HeaderType == "http" || v.Type == "ws" || v.Type == "h2" {
 		if v.Path == "" {
@@ -154,8 +160,7 @@ func (v *Vless) DetailsStr() string {
 	return info
 }
 
-func (v *Vless) ConvertToGeneralConfig() GeneralConfig {
-	var g GeneralConfig
+func (v *Vless) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Protocol = v.Name()
 	g.Address = v.Address
 	g.Host = v.Host
@@ -179,159 +184,134 @@ func (v *Vless) ConvertToGeneralConfig() GeneralConfig {
 	return g
 }
 
-func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
-	out := &conf.OutboundDetourConfig{}
-	out.Tag = "proxy"
-	out.Protocol = v.Name()
+func (v *Vless) CraftInboundOptions() *option.Inbound {
 
-	p := conf.TransportProtocol(v.Type)
-	s := &conf.StreamConfig{
-		Network:  &p,
-		Security: v.Security,
+	return &option.Inbound{
+		Type: v.Name(),
+	}
+}
+
+func (v *Vless) CraftOutboundOptions() (*option.Outbound, error) {
+	port, _ := strconv.Atoi(v.Port)
+
+	tls := false
+	var alpn []string
+	var fingerprint string
+
+	if v.Security == "tls" || v.Security == "reality" {
+		tls = true
+
+		alpn = []string{"http/1.1"}
+		if v.ALPN != "" && v.ALPN != "none" {
+			alpn = strings.Split(v.ALPN, ",")
+		}
+
+		fingerprint = "chrome"
+		if v.TlsFingerprint != "" && v.TlsFingerprint != "none" {
+			fingerprint = v.TlsFingerprint
+		}
+	}
+
+	var transport = &option.V2RayTransportOptions{
+		Type: v.Type,
 	}
 
 	switch v.Type {
 	case "tcp":
-		s.TCPSettings = &conf.TCPConfig{}
-		if v.HeaderType == "" || v.HeaderType == "none" {
-			s.TCPSettings.HeaderConfig = json.RawMessage([]byte(`{ "type": "none" }`))
-		} else { // headerType=http
-			pathb, _ := json.Marshal(strings.Split(v.Path, ","))
-			hostb, _ := json.Marshal(strings.Split(v.Host, ","))
-			s.TCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`
-			{
-				"type": "http",
-				"request": {
-					"path": %s,
-					"headers": {
-						"Host": %s,
-						"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"
-					}
-				}
-			}
-			`, string(pathb), string(hostb))))
-		}
-		break
-	case "kcp":
-		s.KCPSettings = &conf.KCPConfig{}
-		s.KCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, v.Type)))
-		break
+		return nil, errors.New("tcp transport not supported")
 	case "ws":
-		s.WSSettings = &conf.WebSocketConfig{}
-		s.WSSettings.Path = v.Path
-		s.WSSettings.Headers = map[string]string{
-			"Host":       v.Host,
-			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36",
+		transport.WebsocketOptions = option.V2RayWebsocketOptions{
+			Path:                v.Path,
+			Headers:             option.HTTPHeader{},
+			MaxEarlyData:        0,
+			EarlyDataHeaderName: "",
 		}
+		transport.WebsocketOptions.Headers["host"] = option.Listable[string]{v.Host}
+		transport.WebsocketOptions.Headers["User-Agent"] = option.Listable[string]{"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"}
+
 		break
-	case "h2", "http":
-		s.HTTPSettings = &conf.HTTPConfig{
-			Path: v.Path,
+	case "http":
+		transport.HTTPOptions = option.V2RayHTTPOptions{
+			Host:        nil,
+			Path:        v.Path,
+			Method:      "GET",
+			Headers:     nil,
+			IdleTimeout: 0,
+			PingTimeout: 0,
 		}
 		if v.Host != "" {
 			h := conf.StringList(strings.Split(v.Host, ","))
-			s.HTTPSettings.Host = &h
+			transport.HTTPOptions.Host = option.Listable[string](h)
 		}
 		break
 	case "httpupgrade":
-		s.HTTPUPGRADESettings = &conf.HttpUpgradeConfig{
-			Host: v.Host,
-			Path: v.Path,
-		}
-		break
-	case "splithttp":
-		s.SplitHTTPSettings = &conf.SplitHTTPConfig{
+		transport.HTTPUpgradeOptions = option.V2RayHTTPUpgradeOptions{
 			Host: v.Host,
 			Path: v.Path,
 		}
 		break
 	case "grpc":
+		// v.Mode Gun & Multi
 		if len(v.ServiceName) > 0 {
 			if v.ServiceName[0] == '/' {
 				v.ServiceName = v.ServiceName[1:]
 			}
 		}
-		multiMode := false
-		if v.Type != "gun" {
-			multiMode = true
+		transport.GRPCOptions = option.V2RayGRPCOptions{
+			ServiceName: v.ServiceName,
 		}
-		s.GRPCConfig = &conf.GRPCConfig{
-			ServiceName:         v.ServiceName,
-			MultiMode:           multiMode,
-			IdleTimeout:         60,
-			HealthCheckTimeout:  20,
-			PermitWithoutStream: false,
-			InitialWindowsSize:  65536,
-			UserAgent:           "",
-		}
-		if v.Mode != "gun" {
-			s.GRPCConfig.MultiMode = true
-		}
-		v.Flow = ""
 		break
 	case "quic":
-		t := "none"
-		if v.HeaderType != "" {
-			t = v.HeaderType
-		}
-
-		s.QUICSettings = &conf.QUICConfig{
-			Header:   json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, t))),
-			Security: v.QuicSecurity,
-			Key:      v.Key,
-		}
+		transport.QUICOptions = option.V2RayQUICOptions{}
 		break
 	}
 
-	if v.Security == "tls" {
-		if v.TlsFingerprint == "" {
-			v.TlsFingerprint = "chrome"
-		}
-		s.TLSSettings = &conf.TLSConfig{
-			Fingerprint: v.TlsFingerprint,
-			Insecure:    allowInsecure,
-		}
-		if v.SNI != "" {
-			s.TLSSettings.ServerName = v.SNI
-		} else {
-			s.TLSSettings.ServerName = v.Host
-		}
-		if v.ALPN != "" {
-			s.TLSSettings.ALPN = &conf.StringList{v.ALPN}
-		}
-	} else if v.Security == "reality" {
-		s.REALITYSettings = &conf.REALITYConfig{
-			Show:        false,
-			Fingerprint: v.TlsFingerprint,
-			ServerName:  v.SNI,
-			PublicKey:   v.PublicKey,
-			ShortId:     v.ShortIds,
-			SpiderX:     v.SpiderX,
+	opts := option.VLESSOutboundOptions{
+		DialerOptions: option.DialerOptions{},
+		ServerOptions: option.ServerOptions{
+			Server:     v.Address,
+			ServerPort: uint16(port),
+		},
+		UUID:      v.ID,
+		Transport: transport,
+		OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{
+			TLS: &option.OutboundTLSOptions{
+				Enabled:    tls,
+				ServerName: v.SNI,
+				ALPN:       alpn,
+				UTLS: &option.OutboundUTLSOptions{
+					Enabled:     true,
+					Fingerprint: fingerprint,
+				},
+			},
+		},
+		Flow: v.Flow,
+	}
+	if v.Security == "reality" {
+		opts.TLS.Reality = &option.OutboundRealityOptions{
+			Enabled:   true,
+			PublicKey: v.PublicKey,
+			ShortID:   v.ShortIds,
 		}
 	}
 
-	out.StreamSetting = s
-	oset := json.RawMessage([]byte(fmt.Sprintf(`{
-  "vnext": [
-    {
-      "address": "%s",
-      "port": %v,
-      "users": [
-        {
-          "id": "%s",
-		  "alterId": 0,
-          "security": "auto",
-          "flow": "%s",
-          "encryption": "none"
-        }
-      ]
-    }
-  ]
-}`, v.Address, v.Port, v.ID, v.Flow)))
-	out.Settings = &oset
-	return out, nil
+	return &option.Outbound{
+		Type:         v.Name(),
+		VLESSOptions: opts,
+	}, nil
 }
 
-func (v *Vless) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
-	return nil, nil
+func (v *Vless) CraftOutbound(ctx context.Context, l logger.ContextLogger) (adapter.Outbound, error) {
+
+	options, err := v.CraftOutboundOptions()
+	if err != nil {
+		return nil, err
+	}
+
+	out, err := outbound.New(ctx, adapter.RouterFromContext(ctx), l, "out_vless", *options)
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("failed creating vless outbound: %v", err))
+	}
+
+	return out, nil
 }
