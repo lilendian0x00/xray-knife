@@ -285,6 +285,12 @@ var ProxyCmd = &cobra.Command{
 			if err != nil {
 				log.Fatalf("Couldn't parse the config : %v", err)
 			}
+
+			err = outboundParsed.Parse()
+			if err != nil {
+				log.Fatalln(err.Error())
+			}
+
 			fmt.Println(color.RedString("==========OUTBOUND=========="))
 			fmt.Printf("%v", outboundParsed.DetailsStr())
 			fmt.Println(color.RedString("============================"))

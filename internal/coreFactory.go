@@ -5,6 +5,7 @@ import (
 	"github.com/lilendian0x00/xray-knife/internal/singbox"
 	"github.com/lilendian0x00/xray-knife/internal/xray"
 	"net/http"
+	"time"
 )
 
 type CoreType uint8
@@ -18,7 +19,7 @@ const (
 // Core interface that both xray-Core and sing-box must implement
 type Core interface {
 	Name() string
-	MakeHttpClient(outbound protocol.Protocol) (*http.Client, protocol.Instance, error)
+	MakeHttpClient(outbound protocol.Protocol, maxDelay time.Duration) (*http.Client, protocol.Instance, error)
 	CreateProtocol(protocolType string) (protocol.Protocol, error)
 
 	MakeInstance(outbound protocol.Protocol) (protocol.Instance, error)
