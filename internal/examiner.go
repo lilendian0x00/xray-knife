@@ -144,12 +144,12 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 		fmt.Printf("\n")
 	}
 
-	// Remove any spaces
+	// Remove any spaces from the link
 	link = strings.TrimSpace(link)
 
 	var core = e.Core
 
-	// Automatic Core
+	// Select core based on config (Automatic Core)
 	if core == nil {
 		uri, err := url.Parse(link)
 		if err != nil {
@@ -182,7 +182,7 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 	r.Protocol = proto
 	r.TLS = proto.ConvertToGeneralConfig().TLS
 
-	client, instance, err1 := core.MakeHttpClient(proto)
+	client, instance, err1 := core.MakeHttpClient(proto, time.Duration(e.MaxDelay)*time.Millisecond)
 	if err1 != nil {
 		r.Status = "broken"
 		return r, nil
@@ -194,7 +194,7 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 	var downloadTime int64
 	var uploadTime int64
 
-	delay, _, err = MeasureDelay(client, time.Duration(10000)*time.Millisecond, e.ShowBody, e.TestEndpoint, e.TestEndpointHttpMethod)
+	delay, _, err = MeasureDelay(client, true, e.TestEndpoint, e.TestEndpointHttpMethod)
 	if err != nil {
 		//customlog.Printf(customlog.Failure, "Config didn't respond!\n\n")
 		r.Status = "failed"
@@ -263,9 +263,9 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 	return r, nil
 }
 
-func MeasureDelay(client *http.Client, timeout time.Duration, showBody bool, dest string, httpMethod string) (int64, int, error) {
+func MeasureDelay(client *http.Client, showBody bool, dest string, httpMethod string) (int64, int, error) {
 	start := time.Now()
-	code, body, err := CoreHTTPRequest(client, timeout, httpMethod, dest)
+	code, body, err := CoreHTTPRequest(client, httpMethod, dest)
 	if err != nil {
 		return -1, -1, err
 	}
@@ -276,7 +276,7 @@ func MeasureDelay(client *http.Client, timeout time.Duration, showBody bool, des
 	return time.Since(start).Milliseconds(), code, nil
 }
 
-func CoreHTTPRequest(client *http.Client, timeout time.Duration, method, dest string) (int, []byte, error) {
+func CoreHTTPRequest(client *http.Client, method, dest string) (int, []byte, error) {
 	req, _ := http.NewRequest(method, dest, nil)
 	resp, err := client.Do(req)
 	if err != nil {

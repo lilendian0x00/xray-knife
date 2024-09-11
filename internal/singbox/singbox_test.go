@@ -20,7 +20,7 @@ func TestHysteria2_MakeHttpClient(t *testing.T) {
 		return
 	}
 
-	client, err := s.MakeHttpClient(protocol)
+	client, _, err := s.MakeHttpClient(protocol)
 	if err != nil {
 		t.Errorf(err.Error())
 		return
@@ -55,7 +55,7 @@ func TestVless_MakeHttpClient(t *testing.T) {
 		return
 	}
 
-	client, err := s.MakeHttpClient(protocol)
+	client, _, err := s.MakeHttpClient(protocol)
 	if err != nil {
 		t.Errorf(err.Error())
 		return

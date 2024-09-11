@@ -124,7 +124,7 @@ func (c *Core) MakeInstance(outbound protocol.Protocol) (protocol.Instance, erro
 	return server, nil
 }
 
-func (c *Core) MakeHttpClient(outbound protocol.Protocol) (*http.Client, protocol.Instance, error) {
+func (c *Core) MakeHttpClient(outbound protocol.Protocol, maxDelay time.Duration) (*http.Client, protocol.Instance, error) {
 	out := outbound.(Protocol)
 	instance, err := c.MakeInstance(out)
 	if err != nil {
@@ -146,7 +146,7 @@ func (c *Core) MakeHttpClient(outbound protocol.Protocol) (*http.Client, protoco
 
 	return &http.Client{
 		Transport: tr,
-		Timeout:   time.Duration(5) * time.Second,
+		Timeout:   maxDelay,
 	}, instance, nil
 }
 

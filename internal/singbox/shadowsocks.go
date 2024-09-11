@@ -113,7 +113,7 @@ func (s *Shadowsocks) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 
 func (s *Shadowsocks) CraftInboundOptions() *option.Inbound {
 	return &option.Inbound{
-		Type: s.Name(),
+		Type: "shadowsocks",
 	}
 }
 
@@ -131,7 +131,7 @@ func (s *Shadowsocks) CraftOutboundOptions() (*option.Outbound, error) {
 	}
 
 	return &option.Outbound{
-		Type:               s.Name(),
+		Type:               "shadowsocks",
 		ShadowsocksOptions: opts,
 	}, nil
 }

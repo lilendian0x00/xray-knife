@@ -9,6 +9,12 @@ const (
 	SocksIdentifier       = "socks"
 	Hysteria2Identifier   = "hysteria2"
 )
+const (
+	VmessPattern       = `vmess:\/\/[a-zA-Z0-9+/=]+`
+	VlessPattern       = `vless:\/\/[a-zA-Z0-9-]+@[a-zA-Z0-9.-]+:[0-9]+(\?([a-zA-Z0-9%=&.-]+))?#?.*`
+	TrojanPattern      = `trojan:\/\/[a-zA-Z0-9-_.@]+@[a-zA-Z0-9.-]+:[0-9]+(\?([a-zA-Z0-9%=&.-]+))?#?.*`
+	ShadowsocksPattern = ``
+)
 
 type Instance interface {
 	Start() error

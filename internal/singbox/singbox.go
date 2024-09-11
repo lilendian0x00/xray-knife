@@ -2,7 +2,6 @@ package singbox
 
 import (
 	"context"
-	"fmt"
 	"github.com/lilendian0x00/xray-knife/internal/protocol"
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/log"
@@ -125,12 +124,11 @@ func (c *Core) MakeInstance(outbound protocol.Protocol) (protocol.Instance, erro
 	return singboxInstance, nil
 }
 
-func (c *Core) MakeHttpClient(outbound protocol.Protocol) (*http.Client, protocol.Instance, error) {
+func (c *Core) MakeHttpClient(outbound protocol.Protocol, maxDelay time.Duration) (*http.Client, protocol.Instance, error) {
 	out := outbound.(Protocol)
 
 	craftOutbound, err := out.CraftOutbound(context.Background(), c.Log)
 	if err != nil {
-		fmt.Println(err.Error())
 		return nil, nil, err
 	}
 
@@ -143,7 +141,7 @@ func (c *Core) MakeHttpClient(outbound protocol.Protocol) (*http.Client, protoco
 
 	return &http.Client{
 		Transport: tr,
-		Timeout:   time.Duration(5) * time.Second,
+		Timeout:   maxDelay,
 	}, &FakeInstance{}, nil
 }
 
