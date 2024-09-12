@@ -194,7 +194,7 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 	var downloadTime int64
 	var uploadTime int64
 
-	delay, _, err = MeasureDelay(client, true, e.TestEndpoint, e.TestEndpointHttpMethod)
+	delay, _, err = MeasureDelay(client, e.ShowBody, e.TestEndpoint, e.TestEndpointHttpMethod)
 	if err != nil {
 		//customlog.Printf(customlog.Failure, "Config didn't respond!\n\n")
 		r.Status = "failed"

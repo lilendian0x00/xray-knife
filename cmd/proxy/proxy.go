@@ -32,6 +32,7 @@ var (
 	link                string
 	verbose             bool
 	insecureTLS         bool
+	chainOutbounds      bool
 	maximumAllowedDelay uint16
 )
 
@@ -327,5 +328,7 @@ func init() {
 
 	ProxyCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose xray-core")
 	ProxyCmd.Flags().BoolVarP(&insecureTLS, "insecure", "e", false, "Insecure tls connection (fake SNI)")
+
+	ProxyCmd.Flags().BoolVarP(&chainOutbounds, "chain", "n", false, "Chain multiple outbounds")
 
 }
