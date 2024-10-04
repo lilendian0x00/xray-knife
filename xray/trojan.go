@@ -117,7 +117,9 @@ func (t *Trojan) DetailsStr() string {
 		if copyV.ServiceName == "" {
 			copyV.ServiceName = "none"
 		}
-		info += fmt.Sprintf("%s: %s\n", color.RedString("ServiceName"), copyV.ServiceName)
+		info += fmt.Sprintf("%s: %s\n%s: %s\n",
+			color.RedString("ServiceName"), copyV.ServiceName,
+			color.RedString("Authority"), copyV.Authority)
 	}
 
 	if copyV.Security == "reality" {
@@ -174,6 +176,7 @@ func (t *Trojan) ConvertToGeneralConfig() GeneralConfig {
 		g.TLS = t.Security
 	}
 	g.TlsFingerprint = t.TlsFingerprint
+	g.Authority = t.Authority
 	g.ServiceName = t.ServiceName
 	g.Mode = t.Mode
 	g.Type = t.Type
@@ -261,6 +264,7 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 			HealthCheckTimeout: 20,
 			MultiMode:          multiMode,
 			IdleTimeout:        60,
+			Authority:          t.Authority,
 			ServiceName:        t.ServiceName,
 		}
 
