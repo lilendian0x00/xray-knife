@@ -1,28 +1,28 @@
-# xray-knife
+# 🔪 xray-knife
 Swiss army knife tool (cli) for [xray-core](https://github.com/XTLS/Xray-core).
 
 **I DEDICATE THIS TOOL TO MY DEAR PERSIAN PEOPLE.**
 
 **استفاده از این نرم افزار برای حمایت کنندگان جمهوری اسلامی حرام است.**
 
-## Description
+## 🎯 The Gool
 Since there was no existing program capable of directly checking xray-core config links in bulk, I took it upon myself to develop such a tool. I have now made it publicly available, enabling everyone to benefit from and enjoy its functionality. (`net http` command).
 You can also benefit from other key features of this program, such as its rotating proxy functionality (`proxy` command).
 
 You can view the flags of each command by using the `-h` or `--help` option.
 
-## Features (main commands)
+## 🌟 Features (main commands)
 - `parse`: Detailed info about given xray config link.
 - `subs`: Subscription management tool.
 - `net`: Network testing tools for one or multiple xray configs.
 - `scan`: Scanning tools needed for bypassing GFW (CF Scanner, REALITY Scanner).
 - `proxy`: Creates proxy server to work as a client for xray-core configs.
 
-## Download
+## 📦 Download
 
 Get the latest version from [GitHub](https://github.com/lilendian0x00/xray-knife/releases/latest).
 
-## Build instruction
+## 🏗️ Build instruction
 Only works on golang version 1.21
 
 1. `Install golang`
@@ -31,16 +31,14 @@ Only works on golang version 1.21
 4. `go build .`
     
 
-# Screenshots
+# 🧪 Examples
 ### http test CSV report
 <img src="./images/httpCSV.png" width="600" alt="sample1">
-
 
 ### http test log
 <img src="./images/httpTest.png" width="1357" alt="sample2">
 
-
-# TODO
+# 📋 TODO
 ## protocols - parse
 - [X] ~~Add Vmess link support (`vmess://...`, full b64 encoded)~~
 - [X] ~~Add Vmess link v2 support (`vmess://...`, semi b64 encoded)~~
