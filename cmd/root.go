@@ -16,7 +16,7 @@ var rootCmd = &cobra.Command{
 	Use:     "github.com/lilendian0x00/xray-knife",
 	Short:   "Swiss Army Knife for xray-core",
 	Long:    ``,
-	Version: "2.13.18",
+	Version: "2.14.20",
 	// Main Tools:
 	//1. parse: Parses xray config link.
 	//2. net: Multiple network tests for xray configs.
