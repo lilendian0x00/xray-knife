@@ -57,6 +57,7 @@ type GeneralConfig struct {
 	SNI            string
 	ALPN           string
 	TlsFingerprint string
+	Authority      string
 	ServiceName    string
 	Mode           string
 	Type           string
@@ -110,6 +111,7 @@ type Vless struct {
 	TlsFingerprint string `json:"fp"`          // TLS fingerprint
 	Type           string `json:"type"`        // Network
 	Remark         string `json:"ps"`          // Config's name
+	Authority      string `json:"authority"`   // GRPC
 	ServiceName    string `json:"serviceName"` // GRPC
 	Mode           string `json:"mode"`        // GRPC
 	OrigLink       string `json:"-"`           // Original link
@@ -142,6 +144,7 @@ type Trojan struct {
 	AllowInsecure  string `json:"allowInsecure"` // Insecure TLS
 	Type           string `json:"type"`          // Network
 	Remark         string // Config's name
+	Authority      string `json:"authority"`   // GRPC
 	ServiceName    string `json:"serviceName"` // GRPC
 	Mode           string `json:"mode"`        // GRPC
 

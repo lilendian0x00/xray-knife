@@ -170,7 +170,9 @@ func (v *Vmess) DetailsStr() string {
 		if copyV.Host == "" {
 			copyV.Host = "none"
 		}
-		info += fmt.Sprintf("%s: %s\n", color.RedString("ServiceName"), copyV.Path)
+		info += fmt.Sprintf("%s: %s\n%s: %s\n",
+			color.RedString("ServiceName"), copyV.Path,
+			color.RedString("Authority"), copyV.Host)
 	}
 
 	if len(copyV.TLS) != 0 && copyV.TLS != "none" {
@@ -297,6 +299,7 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 			HealthCheckTimeout: 20,
 			MultiMode:          multiMode,
 			IdleTimeout:        60,
+			Authority:          v.Host,
 			ServiceName:        v.Path,
 		}
 	case "quic":
