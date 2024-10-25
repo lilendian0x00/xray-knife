@@ -38,10 +38,10 @@ func (s *Shadowsocks) Parse(configLink string) error {
 	if len(secondPart) > 1 {
 		decoded, err = utils.Base64Decode(secondPart[0])
 		if err != nil {
-			return errors.New("Error when decoding secret part ")
+			return errors.New("error when decoding secret part")
 		}
 	} else {
-		return errors.New("Invalid config link ")
+		return errors.New("invalid config link")
 	}
 
 	//link := "ss://" + string(decoded) + "@" + secondPart[1]
@@ -50,6 +50,10 @@ func (s *Shadowsocks) Parse(configLink string) error {
 	//	return err
 	//}
 	creds := strings.SplitN(string(decoded), ":", 2)
+	if len(creds) != 2 {
+		return errors.New("error when decoding secret part")
+	}
+
 	s.Encryption = creds[0] // Encryption Type
 	s.Password = creds[1]   // Encryption Password
 

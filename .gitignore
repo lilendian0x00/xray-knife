@@ -22,3 +22,7 @@ go.work
 
 
 .idea
+configs.txt
+valid.*
+xray-knife
+xray-knife.exe

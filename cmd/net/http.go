@@ -3,6 +3,7 @@ package net
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -127,8 +128,35 @@ var HttpCmd = &cobra.Command{
 			SpeedtestAmount:        speedtestAmount,
 		}
 
+		switch outputType {
+		case "csv":
+			base := strings.TrimSuffix(outputFile, filepath.Ext(outputFile))
+			outputFile = base + ".csv"
+			break
+		case "txt":
+			break
+		default:
+			customlog.Printf(customlog.Failure, "Bad output format!\nAllowed formats: txt, csv\n")
+			os.Exit(1)
+		}
+
 		if configLinksFile != "" {
 			links := utils.ParseFileByNewline(configLinksFile)
+			fmt.Printf("%s: %d\n%s: %d\n%s: %dms\n%s: %t\n%s: %s\n%s: %t\n%s: %t\n%s: %s\n%s: %t\n\n",
+				color.RedString("Total configs"), len(links),
+				color.RedString("Thread count"), threadCount,
+				color.RedString("Maximum delay"), maximumAllowedDelay,
+				color.RedString("Speed test"), speedtest,
+				color.RedString("Test url"), destURL,
+				color.RedString("IP info"), getIPInfo,
+				color.RedString("Insecure TLS"), insecureTLS,
+				color.RedString("Output type"), outputType,
+				color.RedString("Verbose"), verbose)
+
+			if speedtest && outputType != "csv" {
+				customlog.Printf(customlog.Processing, "Speedtest is enabled, switching to CSV output!\n\n")
+				outputType = "csv"
+			}
 
 			confRes := HttpTestMultipleConfigs(examiner, links, threadCount, true)
 
@@ -152,10 +180,6 @@ var HttpCmd = &cobra.Command{
 				}
 				customlog.Printf(customlog.Finished, "A total of %d working configurations have been saved to %s\n", len(validConfigs), outputFile)
 			} else if outputType == "csv" {
-				if outputFile == "valid.txt" {
-					outputFile = "valid.csv"
-				}
-
 				out, err := gocsv.MarshalString(&confRes)
 				if err != nil {
 					customlog.Printf(customlog.Failure, "Saving configs failed due to the error: %v\n", err)
@@ -205,7 +229,7 @@ func init() {
 	HttpCmd.Flags().BoolVarP(&getIPInfo, "rip", "r", false, "Send request to XXXX/cdn-cgi/trace to receive config's IP details")
 	HttpCmd.Flags().Uint32VarP(&speedtestAmount, "amount", "a", 10000, "Download and upload amount (KB)")
 	HttpCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose xray-core")
-	HttpCmd.Flags().StringVarP(&outputType, "type", "x", "txt", "Output type (csv, txt)")
+	HttpCmd.Flags().StringVarP(&outputType, "type", "x", "txt", "Output type (txt, csv)")
 	HttpCmd.Flags().StringVarP(&outputFile, "out", "o", "valid.txt", "Output file for valid config links")
 	HttpCmd.Flags().BoolVarP(&sortedByRealDelay, "sort", "s", true, "Sort config links by their delay (fast to slow)")
 }
