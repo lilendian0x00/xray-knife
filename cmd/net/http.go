@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/lilendian0x00/xray-knife/internal"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -116,6 +117,8 @@ var HttpCmd = &cobra.Command{
 	Short: "Examine config[s] real delay using http request",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
+
+		// Validations
 		switch CoreType {
 		case "auto":
 			break
@@ -125,6 +128,18 @@ var HttpCmd = &cobra.Command{
 			break
 		default:
 			customlog.Printf(customlog.Failure, "Invalid core type!\nAvailable cores: (auto, xray, singbox)")
+			os.Exit(1)
+		}
+
+		switch outputType {
+		case "csv":
+			base := strings.TrimSuffix(outputFile, filepath.Ext(outputFile))
+			outputFile = base + ".csv"
+			break
+		case "txt":
+			break
+		default:
+			customlog.Printf(customlog.Failure, "Bad output format!\nAllowed formats: txt, csv\n")
 			os.Exit(1)
 		}
 
@@ -146,6 +161,21 @@ var HttpCmd = &cobra.Command{
 
 		if configLinksFile != "" {
 			links := utils.ParseFileByNewline(configLinksFile)
+			fmt.Printf("%s: %d\n%s: %d\n%s: %dms\n%s: %t\n%s: %s\n%s: %t\n%s: %t\n%s: %s\n%s: %t\n\n",
+				color.RedString("Total configs"), len(links),
+				color.RedString("Thread count"), threadCount,
+				color.RedString("Maximum delay"), maximumAllowedDelay,
+				color.RedString("Speed test"), speedtest,
+				color.RedString("Test url"), destURL,
+				color.RedString("IP info"), getIPInfo,
+				color.RedString("Insecure TLS"), insecureTLS,
+				color.RedString("Output type"), outputType,
+				color.RedString("Verbose"), verbose)
+
+			if speedtest && outputType != "csv" {
+				customlog.Printf(customlog.Processing, "Speedtest is enabled, switching to CSV output!\n\n")
+				outputType = "csv"
+			}
 
 			confRes := HttpTestMultipleConfigs(examiner, links, threadCount, true)
 
@@ -169,10 +199,6 @@ var HttpCmd = &cobra.Command{
 				}
 				customlog.Printf(customlog.Finished, "A total of %d working configurations have been saved to %s\n", len(validConfigs), outputFile)
 			} else if outputType == "csv" {
-				if outputFile == "valid.txt" {
-					outputFile = "valid.csv"
-				}
-
 				out, err := gocsv.MarshalString(&confRes)
 				if err != nil {
 					customlog.Printf(customlog.Failure, "Saving configs failed due to the error: %v\n", err)

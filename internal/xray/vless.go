@@ -114,7 +114,12 @@ func (v *Vless) DetailsStr() string {
 		if copyV.ServiceName == "" {
 			copyV.ServiceName = "none"
 		}
-		info += fmt.Sprintf("%s: %s\n", color.RedString("ServiceName"), copyV.ServiceName)
+		if copyV.Authority == "" {
+			copyV.Authority = "none"
+		}
+		info += fmt.Sprintf("%s: %s\n%s: %s\n",
+			color.RedString("ServiceName"), copyV.ServiceName,
+			color.RedString("Authority"), copyV.Authority)
 	}
 
 	if copyV.Security == "reality" {
@@ -170,6 +175,7 @@ func (v *Vless) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.SNI = v.SNI
 	g.ALPN = v.ALPN
 	g.TlsFingerprint = v.TlsFingerprint
+	g.Authority = v.Authority
 	g.ServiceName = v.ServiceName
 	g.Mode = v.Mode
 	g.Type = v.Type
@@ -256,6 +262,7 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 		}
 
 		s.GRPCConfig = &conf.GRPCConfig{
+			Authority:           v.Authority,
 			ServiceName:         v.ServiceName,
 			MultiMode:           multiMode,
 			IdleTimeout:         60,

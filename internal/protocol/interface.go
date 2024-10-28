@@ -42,6 +42,7 @@ type GeneralConfig struct {
 	SNI            string
 	ALPN           string
 	TlsFingerprint string
+	Authority      string
 	ServiceName    string
 	Mode           string
 	Type           string
