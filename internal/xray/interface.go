@@ -60,6 +60,7 @@ type Vless struct {
 	TlsFingerprint string `json:"fp"`          // TLS fingerprint
 	Type           string `json:"type"`        // Network
 	Remark         string `json:"ps"`          // Config's name
+	Authority      string `json:"authority"`   // GRPC
 	ServiceName    string `json:"serviceName"` // GRPC
 	Mode           string `json:"mode"`        // GRPC
 	OrigLink       string `json:"-"`           // Original link

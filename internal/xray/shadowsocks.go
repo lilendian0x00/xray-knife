@@ -51,6 +51,10 @@ func (s *Shadowsocks) Parse() error {
 	//	return err
 	//}
 	creds := strings.SplitN(string(decoded), ":", 2)
+	if len(creds) != 2 {
+		return errors.New("error when decoding secret part")
+	}
+
 	s.Encryption = creds[0] // Encryption Type
 	s.Password = creds[1]   // Encryption Password
 
