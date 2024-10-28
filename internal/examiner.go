@@ -18,7 +18,8 @@ import (
 type Result struct {
 	ConfigLink    string            `csv:"link"` // vmess://... vless//..., etc
 	Protocol      protocol.Protocol `csv:"-"`
-	Status        string            `csv:"status"`   // passed, semi-passed, failed
+	Status        string            `csv:"status"`   // passed, semi-passed, failed, broken
+	Reason        string            `csv:"reason"`   // reason of the error
 	TLS           string            `csv:"tls"`      // none, tls, reality
 	RealIPAddr    string            `csv:"ip"`       // Real ip address (req to cloudflare.com/cdn-cgi/trace)
 	Delay         int64             `csv:"delay"`    // millisecond
@@ -182,9 +183,10 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 	r.Protocol = proto
 	r.TLS = proto.ConvertToGeneralConfig().TLS
 
-	client, instance, err1 := core.MakeHttpClient(proto, time.Duration(e.MaxDelay)*time.Millisecond)
-	if err1 != nil {
+	client, instance, err := core.MakeHttpClient(proto, time.Duration(e.MaxDelay)*time.Millisecond)
+	if err != nil {
 		r.Status = "broken"
+		r.Reason = err.Error()
 		return r, nil
 	}
 	// Close xray conn after testing
@@ -198,6 +200,7 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 	if err != nil {
 		//customlog.Printf(customlog.Failure, "Config didn't respond!\n\n")
 		r.Status = "failed"
+		r.Reason = err.Error()
 		return r, nil
 		//os.Exit(1)
 	}

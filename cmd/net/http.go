@@ -221,8 +221,8 @@ var HttpCmd = &cobra.Command{
 				return
 			}
 
-			if res.Status == "failed" {
-				customlog.Printf(customlog.Failure, "Config didn't respond!\n")
+			if res.Status != "passed" {
+				customlog.Printf(customlog.Failure, "%s: %s\n", res.Status, res.Reason)
 			} else {
 				customlog.Printf(customlog.Success, "Real Delay: %dms\n", res.Delay)
 				if speedtest {
