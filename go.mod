@@ -4,7 +4,7 @@ go 1.23
 
 require (
 	github.com/fatih/color v1.18.0
-	github.com/gocarina/gocsv v0.0.0-20231116093920-b87c2d0e983a
+	github.com/gocarina/gocsv v0.0.0-20240520201108-78e41c74b4b1
 	github.com/imroc/req/v3 v3.48.0
 	github.com/sagernet/sing v0.5.0-rc.4
 	github.com/sagernet/sing-box v1.10.1
