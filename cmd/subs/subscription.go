@@ -1,6 +1,7 @@
 package subs
 
 import (
+	"github.com/imroc/req/v3"
 	"io"
 	"log"
 	"net/url"
@@ -20,11 +21,19 @@ type Subscription struct {
 }
 
 func (s *Subscription) FetchAll() ([]string, error) {
-	ll, _ := url.Parse(s.Url)
+	u, _ := url.Parse(s.Url)
 	if s.Method == "" {
 		s.Method = "GET"
 	}
-	response, err := utils.SendHTTPRequest(ll, s.UserAgent, s.Method)
+
+	client := req.C().ImpersonateChrome()
+
+	r := client.R()
+	if s.UserAgent != "" {
+		r.SetHeader("User-Agent", s.UserAgent)
+	}
+
+	response, err := r.Send(s.Method, u.String())
 	if err != nil {
 		return nil, err
 	}

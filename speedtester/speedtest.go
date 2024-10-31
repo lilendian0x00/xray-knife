@@ -1,14 +1,8 @@
 package speedtester
 
 import (
-	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"time"
-
-	"github.com/lilendian0x00/xray-knife/network/customtls"
 	"github.com/lilendian0x00/xray-knife/speedtester/custom"
+	"net/http"
 )
 
 type SpeedTester struct {
@@ -73,84 +67,84 @@ func NewSpeedTester(tester TesterI, opts ...SpeedTesterOption) *SpeedTester {
 	return s
 }
 
-func (s *SpeedTester) startDownloadTest(address string) (int64, error) {
-	dialConn, err := net.DialTimeout("tcp", address, time.Second*30)
-	if err != nil {
-		return -1, fmt.Errorf("net.DialTimeout error: %+v", err)
-	}
-	uTlsConn, err := customtls.MakeUTLSConn(dialConn, s.downloadRequest.Host)
-	if err != nil {
-		return -1, err
-	}
-
-	resp, err := customtls.HttpOverUTLSConn(uTlsConn, s.downloadRequest, uTlsConn.ConnectionState().NegotiatedProtocol)
-	if err != nil {
-		return -1, err
-	}
-
-	start := time.Now()
-	_, err = io.ReadAll(resp.Body)
-	if err != nil {
-		return -1, err
-	}
-	duration := time.Since(start).Milliseconds()
-
-	resp.Body.Close()
-	uTlsConn.Close()
-	dialConn.Close()
-	return duration, nil
-}
-
-func (s *SpeedTester) startUploadTest(address string) (int64, error) {
-	dialConn, err := net.DialTimeout("tcp", address, time.Second*30)
-	if err != nil {
-		return -1, fmt.Errorf("net.DialTimeout error: %+v", err)
-	}
-	uTlsConn, err := customtls.MakeUTLSConn(dialConn, s.uploadRequest.Host)
-	if err != nil {
-		return -1, err
-	}
-
-	start := time.Now()
-	resp, err := customtls.HttpOverUTLSConn(uTlsConn, s.uploadRequest, uTlsConn.ConnectionState().NegotiatedProtocol)
-	if err != nil {
-		return -1, err
-	}
-	duration := time.Since(start).Milliseconds()
-
-	resp.Body.Close()
-	uTlsConn.Close()
-	dialConn.Close()
-	return duration, nil
-}
-
-//type SpeedTesterI interface {
-//	startDownloadTest() error
-//	StartUploadTest() error
-//}
+//func (s *SpeedTester) startDownloadTest(address string) (int64, error) {
+//	dialConn, err := net.DialTimeout("tcp", address, time.Second*30)
+//	if err != nil {
+//		return -1, fmt.Errorf("net.DialTimeout error: %+v", err)
+//	}
+//	uTlsConn, err := customtls.MakeUTLSConn(dialConn, s.downloadRequest.Host)
+//	if err != nil {
+//		return -1, err
+//	}
 //
-//type SpeedTestDecorator struct {
-//	original SpeedTesterI
-//}
+//	resp, err := customtls.HttpOverUTLSConn(uTlsConn, s.downloadRequest, uTlsConn.ConnectionState().NegotiatedProtocol)
+//	if err != nil {
+//		return -1, err
+//	}
 //
-//func (d *SpeedTestDecorator) startDownloadTest() error {
-//	// measure delay before calling original download method
 //	start := time.Now()
-//	err := d.original.startDownloadTest()
-//	duration := time.Since(start)
+//	_, err = io.ReadAll(resp.Body)
+//	if err != nil {
+//		return -1, err
+//	}
+//	duration := time.Since(start).Milliseconds()
 //
-//	// log or handle the duration as per your requirements
-//
-//	return err
+//	resp.Body.Close()
+//	uTlsConn.Close()
+//	dialConn.Close()
+//	return duration, nil
 //}
 //
-//func (d *SpeedTestDecorator) StartUploadTest() error {
-//	// measure delay before calling original upload method
+//func (s *SpeedTester) startUploadTest(address string) (int64, error) {
+//	dialConn, err := net.DialTimeout("tcp", address, time.Second*30)
+//	if err != nil {
+//		return -1, fmt.Errorf("net.DialTimeout error: %+v", err)
+//	}
+//	uTlsConn, err := customtls.MakeUTLSConn(dialConn, s.uploadRequest.Host)
+//	if err != nil {
+//		return -1, err
+//	}
+//
 //	start := time.Now()
-//	err := d.original.StartUploadTest()
-//	duration := time.Since(start)
+//	resp, err := customtls.HttpOverUTLSConn(uTlsConn, s.uploadRequest, uTlsConn.ConnectionState().NegotiatedProtocol)
+//	if err != nil {
+//		return -1, err
+//	}
+//	duration := time.Since(start).Milliseconds()
 //
-//	// log or handle the duration as per your requirements
-//
-//	return err
+//	resp.Body.Close()
+//	uTlsConn.Close()
+//	dialConn.Close()
+//	return duration, nil
 //}
+//
+////type SpeedTesterI interface {
+////	startDownloadTest() error
+////	StartUploadTest() error
+////}
+////
+////type SpeedTestDecorator struct {
+////	original SpeedTesterI
+////}
+////
+////func (d *SpeedTestDecorator) startDownloadTest() error {
+////	// measure delay before calling original download method
+////	start := time.Now()
+////	err := d.original.startDownloadTest()
+////	duration := time.Since(start)
+////
+////	// log or handle the duration as per your requirements
+////
+////	return err
+////}
+////
+////func (d *SpeedTestDecorator) StartUploadTest() error {
+////	// measure delay before calling original upload method
+////	start := time.Now()
+////	err := d.original.StartUploadTest()
+////	duration := time.Since(start)
+////
+////	// log or handle the duration as per your requirements
+////
+////	return err
+////}
