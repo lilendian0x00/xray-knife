@@ -157,6 +157,11 @@ func (t *Trojan) DetailsStr() string {
 			color.RedString("SNI"), copyV.SNI,
 			color.RedString("ALPN"), copyV.ALPN,
 			color.RedString("Fingerprint"), copyV.TlsFingerprint)
+
+		if t.AllowInsecure != "" {
+			info += fmt.Sprintf("%s: %v\n",
+				color.RedString("Insecure"), t.AllowInsecure)
+		}
 	} else {
 		info += fmt.Sprintf("%s: none\n", color.RedString("TLS"))
 	}
@@ -193,12 +198,14 @@ func (t *Trojan) CraftInboundOptions() *option.Inbound {
 	}
 }
 
-func (t *Trojan) CraftOutboundOptions() (*option.Outbound, error) {
+func (t *Trojan) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, error) {
 	port, _ := strconv.Atoi(t.Port)
 
 	tls := false
 	var alpn []string
 	var fingerprint string
+	var insecure = allowInsecure
+
 	if t.Security == "tls" || t.Security == "reality" {
 		tls = true
 
@@ -210,6 +217,12 @@ func (t *Trojan) CraftOutboundOptions() (*option.Outbound, error) {
 		fingerprint = "chrome"
 		if t.TlsFingerprint != "" && t.TlsFingerprint != "none" {
 			fingerprint = t.TlsFingerprint
+		}
+
+		if t.AllowInsecure != "" {
+			if t.AllowInsecure == "1" || t.AllowInsecure == "true" {
+				insecure = true
+			}
 		}
 	}
 
@@ -285,6 +298,7 @@ func (t *Trojan) CraftOutboundOptions() (*option.Outbound, error) {
 					Enabled:     true,
 					Fingerprint: fingerprint,
 				},
+				Insecure: insecure,
 			},
 		},
 	}
@@ -302,9 +316,9 @@ func (t *Trojan) CraftOutboundOptions() (*option.Outbound, error) {
 	}, nil
 }
 
-func (t *Trojan) CraftOutbound(ctx context.Context, l logger.ContextLogger) (adapter.Outbound, error) {
+func (t *Trojan) CraftOutbound(ctx context.Context, l logger.ContextLogger, allowInsecure bool) (adapter.Outbound, error) {
 
-	options, err := t.CraftOutboundOptions()
+	options, err := t.CraftOutboundOptions(allowInsecure)
 	if err != nil {
 		return nil, err
 	}

@@ -121,7 +121,7 @@ func (s *Shadowsocks) CraftInboundOptions() *option.Inbound {
 	}
 }
 
-func (s *Shadowsocks) CraftOutboundOptions() (*option.Outbound, error) {
+func (s *Shadowsocks) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, error) {
 	port, _ := strconv.Atoi(s.Port)
 
 	opts := option.ShadowsocksOutboundOptions{
@@ -140,9 +140,9 @@ func (s *Shadowsocks) CraftOutboundOptions() (*option.Outbound, error) {
 	}, nil
 }
 
-func (s *Shadowsocks) CraftOutbound(ctx context.Context, l logger.ContextLogger) (adapter.Outbound, error) {
+func (s *Shadowsocks) CraftOutbound(ctx context.Context, l logger.ContextLogger, allowInsecure bool) (adapter.Outbound, error) {
 
-	options, err := s.CraftOutboundOptions()
+	options, err := s.CraftOutboundOptions(allowInsecure)
 	if err != nil {
 		return nil, err
 	}

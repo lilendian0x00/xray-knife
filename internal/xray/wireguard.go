@@ -118,7 +118,7 @@ func (w *Wireguard) BuildOutboundDetourConfig(allowInsecure bool) (*conf.Outboun
 	//	DomainStrategy: "ForceIPv6v4",
 	//}
 
-	oset := json.RawMessage([]byte(fmt.Sprintf(`{
+	oset := json.RawMessage(fmt.Sprintf(`{
   "secretKey": "%s",
   "address": ["%s", "%s"],
   "peers": [
@@ -130,7 +130,7 @@ func (w *Wireguard) BuildOutboundDetourConfig(allowInsecure bool) (*conf.Outboun
   "mtu": %d
 }
 `, w.SecretKey, strings.Split(w.LocalAddress, ",")[0], strings.Split(w.LocalAddress, ",")[1], w.Endpoint, w.PublicKey, w.Mtu,
-	)))
+	))
 	out.Settings = &oset
 
 	return out, nil

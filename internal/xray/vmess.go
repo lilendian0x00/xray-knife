@@ -193,6 +193,11 @@ func (v *Vmess) DetailsStr() string {
 			color.RedString("SNI"), copyV.SNI,
 			color.RedString("ALPN"), copyV.ALPN,
 			color.RedString("Fingerprint"), copyV.TlsFingerprint)
+
+		if v.AllowInsecure != "" {
+			info += fmt.Sprintf("%s: %v\n",
+				color.RedString("Insecure"), v.AllowInsecure)
+		}
 	}
 	return info
 }
@@ -332,7 +337,7 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 	}
 
 	out.StreamSetting = s
-	oset := json.RawMessage([]byte(fmt.Sprintf(`{
+	oset := json.RawMessage(fmt.Sprintf(`{
   "vnext": [
     {
       "address": "%s",
@@ -346,7 +351,7 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
       ]
     }
   ]
-}`, v.Address, v.Port, v.ID, v.Aid, v.Security)))
+}`, v.Address, v.Port, v.ID, v.Aid, v.Security))
 	out.Settings = &oset
 	return out, nil
 }

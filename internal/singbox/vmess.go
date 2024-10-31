@@ -233,7 +233,7 @@ func (v *Vmess) CraftInboundOptions() *option.Inbound {
 	}
 }
 
-func (v *Vmess) CraftOutboundOptions() (*option.Outbound, error) {
+func (v *Vmess) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, error) {
 	// Port type checker
 	var port int
 	p, ok := v.Port.(int)
@@ -263,6 +263,7 @@ func (v *Vmess) CraftOutboundOptions() (*option.Outbound, error) {
 	tls := false
 	var alpn []string
 	var fingerprint string
+	var insecure = allowInsecure
 
 	if v.TLS == "tls" {
 		tls = true
@@ -275,6 +276,12 @@ func (v *Vmess) CraftOutboundOptions() (*option.Outbound, error) {
 		fingerprint = "chrome"
 		if v.TlsFingerprint != "" && v.TlsFingerprint != "none" {
 			fingerprint = v.TlsFingerprint
+		}
+
+		if v.AllowInsecure != "" {
+			if v.AllowInsecure == "1" || v.AllowInsecure == "true" {
+				insecure = true
+			}
 		}
 	}
 
@@ -350,6 +357,7 @@ func (v *Vmess) CraftOutboundOptions() (*option.Outbound, error) {
 					Enabled:     true,
 					Fingerprint: fingerprint,
 				},
+				Insecure: insecure,
 			},
 		},
 	}
@@ -360,9 +368,9 @@ func (v *Vmess) CraftOutboundOptions() (*option.Outbound, error) {
 	}, nil
 }
 
-func (v *Vmess) CraftOutbound(ctx context.Context, l logger.ContextLogger) (adapter.Outbound, error) {
+func (v *Vmess) CraftOutbound(ctx context.Context, l logger.ContextLogger, allowInsecure bool) (adapter.Outbound, error) {
 
-	options, err := v.CraftOutboundOptions()
+	options, err := v.CraftOutboundOptions(allowInsecure)
 	if err != nil {
 		return nil, err
 	}

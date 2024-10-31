@@ -38,9 +38,10 @@ type Examiner struct {
 	// =========================== //
 
 	// Maximum allowed delay (in ms)
-	MaxDelay uint16
-	Verbose  bool
-	ShowBody bool
+	MaxDelay    uint16
+	Verbose     bool
+	ShowBody    bool
+	InsecureTLS bool
 
 	DoSpeedtest bool
 	DoIPInfo    bool
@@ -59,9 +60,10 @@ type Options struct {
 	CoreInstance Core
 
 	// Maximum allowed delay (in ms)
-	MaxDelay uint16
-	Verbose  bool
-	ShowBody bool
+	MaxDelay    uint16
+	Verbose     bool
+	ShowBody    bool
+	InsecureTLS bool
 
 	DoSpeedtest bool
 	DoIPInfo    bool
@@ -73,9 +75,10 @@ type Options struct {
 
 func NewExaminer(opts Options) (*Examiner, error) {
 	e := &Examiner{
-		MaxDelay:               10000,
+		MaxDelay:               opts.MaxDelay,
 		Verbose:                opts.Verbose,
 		ShowBody:               opts.ShowBody,
+		InsecureTLS:            opts.InsecureTLS,
 		DoSpeedtest:            opts.DoSpeedtest,
 		DoIPInfo:               opts.DoIPInfo,
 		TestEndpoint:           "https://cloudflare.com/cdn-cgi/trace",
@@ -88,21 +91,21 @@ func NewExaminer(opts Options) (*Examiner, error) {
 	} else {
 		switch opts.Core {
 		case "xray":
-			e.Core = CoreFactory(XrayCoreType)
+			e.Core = CoreFactory(XrayCoreType, e.InsecureTLS, e.Verbose)
 			break
 		case "singbox":
-			e.Core = CoreFactory(SingboxCoreType)
+			e.Core = CoreFactory(SingboxCoreType, e.InsecureTLS, e.Verbose)
 			break
 		default:
 			e.Core = nil
-			e.xrayCore = CoreFactory(XrayCoreType)
-			e.singboxCore = CoreFactory(SingboxCoreType)
+			e.xrayCore = CoreFactory(XrayCoreType, e.InsecureTLS, e.Verbose)
+			e.singboxCore = CoreFactory(SingboxCoreType, e.InsecureTLS, e.Verbose)
 			e.SelectedCore = map[string]Core{
-				protocol.VmessIdentifier:       e.singboxCore,
-				protocol.VlessIdentifier:       e.singboxCore,
-				protocol.ShadowsocksIdentifier: e.singboxCore,
-				protocol.TrojanIdentifier:      e.singboxCore,
-				protocol.SocksIdentifier:       e.singboxCore,
+				protocol.VmessIdentifier:       e.xrayCore,
+				protocol.VlessIdentifier:       e.xrayCore,
+				protocol.ShadowsocksIdentifier: e.xrayCore,
+				protocol.TrojanIdentifier:      e.xrayCore,
+				protocol.SocksIdentifier:       e.xrayCore,
 				protocol.WireguardIdentifier:   e.singboxCore,
 				protocol.Hysteria2Identifier:   e.singboxCore,
 				"hy2":                          e.singboxCore,

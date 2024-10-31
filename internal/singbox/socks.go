@@ -145,7 +145,7 @@ func (s *Socks) CraftInboundOptions() *option.Inbound {
 	}
 }
 
-func (s *Socks) CraftOutboundOptions() (*option.Outbound, error) {
+func (s *Socks) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, error) {
 	// Port type checker
 	var port, _ = strconv.Atoi(s.Port)
 
@@ -165,8 +165,8 @@ func (s *Socks) CraftOutboundOptions() (*option.Outbound, error) {
 	}, nil
 }
 
-func (s *Socks) CraftOutbound(ctx context.Context, l logger.ContextLogger) (adapter.Outbound, error) {
-	options, err := s.CraftOutboundOptions()
+func (s *Socks) CraftOutbound(ctx context.Context, l logger.ContextLogger, allowInsecure bool) (adapter.Outbound, error) {
+	options, err := s.CraftOutboundOptions(allowInsecure)
 	if err != nil {
 		return nil, err
 	}

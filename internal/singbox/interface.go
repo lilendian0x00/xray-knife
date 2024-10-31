@@ -12,9 +12,9 @@ type Protocol interface {
 	Parse() error
 	DetailsStr() string
 	ConvertToGeneralConfig() protocol.GeneralConfig
-	CraftOutboundOptions() (*option.Outbound, error)
+	CraftOutboundOptions(allowInsecure bool) (*option.Outbound, error)
 	CraftInboundOptions() *option.Inbound
-	CraftOutbound(ctx context.Context, l logger.ContextLogger) (adapter.Outbound, error)
+	CraftOutbound(ctx context.Context, l logger.ContextLogger, allowInsecure bool) (adapter.Outbound, error)
 }
 
 type Vmess struct {
@@ -59,14 +59,15 @@ type Vless struct {
 	Host           string `json:"host"`       // HTTP, WS
 	Path           string `json:"path"`
 	Port           string `json:"port"`
-	SNI            string `json:"sni"`         // Server name indication
-	ALPN           string `json:"alpn"`        // Application-Layer Protocol Negotiation
-	TlsFingerprint string `json:"fp"`          // TLS fingerprint
-	Type           string `json:"type"`        // Network
-	Remark         string `json:"ps"`          // Config's name
-	ServiceName    string `json:"serviceName"` // GRPC
-	Mode           string `json:"mode"`        // GRPC
-	OrigLink       string `json:"-"`           // Original link
+	SNI            string `json:"sni"`           // Server name indication
+	ALPN           string `json:"alpn"`          // Application-Layer Protocol Negotiation
+	TlsFingerprint string `json:"fp"`            // TLS fingerprint
+	AllowInsecure  string `json:"allowInsecure"` // Insecure TLS
+	Type           string `json:"type"`          // Network
+	Remark         string `json:"ps"`            // Config's name
+	ServiceName    string `json:"serviceName"`   // GRPC
+	Mode           string `json:"mode"`          // GRPC
+	OrigLink       string `json:"-"`             // Original link
 }
 
 type Shadowsocks struct {
@@ -132,9 +133,9 @@ type Hysteria2 struct {
 	Address       string
 	Port          string
 	Password      string
-	ObfusType     string      `json:"obfs"`
-	ObfusPassword string      `json:"obfs-password"`
-	SNI           string      `json:"sni"`
-	Insecure      interface{} `json:"insecure"`
-	OrigLink      string      // Original link
+	ObfusType     string `json:"obfs"`
+	ObfusPassword string `json:"obfs-password"`
+	SNI           string `json:"sni"`
+	Insecure      string `json:"insecure"`
+	OrigLink      string // Original link
 }
