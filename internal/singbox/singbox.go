@@ -86,7 +86,7 @@ func (c *Core) SetInbound(inbound protocol.Protocol) error {
 func (c *Core) MakeInstance(outbound protocol.Protocol) (protocol.Instance, error) {
 	out := outbound.(Protocol)
 
-	outOpts, err := out.CraftOutboundOptions()
+	outOpts, err := out.CraftOutboundOptions(c.AllowInsecure)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +127,7 @@ func (c *Core) MakeInstance(outbound protocol.Protocol) (protocol.Instance, erro
 func (c *Core) MakeHttpClient(outbound protocol.Protocol, maxDelay time.Duration) (*http.Client, protocol.Instance, error) {
 	out := outbound.(Protocol)
 
-	craftOutbound, err := out.CraftOutbound(context.Background(), c.Log)
+	craftOutbound, err := out.CraftOutbound(context.Background(), c.Log, c.AllowInsecure)
 	if err != nil {
 		return nil, nil, err
 	}

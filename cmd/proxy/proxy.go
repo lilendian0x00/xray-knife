@@ -52,7 +52,7 @@ var ProxyCmd = &cobra.Command{
 
 		switch CoreType {
 		case "xray":
-			core = internal.CoreFactory(internal.XrayCoreType)
+			core = internal.CoreFactory(internal.XrayCoreType, insecureTLS, verbose)
 
 			inbound = &xray.Socks{
 				Remark:  "Listener",
@@ -61,7 +61,7 @@ var ProxyCmd = &cobra.Command{
 			}
 			break
 		case "singbox":
-			core = internal.CoreFactory(internal.SingboxCoreType)
+			core = internal.CoreFactory(internal.SingboxCoreType, insecureTLS, verbose)
 
 			inbound = &singbox.Socks{
 				Remark:  "Listener",

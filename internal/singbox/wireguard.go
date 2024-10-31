@@ -108,7 +108,7 @@ func (w *Wireguard) CraftInboundOptions() *option.Inbound {
 	}
 }
 
-func (w *Wireguard) CraftOutboundOptions() (*option.Outbound, error) {
+func (w *Wireguard) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, error) {
 	Address, portS, err := net.SplitHostPort(w.Endpoint)
 	if err != nil {
 		return nil, err
@@ -146,9 +146,9 @@ func (w *Wireguard) CraftOutboundOptions() (*option.Outbound, error) {
 	}, nil
 }
 
-func (w *Wireguard) CraftOutbound(ctx context.Context, l logger.ContextLogger) (adapter.Outbound, error) {
+func (w *Wireguard) CraftOutbound(ctx context.Context, l logger.ContextLogger, allowInsecure bool) (adapter.Outbound, error) {
 
-	options, err := w.CraftOutboundOptions()
+	options, err := w.CraftOutboundOptions(allowInsecure)
 	if err != nil {
 		return nil, err
 	}

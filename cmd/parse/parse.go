@@ -33,8 +33,8 @@ var ParseCmd = &cobra.Command{
 			return
 		}
 
-		xrayCore := internal.CoreFactory(internal.XrayCoreType)
-		singboxCore := internal.CoreFactory(internal.SingboxCoreType)
+		xrayCore := internal.CoreFactory(internal.XrayCoreType, false, false)
+		singboxCore := internal.CoreFactory(internal.SingboxCoreType, false, false)
 		SelectedCore := map[string]internal.Core{
 			protocol.VmessIdentifier:       xrayCore,
 			protocol.VlessIdentifier:       xrayCore,

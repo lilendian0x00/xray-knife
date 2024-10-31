@@ -53,6 +53,7 @@ func (h *Hysteria2) Parse() error {
 
 		// If the query value exists for the field, set it
 		if values, ok := uri.Query()[tag]; ok {
+
 			value := values[0]
 			v := reflect.ValueOf(h).Elem().FieldByName(field.Name)
 
@@ -84,9 +85,9 @@ func (h *Hysteria2) DetailsStr() string {
 		color.RedString("Password"), h.Password,
 		color.RedString("SNI"), h.SNI)
 
-	if h.Insecure != nil {
+	if h.Insecure != "" {
 		info += fmt.Sprintf("%s: %v\n",
-			color.RedString("Obfuscation Type"), h.Insecure)
+			color.RedString("Insecure"), h.Insecure)
 	}
 
 	if h.ObfusType != "" {
@@ -108,23 +109,13 @@ func (h *Hysteria2) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	return g
 }
 
-func (h *Hysteria2) CraftOutboundOptions() (*option.Outbound, error) {
+func (h *Hysteria2) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, error) {
 	port, _ := strconv.Atoi(h.Port)
-	var insecure = false
+	var insecure = allowInsecure
 
-	if h.Insecure != nil {
-		v, ok := h.Insecure.(int)
-		if ok {
-			if v == 1 {
-				insecure = true
-			}
-		}
-
-		vv, ok := h.Insecure.(bool)
-		if ok {
-			if vv {
-				insecure = true
-			}
+	if h.Insecure != "" {
+		if h.Insecure == "1" || h.Insecure == "true" {
+			insecure = true
 		}
 	}
 
@@ -134,10 +125,6 @@ func (h *Hysteria2) CraftOutboundOptions() (*option.Outbound, error) {
 			Server:     h.Address,
 			ServerPort: uint16(port),
 		},
-		Obfs: &option.Hysteria2Obfs{
-			Type:     h.ObfusType,
-			Password: h.ObfusPassword,
-		},
 		Password: h.Password,
 		OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{
 			TLS: &option.OutboundTLSOptions{
@@ -146,6 +133,13 @@ func (h *Hysteria2) CraftOutboundOptions() (*option.Outbound, error) {
 				Insecure:   insecure,
 			},
 		},
+	}
+
+	if h.ObfusType != "" {
+		opts.Obfs = &option.Hysteria2Obfs{
+			Type:     h.ObfusType,
+			Password: h.ObfusPassword,
+		}
 	}
 
 	return &option.Outbound{
@@ -160,8 +154,8 @@ func (h *Hysteria2) CraftInboundOptions() *option.Inbound {
 	}
 }
 
-func (h *Hysteria2) CraftOutbound(ctx context.Context, l logger.ContextLogger) (adapter.Outbound, error) {
-	options, err := h.CraftOutboundOptions()
+func (h *Hysteria2) CraftOutbound(ctx context.Context, l logger.ContextLogger, allowInsecure bool) (adapter.Outbound, error) {
+	options, err := h.CraftOutboundOptions(allowInsecure)
 	if err != nil {
 		return nil, err
 	}

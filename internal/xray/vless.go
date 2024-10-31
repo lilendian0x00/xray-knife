@@ -153,6 +153,11 @@ func (v *Vless) DetailsStr() string {
 			color.RedString("SNI"), copyV.SNI,
 			color.RedString("ALPN"), copyV.ALPN,
 			color.RedString("Fingerprint"), copyV.TlsFingerprint)
+
+		if v.AllowInsecure != "" {
+			info += fmt.Sprintf("%s: %v\n",
+				color.RedString("Insecure"), v.AllowInsecure)
+		}
 	} else {
 		info += fmt.Sprintf("%s: none\n", color.RedString("TLS"))
 	}
@@ -203,7 +208,7 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 		} else { // headerType=http
 			pathb, _ := json.Marshal(strings.Split(v.Path, ","))
 			hostb, _ := json.Marshal(strings.Split(v.Host, ","))
-			s.TCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`
+			s.TCPSettings.HeaderConfig = []byte(fmt.Sprintf(`
 			{
 				"type": "http",
 				"request": {
@@ -214,7 +219,7 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 					}
 				}
 			}
-			`, string(pathb), string(hostb))))
+			`, string(pathb), string(hostb)))
 		}
 		break
 	case "kcp":
@@ -288,12 +293,19 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 	}
 
 	if v.Security == "tls" {
+		var insecure = allowInsecure
+		if v.AllowInsecure != "" {
+			if v.AllowInsecure == "1" || v.AllowInsecure == "true" {
+				insecure = true
+			}
+		}
+
 		if v.TlsFingerprint == "" {
 			v.TlsFingerprint = "chrome"
 		}
 		s.TLSSettings = &conf.TLSConfig{
 			Fingerprint: v.TlsFingerprint,
-			Insecure:    allowInsecure,
+			Insecure:    insecure,
 		}
 		if v.SNI != "" {
 			s.TLSSettings.ServerName = v.SNI
@@ -316,7 +328,7 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 	}
 
 	out.StreamSetting = s
-	oset := json.RawMessage([]byte(fmt.Sprintf(`{
+	oset := json.RawMessage(fmt.Sprintf(`{
   "vnext": [
     {
       "address": "%s",
@@ -332,7 +344,7 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
       ]
     }
   ]
-}`, v.Address, v.Port, v.ID, v.Flow)))
+}`, v.Address, v.Port, v.ID, v.Flow))
 	out.Settings = &oset
 	return out, nil
 }

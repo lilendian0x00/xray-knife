@@ -117,7 +117,6 @@ var HttpCmd = &cobra.Command{
 	Short: "Examine config[s] real delay using http request",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-
 		// Validations
 		switch CoreType {
 		case "auto":
@@ -148,6 +147,7 @@ var HttpCmd = &cobra.Command{
 			MaxDelay:               maximumAllowedDelay,
 			Verbose:                verbose,
 			ShowBody:               showBody,
+			InsecureTLS:            insecureTLS,
 			DoSpeedtest:            speedtest,
 			DoIPInfo:               getIPInfo,
 			TestEndpoint:           destURL,

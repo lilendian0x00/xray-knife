@@ -70,7 +70,6 @@ func (t *Trojan) Parse() error {
 	if err != nil {
 		t.Remark = uri.Fragment
 	}
-	t.OrigLink = t.OrigLink
 
 	if t.HeaderType == "http" || t.Type == "ws" || t.Type == "h2" {
 		if t.Path == "" {
@@ -152,6 +151,11 @@ func (t *Trojan) DetailsStr() string {
 			color.RedString("SNI"), copyV.SNI,
 			color.RedString("ALPN"), copyV.ALPN,
 			color.RedString("Fingerprint"), copyV.TlsFingerprint)
+
+		if t.AllowInsecure != "" {
+			info += fmt.Sprintf("%s: %v\n",
+				color.RedString("Insecure"), t.AllowInsecure)
+		}
 	} else {
 		info += fmt.Sprintf("%s: none\n", color.RedString("TLS"))
 	}
@@ -273,7 +277,7 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 		}
 
 		s.QUICSettings = &conf.QUICConfig{
-			Header:   json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, tp))),
+			Header:   json.RawMessage(fmt.Sprintf(`{ "type": "%s" }`, tp)),
 			Security: t.QuicSecurity,
 			Key:      t.Key,
 		}
@@ -281,12 +285,19 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 	}
 
 	if t.Security == "tls" {
+		var insecure = allowInsecure
+		if t.AllowInsecure != "" {
+			if t.AllowInsecure == "1" || t.AllowInsecure == "true" {
+				insecure = true
+			}
+		}
+
 		if t.TlsFingerprint == "" {
 			t.TlsFingerprint = "chrome"
 		}
 		s.TLSSettings = &conf.TLSConfig{
 			Fingerprint: t.TlsFingerprint,
-			Insecure:    allowInsecure,
+			Insecure:    insecure,
 		}
 		if t.AllowInsecure == "1" {
 			s.TLSSettings.Insecure = true
@@ -312,7 +323,7 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 	}
 
 	out.StreamSetting = s
-	oset := json.RawMessage([]byte(fmt.Sprintf(`{
+	oset := json.RawMessage(fmt.Sprintf(`{
   "servers": [
     {
       "address": "%s",
@@ -323,7 +334,7 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 	  "flow": "%s"
     }
   ]
-}`, t.Address, t.Port, t.Password, t.Flow)))
+}`, t.Address, t.Port, t.Password, t.Flow))
 	out.Settings = &oset
 	return out, nil
 }

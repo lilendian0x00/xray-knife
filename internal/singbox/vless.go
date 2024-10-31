@@ -154,6 +154,11 @@ func (v *Vless) DetailsStr() string {
 			color.RedString("SNI"), copyV.SNI,
 			color.RedString("ALPN"), copyV.ALPN,
 			color.RedString("Fingerprint"), copyV.TlsFingerprint)
+
+		if v.AllowInsecure != "" {
+			info += fmt.Sprintf("%s: %v\n",
+				color.RedString("Insecure"), v.AllowInsecure)
+		}
 	} else {
 		info += fmt.Sprintf("%s: none\n", color.RedString("TLS"))
 	}
@@ -191,12 +196,13 @@ func (v *Vless) CraftInboundOptions() *option.Inbound {
 	}
 }
 
-func (v *Vless) CraftOutboundOptions() (*option.Outbound, error) {
+func (v *Vless) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, error) {
 	port, _ := strconv.Atoi(v.Port)
 
 	tls := false
 	var alpn []string
 	var fingerprint string
+	var insecure = allowInsecure
 
 	if v.Security == "tls" || v.Security == "reality" {
 		tls = true
@@ -209,6 +215,12 @@ func (v *Vless) CraftOutboundOptions() (*option.Outbound, error) {
 		fingerprint = "chrome"
 		if v.TlsFingerprint != "" && v.TlsFingerprint != "none" {
 			fingerprint = v.TlsFingerprint
+		}
+
+		if v.AllowInsecure != "" {
+			if v.AllowInsecure == "1" || v.AllowInsecure == "true" {
+				insecure = true
+			}
 		}
 	}
 
@@ -283,6 +295,7 @@ func (v *Vless) CraftOutboundOptions() (*option.Outbound, error) {
 					Enabled:     true,
 					Fingerprint: fingerprint,
 				},
+				Insecure: insecure,
 			},
 		},
 		Flow: v.Flow,
@@ -301,9 +314,9 @@ func (v *Vless) CraftOutboundOptions() (*option.Outbound, error) {
 	}, nil
 }
 
-func (v *Vless) CraftOutbound(ctx context.Context, l logger.ContextLogger) (adapter.Outbound, error) {
+func (v *Vless) CraftOutbound(ctx context.Context, l logger.ContextLogger, allowInsecure bool) (adapter.Outbound, error) {
 
-	options, err := v.CraftOutboundOptions()
+	options, err := v.CraftOutboundOptions(allowInsecure)
 	if err != nil {
 		return nil, err
 	}

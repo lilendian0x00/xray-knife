@@ -27,12 +27,12 @@ type Core interface {
 }
 
 // CoreFactory is the factory method to create cores
-func CoreFactory(coreType CoreType) Core {
+func CoreFactory(coreType CoreType, insecureTLS bool, verbose bool) Core {
 	switch coreType {
 	case XrayCoreType:
-		return xray.NewXrayService(false, false)
+		return xray.NewXrayService(verbose, insecureTLS)
 	case SingboxCoreType:
-		return singbox.NewSingboxService(false, false)
+		return singbox.NewSingboxService(verbose, insecureTLS)
 	//case AutoCoreType:
 	//	return NewAutomaticCore(false, false)
 	default:
