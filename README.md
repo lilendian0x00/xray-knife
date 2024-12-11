@@ -65,3 +65,5 @@ Only works on golang version 1.21
 
 ## scan (under development)
 - [ ] Cloudflare white-list IP scanner
+
+Verify (Lil Endian)
