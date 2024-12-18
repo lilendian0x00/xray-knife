@@ -82,8 +82,8 @@ func (w *Wireguard) Parse() error {
 }
 
 func (w *Wireguard) DetailsStr() string {
-	info := fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %d\n%s: %s\n%s: %v\n%s: %s\n", w.Name(),
-		color.RedString("Protocol"),
+	info := fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %d\n%s: %s\n%s: %v\n%s: %s\n",
+		color.RedString("Protocol"), w.Name(),
 		color.RedString("Remark"), w.Remark,
 		color.RedString("Endpoint"), w.Endpoint,
 		color.RedString("MTU"), w.Mtu,
@@ -116,6 +116,19 @@ func (w *Wireguard) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, 
 
 	port, _ := strconv.Atoi(portS)
 
+	var reserved = []uint8{0, 0, 0}
+	if w.Reserved != "" {
+		reservedList := strings.Split(w.Reserved, ",")
+		for i, v := range reservedList {
+			num, err := strconv.ParseUint(v, 10, 8)
+			if err != nil {
+				fmt.Println(err)
+				return nil, errors.New("invalid reserved value")
+			}
+			reserved[i] = uint8(num)
+		}
+	}
+
 	opts := option.WireGuardOutboundOptions{
 		DialerOptions: option.DialerOptions{},
 		ServerOptions: option.ServerOptions{
@@ -124,12 +137,15 @@ func (w *Wireguard) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, 
 		},
 		LocalAddress:  option.Listable[netip.Prefix]{},
 		PeerPublicKey: w.PublicKey,
-		PreSharedKey:  w.SecretKey,
-		Reserved:      nil,
+		PrivateKey:    w.SecretKey,
+		PreSharedKey:  "",
+		Reserved:      reserved,
 		MTU:           uint32(w.Mtu),
 	}
 
 	localAddresses := strings.Split(w.LocalAddress, ",")
+
+	opts.LocalAddress = make(option.Listable[netip.Prefix], len(localAddresses))
 
 	// Parsing local addresses
 	for i, v := range localAddresses {
@@ -153,7 +169,9 @@ func (w *Wireguard) CraftOutbound(ctx context.Context, l logger.ContextLogger, a
 		return nil, err
 	}
 
-	out, err := outbound.New(ctx, adapter.RouterFromContext(ctx), l, "out_wireguard", *options)
+	router := adapter.RouterFromContext(ctx)
+
+	out, err := outbound.New(ctx, router, l, "out_wireguard", *options)
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("failed creating wireguard outbound: %v", err))
 	}

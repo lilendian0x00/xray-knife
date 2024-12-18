@@ -135,7 +135,15 @@ func (c *Core) MakeHttpClient(outbound protocol.Protocol, maxDelay time.Duration
 	tr := &http.Transport{
 		DisableKeepAlives: true,
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return craftOutbound.DialContext(ctx, network, M.ParseSocksaddr(addr))
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			ips, lookupErr := net.LookupIP(host)
+			if lookupErr != nil {
+				return nil, lookupErr
+			}
+			return craftOutbound.DialContext(ctx, network, M.ParseSocksaddr(ips[0].To4().String()+":"+port))
 		},
 	}
 
