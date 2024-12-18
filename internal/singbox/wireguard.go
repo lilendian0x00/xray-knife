@@ -65,9 +65,11 @@ func (w *Wireguard) Parse() error {
 			case "string":
 				v.SetString(value)
 			case "int32":
-				var intValue int
-				fmt.Sscanf(value, "%d", &intValue)
-				v.SetInt(int64(intValue))
+				intValue, err := strconv.ParseInt(value, 10, 32)
+				if err != nil {
+					return fmt.Errorf("failed to parse int32 value: %w", err)
+				}
+				v.SetInt(intValue)
 
 			}
 		}
@@ -114,7 +116,10 @@ func (w *Wireguard) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, 
 		return nil, err
 	}
 
-	port, _ := strconv.Atoi(portS)
+	port, err := strconv.ParseUint(portS, 10, 16)
+	if err != nil {
+		return nil, errors.New("invalid port number")
+	}
 
 	var reserved = []uint8{0, 0, 0}
 	if w.Reserved != "" {
@@ -135,25 +140,37 @@ func (w *Wireguard) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, 
 			Server:     Address,
 			ServerPort: uint16(port),
 		},
-		LocalAddress:  option.Listable[netip.Prefix]{},
+		LocalAddress: option.Listable[netip.Prefix]{},
+		//Peers: []option.WireGuardPeer{
+		//	{
+		//		ServerOptions: option.ServerOptions{
+		//			Server:     Address,
+		//			ServerPort: uint16(port),
+		//		},
+		//		PublicKey:    w.PublicKey,
+		//		PreSharedKey: "",                            // Changed from SecretKey to PreSharedKey
+		//		AllowedIPs:   []string{"0.0.0.0/0", "::/0"}, // Added IPv6 support
+		//		Reserved:     reserved,
+		//	},
+		//},
 		PeerPublicKey: w.PublicKey,
 		PrivateKey:    w.SecretKey,
-		PreSharedKey:  "",
-		Reserved:      reserved,
-		MTU:           uint32(w.Mtu),
+		//PreSharedKey: w.SecretKey,
+		Reserved: reserved,
+		MTU:      uint32(w.Mtu),
 	}
 
 	localAddresses := strings.Split(w.LocalAddress, ",")
 
-	opts.LocalAddress = make(option.Listable[netip.Prefix], len(localAddresses))
+	//opts.LocalAddress = make(option.Listable[netip.Prefix], len(localAddresses))
 
 	// Parsing local addresses
-	for i, v := range localAddresses {
+	for _, v := range localAddresses {
 		prefix, err := netip.ParsePrefix(v)
 		if err != nil {
 			return nil, err
 		}
-		opts.LocalAddress[i] = prefix
+		opts.LocalAddress = append(opts.LocalAddress, prefix)
 	}
 
 	return &option.Outbound{
