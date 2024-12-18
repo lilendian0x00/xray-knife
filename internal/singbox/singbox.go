@@ -63,6 +63,16 @@ func NewSingboxService(verbose bool, allowInsecure bool, opts ...ServiceOption) 
 		s.Log = l.Logger()
 	}
 
+	if verbose {
+		l, _ := log.New(log.Options{
+			Options: option.LogOptions{
+				Disabled: false,
+				Level:    "trace",
+			},
+		})
+		s.Log = l.Logger()
+	}
+
 	return s
 }
 
@@ -132,9 +142,12 @@ func (c *Core) MakeHttpClient(outbound protocol.Protocol, maxDelay time.Duration
 		return nil, nil, err
 	}
 
-	tr := &http.Transport{
-		DisableKeepAlives: true,
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialFunc := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return craftOutbound.DialContext(ctx, network, M.ParseSocksaddr(addr))
+	}
+
+	if craftOutbound.Type() == protocol.WireguardIdentifier {
+		dialFunc = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(addr)
 			if err != nil {
 				return nil, err
@@ -144,7 +157,12 @@ func (c *Core) MakeHttpClient(outbound protocol.Protocol, maxDelay time.Duration
 				return nil, lookupErr
 			}
 			return craftOutbound.DialContext(ctx, network, M.ParseSocksaddr(ips[0].To4().String()+":"+port))
-		},
+		}
+	}
+
+	tr := &http.Transport{
+		DisableKeepAlives: true,
+		DialContext:       dialFunc,
 	}
 
 	return &http.Client{

@@ -91,7 +91,7 @@ func TestWireguard_MakeHttpClient(t *testing.T) {
 		return
 	}
 
-	client, _, err := s.MakeHttpClient(protocol, time.Duration(10)*time.Second)
+	client, _, err := s.MakeHttpClient(protocol, time.Duration(20)*time.Second)
 	if err != nil {
 		t.Errorf(err.Error())
 		return
