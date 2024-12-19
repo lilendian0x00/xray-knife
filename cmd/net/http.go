@@ -210,7 +210,7 @@ var HttpCmd = &cobra.Command{
 					os.Exit(1)
 				}
 
-				customlog.Printf(customlog.Finished, "A total of %d configurations have been saved to %s\n", len(confRes), outputFile)
+				customlog.Printf(customlog.Finished, "A total of %d configurations have been saved to %s\n", len(validConfigs), outputFile)
 			}
 
 		} else {
