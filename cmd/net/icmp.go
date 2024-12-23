@@ -5,10 +5,10 @@ import (
 	"net"
 	"os"
 
-	"github.com/lilendian0x00/xray-knife/utils/customlog"
-	"github.com/lilendian0x00/xray-knife/xray"
+	"github.com/lilendian0x00/xray-knife/v2/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v2/xray"
 
-	"github.com/lilendian0x00/xray-knife/network"
+	"github.com/lilendian0x00/xray-knife/v2/network"
 	"github.com/spf13/cobra"
 )
 

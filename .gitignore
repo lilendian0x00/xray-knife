@@ -20,7 +20,7 @@
 # Go workspace file
 go.work
 
-
+.DS_Store
 .idea
 configs.txt
 valid.*

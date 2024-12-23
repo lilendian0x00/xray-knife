@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/lilendian0x00/xray-knife/utils"
-	"github.com/lilendian0x00/xray-knife/xray"
+	"github.com/lilendian0x00/xray-knife/v2/utils"
+	"github.com/lilendian0x00/xray-knife/v2/xray"
 	"github.com/spf13/cobra"
 )
 
