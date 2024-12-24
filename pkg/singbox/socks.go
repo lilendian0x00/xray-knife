@@ -1,18 +1,22 @@
-package xray
+package singbox
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/internal/protocol"
-	"log"
+	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
+	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/outbound"
+	"github.com/sagernet/sing/common/logger"
 	"net"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
 
 	"github.com/fatih/color"
-	"github.com/lilendian0x00/xray-knife/utils"
-	net2 "github.com/xtls/xray-core/common/net"
+	"github.com/lilendian0x00/xray-knife/v2/utils"
 	"github.com/xtls/xray-core/infra/conf"
 )
 
@@ -21,7 +25,7 @@ func NewSocks(link string) Protocol {
 }
 
 func (s *Socks) Name() string {
-	return "socks"
+	return protocol.SocksIdentifier
 }
 
 func (s *Socks) Parse() error {
@@ -47,8 +51,6 @@ func (s *Socks) Parse() error {
 		s.Username = creds[0]
 		s.Password = creds[1]
 	}
-
-	s.OrigLink = s.OrigLink
 
 	return err
 }
@@ -117,48 +119,62 @@ func (s *Socks) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 	return out, nil
 }
 
-func (s *Socks) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
-	p := conf.TransportProtocol("tcp")
-	in := &conf.InboundDetourConfig{
-		Protocol: s.Name(),
-		Tag:      s.Name(),
-		Settings: nil,
-		StreamSetting: &conf.StreamConfig{
-			Network: &p,
+func (s *Socks) CraftInboundOptions() *option.Inbound {
+	port, _ := strconv.Atoi(s.Port)
+	addr, _ := netip.ParseAddr(s.Address)
+
+	opts := option.SocksInboundOptions{
+		ListenOptions: option.ListenOptions{
+			Listen:                      option.NewListenAddress(addr),
+			ListenPort:                  uint16(port),
+			TCPFastOpen:                 false,
+			TCPMultiPath:                false,
+			UDPFragment:                 nil,
+			UDPFragmentDefault:          false,
+			UDPTimeout:                  0,
+			ProxyProtocol:               false,
+			ProxyProtocolAcceptNoHeader: false,
+			Detour:                      "",
+			InboundOptions:              option.InboundOptions{},
 		},
-		ListenOn: &conf.Address{},
+		Users: nil,
 	}
-	// Convert string to uint32
-	uint32Value, err := strconv.ParseUint(s.Port, 10, 32)
+	return &option.Inbound{
+		Type:         s.Name(),
+		SocksOptions: opts,
+	}
+}
+
+func (s *Socks) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, error) {
+	// Port type checker
+	var port, _ = strconv.Atoi(s.Port)
+
+	opts := option.SocksOutboundOptions{
+		DialerOptions: option.DialerOptions{},
+		ServerOptions: option.ServerOptions{
+			Server:     s.Address,
+			ServerPort: uint16(port),
+		},
+		Username: s.Username,
+		Password: s.Password,
+	}
+
+	return &option.Outbound{
+		Type:         s.Name(),
+		SocksOptions: opts,
+	}, nil
+}
+
+func (s *Socks) CraftOutbound(ctx context.Context, l logger.ContextLogger, allowInsecure bool) (adapter.Outbound, error) {
+	options, err := s.CraftOutboundOptions(allowInsecure)
 	if err != nil {
-		log.Fatalln("Error converting string to uint32:", err)
+		return nil, err
 	}
 
-	// Convert uint64 to uint32
-	uint32Result := uint32(uint32Value)
-
-	// Parse addr
-	in.ListenOn.Address = net2.ParseAddress(s.Address)
-	in.PortList = &conf.PortList{Range: []conf.PortRange{
-		{From: uint32Result, To: uint32Result},
-	}}
-
-	var auth = "noauth"
-	var accounts = ""
-	if len(s.Username) != 0 {
-		auth = "password"
-		accounts = fmt.Sprintf("{\n\"user\": \"%s\",\n\"pass\": \"%s\"\n}", s.Username, s.Password)
+	out, err := outbound.New(ctx, adapter.RouterFromContext(ctx), l, "out_socks", *options)
+	if err != nil {
+		return nil, err
 	}
 
-	oset := json.RawMessage([]byte(fmt.Sprintf(`{
-	  "auth": "%s",
-        "accounts": [
-    		%s
-  		],
-        "udp": true,
-        "allowTransparent": false
-	}`, auth, accounts)))
-	in.Settings = &oset
-
-	return in, nil
+	return out, nil
 }

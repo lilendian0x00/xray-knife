@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/lilendian0x00/xray-knife/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v2/utils/customlog"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 )
@@ -35,7 +35,7 @@ func NewIcmpPacket(dest string, count uint16, opts ...IcmpPacketOption) (*IcmpPa
 	}
 
 	i.DestIP = net.ParseIP(dest)
-	if i.DestIP != nil {
+	if i.DestIP == nil {
 		addr, err := net.LookupIP(dest)
 		if err != nil {
 			return nil, err

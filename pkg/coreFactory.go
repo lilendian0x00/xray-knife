@@ -1,9 +1,9 @@
-package internal
+package pkg
 
 import (
-	"github.com/lilendian0x00/xray-knife/internal/protocol"
-	"github.com/lilendian0x00/xray-knife/internal/singbox"
-	"github.com/lilendian0x00/xray-knife/internal/xray"
+	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
+	"github.com/lilendian0x00/xray-knife/v2/pkg/singbox"
+	"github.com/lilendian0x00/xray-knife/v2/pkg/xray"
 	"net/http"
 	"time"
 )

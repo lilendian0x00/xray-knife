@@ -2,7 +2,7 @@ package xray
 
 import (
 	"errors"
-	"github.com/lilendian0x00/xray-knife/internal/protocol"
+	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
 	"net/url"
 	"strings"
 )

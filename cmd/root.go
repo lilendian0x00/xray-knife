@@ -1,13 +1,13 @@
 package cmd
 
 import (
-	"github.com/lilendian0x00/xray-knife/cmd/proxy"
+	"github.com/lilendian0x00/xray-knife/v2/cmd/proxy"
 	"os"
 
-	"github.com/lilendian0x00/xray-knife/cmd/net"
-	"github.com/lilendian0x00/xray-knife/cmd/parse"
-	"github.com/lilendian0x00/xray-knife/cmd/scan"
-	"github.com/lilendian0x00/xray-knife/cmd/subs"
+	"github.com/lilendian0x00/xray-knife/v2/cmd/net"
+	"github.com/lilendian0x00/xray-knife/v2/cmd/parse"
+	"github.com/lilendian0x00/xray-knife/v2/cmd/scan"
+	"github.com/lilendian0x00/xray-knife/v2/cmd/subs"
 	"github.com/spf13/cobra"
 )
 

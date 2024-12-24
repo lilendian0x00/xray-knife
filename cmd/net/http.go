@@ -2,8 +2,6 @@ package net
 
 import (
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/internal"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -11,245 +9,321 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/gocarina/gocsv"
-	"github.com/lilendian0x00/xray-knife/utils"
-	"github.com/lilendian0x00/xray-knife/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v2/pkg"
+	"github.com/lilendian0x00/xray-knife/v2/utils"
+	"github.com/lilendian0x00/xray-knife/v2/utils/customlog"
 	"github.com/spf13/cobra"
 )
 
-var (
-	configLinksFile     string
-	outputFile          string
-	outputType          string
-	threadCount         uint16
+// Config holds all command configuration options
+type Config struct {
+	ConfigLink          string
+	ConfigLinksFile     string
+	OutputFile          string
+	OutputType          string
+	ThreadCount         uint16
 	CoreType            string
-	destURL             string
-	httpMethod          string
-	showBody            bool
-	insecureTLS         bool
-	verbose             bool
-	sortedByRealDelay   bool
-	speedtest           bool
-	getIPInfo           bool
-	speedtestAmount     uint32
-	maximumAllowedDelay uint16
-)
-
-var validConfigs []string
-var validConfigsMu sync.Mutex
-
-type ConfigResults []*internal.Result
-
-func (cResults ConfigResults) Len() int {
-	return len(cResults)
+	DestURL             string
+	HTTPMethod          string
+	ShowBody            bool
+	InsecureTLS         bool
+	Verbose             bool
+	SortedByRealDelay   bool
+	Speedtest           bool
+	GetIPInfo           bool
+	SpeedtestAmount     uint32
+	MaximumAllowedDelay uint16
 }
 
-func (cResults ConfigResults) Less(i, j int) bool {
-	if (cResults[i].Delay < cResults[j].Delay) && (cResults[i].DownloadSpeed >= cResults[j].DownloadSpeed) && (cResults[i].UploadSpeed >= cResults[j].UploadSpeed) {
-		return true
-	} /*else if cResults[i].Delay == cResults[j].Delay {
-		return cResults[i].ConfigLink < cResults[j].ConfigLink
-	}*/
-	return false
+// ConfigResults represents a slice of test results
+type ConfigResults []*pkg.Result
+
+// ResultProcessor handles the processing and storage of test results
+type ResultProcessor struct {
+	validConfigs   []string
+	validConfigsMu sync.Mutex
+	config         *Config
 }
 
-func (cResults ConfigResults) Swap(i, j int) {
-	cResults[i], cResults[j] = cResults[j], cResults[i]
+// NewResultProcessor creates a new ResultProcessor instance
+func NewResultProcessor(config *Config) *ResultProcessor {
+	return &ResultProcessor{
+		validConfigs: make([]string, 0),
+		config:       config,
+	}
 }
 
-func HttpTestMultipleConfigs(examiner *internal.Examiner, links []string, threadCount uint16, verbose bool) ConfigResults {
-	d := color.New(color.FgCyan, color.Bold)
+// Sort interface implementation for ConfigResults
+func (cr ConfigResults) Len() int { return len(cr) }
+func (cr ConfigResults) Less(i, j int) bool {
+	return cr[i].Delay < cr[j].Delay &&
+		cr[i].DownloadSpeed >= cr[j].DownloadSpeed &&
+		cr[i].UploadSpeed >= cr[j].UploadSpeed
+}
+func (cr ConfigResults) Swap(i, j int) { cr[i], cr[j] = cr[j], cr[i] }
 
-	// Limit the number of concurrent workers
-	semaphore := make(chan int, threadCount)
+// TestManager handles the concurrent testing of configurations
+type TestManager struct {
+	examiner    *pkg.Examiner
+	processor   *ResultProcessor
+	threadCount uint16
+	verbose     bool
+}
 
-	// Wait for all workers to finish
-	wg := sync.WaitGroup{}
+// NewTestManager creates a new TestManager instance
+func NewTestManager(examiner *pkg.Examiner, processor *ResultProcessor, threadCount uint16, verbose bool) *TestManager {
+	return &TestManager{
+		examiner:    examiner,
+		processor:   processor,
+		threadCount: threadCount,
+		verbose:     verbose,
+	}
+}
 
-	var confRes ConfigResults
+// TestConfigs tests multiple configurations concurrently
+func (tm *TestManager) TestConfigs(links []string) ConfigResults {
+	semaphore := make(chan int, tm.threadCount)
+	var wg sync.WaitGroup
+	var results ConfigResults
 
-	for i := 0; i < len(links); i++ {
+	for i := range links {
 		semaphore <- 1
 		wg.Add(1)
-		go func(configIndex int) {
-			defer func() {
-				// Free the worker at the end
-				<-semaphore
-				wg.Done()
-			}()
-
-			res, err := examiner.ExamineConfig(links[configIndex])
-			if err != nil {
-				if verbose {
-					customlog.Printf(customlog.Failure, "Error: %s - broken config: %s\n", err.Error(), links[configIndex])
-				}
-				return
-			}
-
-			if res.Status == "passed" {
-				if verbose {
-					d.Printf("Config Number: %d\n", configIndex+1)
-					fmt.Printf("%v", res.Protocol.DetailsStr())
-					customlog.Printf(customlog.Success, "Real Delay: %dms\n\n", res.Delay)
-				}
-			}
-
-			if outputType == "csv" || res.Status == "passed" {
-				// Save both passed and failed configs if we save as csv
-				validConfigsMu.Lock()
-				confRes = append(confRes, &res)
-				validConfigsMu.Unlock()
-			}
-			return
-		}(i)
+		go tm.testSingleConfig(links[i], i, &results, semaphore, &wg)
 	}
-	// Wait for all goroutines to finish
+
 	wg.Wait()
-
-	// Close semaphore channel
 	close(semaphore)
-
-	return confRes
+	return results
 }
 
-// HttpCmd represents the http command
-var HttpCmd = &cobra.Command{
-	Use:   "http",
-	Short: "Examine config[s] real delay using http request",
-	Long:  ``,
-	Run: func(cmd *cobra.Command, args []string) {
-		// Validations
-		switch CoreType {
-		case "auto":
-			break
-		case "xray":
-			break
-		case "singbox":
-			break
-		default:
-			customlog.Printf(customlog.Failure, "Invalid core type!\nAvailable cores: (auto, xray, singbox)")
-			os.Exit(1)
+// testSingleConfig tests a single configuration
+func (tm *TestManager) testSingleConfig(link string, index int, results *ConfigResults, semaphore chan int, wg *sync.WaitGroup) {
+	defer func() {
+		<-semaphore
+		wg.Done()
+	}()
+
+	res, err := tm.examiner.ExamineConfig(link)
+	if err != nil {
+		if tm.verbose {
+			customlog.Printf(customlog.Failure, "Error: %s - broken config: %s\n", err.Error(), link)
 		}
+		return
+	}
 
-		switch outputType {
-		case "csv":
-			base := strings.TrimSuffix(outputFile, filepath.Ext(outputFile))
-			outputFile = base + ".csv"
-			break
-		case "txt":
-			break
-		default:
-			customlog.Printf(customlog.Failure, "Bad output format!\nAllowed formats: txt, csv\n")
-			os.Exit(1)
+	if res.Status == "passed" && tm.verbose {
+		tm.printSuccessDetails(index, res)
+	}
+
+	if tm.processor.config.OutputType == "csv" || res.Status == "passed" {
+		tm.processor.validConfigsMu.Lock()
+		*results = append(*results, &res)
+		tm.processor.validConfigsMu.Unlock()
+	}
+}
+
+// printSuccessDetails prints the details of a successful test
+func (tm *TestManager) printSuccessDetails(index int, res pkg.Result) {
+	d := color.New(color.FgCyan, color.Bold)
+	d.Printf("Config Number: %d\n", index+1)
+	fmt.Printf("%v", res.Protocol.DetailsStr())
+	customlog.Printf(customlog.Success, "Real Delay: %dms\n\n", res.Delay)
+}
+
+// SaveResults saves the test results to a file
+func (rp *ResultProcessor) SaveResults(results ConfigResults) error {
+	if rp.config.SortedByRealDelay {
+		sort.Sort(results)
+	}
+
+	switch rp.config.OutputType {
+	case "txt":
+		return rp.saveTxtResults(results)
+	case "csv":
+		return rp.saveCSVResults(results)
+	default:
+		return fmt.Errorf("unsupported output type: %s", rp.config.OutputType)
+	}
+}
+
+// saveTxtResults saves results in text format
+func (rp *ResultProcessor) saveTxtResults(results ConfigResults) error {
+	for _, v := range results {
+		if v.Status == "passed" {
+			rp.validConfigs = append(rp.validConfigs, v.ConfigLink)
 		}
+	}
 
-		examiner, err := internal.NewExaminer(internal.Options{
-			Core:                   CoreType,
-			MaxDelay:               maximumAllowedDelay,
-			Verbose:                verbose,
-			ShowBody:               showBody,
-			InsecureTLS:            insecureTLS,
-			DoSpeedtest:            speedtest,
-			DoIPInfo:               getIPInfo,
-			TestEndpoint:           destURL,
-			TestEndpointHttpMethod: httpMethod,
-			SpeedtestKbAmount:      speedtestAmount,
-		})
-		if err != nil {
-			customlog.Printf(customlog.Failure, "%v", err)
-			os.Exit(1)
+	content := strings.Join(rp.validConfigs, "\n\n")
+	if err := utils.WriteIntoFile(rp.config.OutputFile, []byte(content)); err != nil {
+		return fmt.Errorf("failed to save configs: %v", err)
+	}
+
+	customlog.Printf(customlog.Finished, "A total of %d working configurations have been saved to %s\n",
+		len(rp.validConfigs), rp.config.OutputFile)
+	return nil
+}
+
+// saveCSVResults saves results in CSV format
+func (rp *ResultProcessor) saveCSVResults(results ConfigResults) error {
+	out, err := gocsv.MarshalString(&results)
+	if err != nil {
+		return fmt.Errorf("failed to marshal CSV: %v", err)
+	}
+
+	if err := utils.WriteIntoFile(rp.config.OutputFile, []byte(out)); err != nil {
+		return fmt.Errorf("failed to save configs: %v", err)
+	}
+
+	for _, v := range results {
+		if v.Status == "passed" {
+			rp.validConfigs = append(rp.validConfigs, v.ConfigLink)
 		}
+	}
 
-		if configLinksFile != "" {
-			links := utils.ParseFileByNewline(configLinksFile)
-			fmt.Printf("%s: %d\n%s: %d\n%s: %dms\n%s: %t\n%s: %s\n%s: %t\n%s: %t\n%s: %s\n%s: %t\n\n",
-				color.RedString("Total configs"), len(links),
-				color.RedString("Thread count"), threadCount,
-				color.RedString("Maximum delay"), maximumAllowedDelay,
-				color.RedString("Speed test"), speedtest,
-				color.RedString("Test url"), destURL,
-				color.RedString("IP info"), getIPInfo,
-				color.RedString("Insecure TLS"), insecureTLS,
-				color.RedString("Output type"), outputType,
-				color.RedString("Verbose"), verbose)
+	customlog.Printf(customlog.Finished, "A total of %d configurations have been saved to %s\n",
+		len(rp.validConfigs), rp.config.OutputFile)
+	return nil
+}
 
-			if speedtest && outputType != "csv" {
-				customlog.Printf(customlog.Processing, "Speedtest is enabled, switching to CSV output!\n\n")
-				outputType = "csv"
+// validateConfig validates the configuration options
+func validateConfig(cfg *Config) error {
+	validCores := map[string]bool{"auto": true, "xray": true, "singbox": true}
+	if !validCores[cfg.CoreType] {
+		return fmt.Errorf("invalid core type. Available cores: (auto, xray, singbox)")
+	}
+
+	validOutputTypes := map[string]bool{"csv": true, "txt": true}
+	if !validOutputTypes[cfg.OutputType] {
+		return fmt.Errorf("bad output format. Allowed formats: txt, csv")
+	}
+
+	if cfg.OutputType == "csv" {
+		base := strings.TrimSuffix(cfg.OutputFile, filepath.Ext(cfg.OutputFile))
+		cfg.OutputFile = base + ".csv"
+	}
+
+	return nil
+}
+
+// NewHTTPCommand creates and returns the HTTP command
+func NewHTTPCommand() *cobra.Command {
+	config := &Config{}
+
+	cmd := &cobra.Command{
+		Use:   "http",
+		Short: "Examine config[s] real delay using http request",
+		Long:  ``,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Validate the values of the flags
+			if err := validateConfig(config); err != nil {
+				return err
 			}
 
-			confRes := HttpTestMultipleConfigs(examiner, links, threadCount, true)
-
-			// Sort configs based on their delay
-			if sortedByRealDelay {
-				sort.Sort(confRes)
-			}
-
-			if outputType == "txt" {
-				for _, v := range confRes {
-					if v.Status == "passed" {
-						validConfigs = append(validConfigs, v.ConfigLink)
-					}
-				}
-
-				// Save configs
-				err := utils.WriteIntoFile(outputFile, []byte(strings.Join(validConfigs, "\n\n")))
-				if err != nil {
-					customlog.Printf(customlog.Failure, "Saving configs failed due to the error: %v\n", err)
-					os.Exit(1)
-				}
-				customlog.Printf(customlog.Finished, "A total of %d working configurations have been saved to %s\n", len(validConfigs), outputFile)
-			} else if outputType == "csv" {
-				out, err := gocsv.MarshalString(&confRes)
-				if err != nil {
-					customlog.Printf(customlog.Failure, "Saving configs failed due to the error: %v\n", err)
-					os.Exit(1)
-				}
-				err = utils.WriteIntoFile(outputFile, []byte(out))
-				if err != nil {
-					customlog.Printf(customlog.Failure, "Saving configs failed due to the error: %v\n", err)
-					os.Exit(1)
-				}
-
-				customlog.Printf(customlog.Finished, "A total of %d configurations have been saved to %s\n", len(validConfigs), outputFile)
-			}
-
-		} else {
-			examiner.Verbose = true
-			res, err := examiner.ExamineConfig(configLink)
+			// Instantiate a Examiner
+			examiner, err := pkg.NewExaminer(pkg.Options{
+				Core:                   config.CoreType,
+				MaxDelay:               config.MaximumAllowedDelay,
+				Verbose:                config.Verbose,
+				ShowBody:               config.ShowBody,
+				InsecureTLS:            config.InsecureTLS,
+				DoSpeedtest:            config.Speedtest,
+				DoIPInfo:               config.GetIPInfo,
+				TestEndpoint:           config.DestURL,
+				TestEndpointHttpMethod: config.HTTPMethod,
+				SpeedtestKbAmount:      config.SpeedtestAmount,
+			})
 			if err != nil {
-				customlog.Printf(customlog.Failure, "%s\n", err)
-				return
+				return fmt.Errorf("failed to create examiner: %v", err)
 			}
 
-			if res.Status != "passed" {
-				customlog.Printf(customlog.Failure, "%s: %s\n", res.Status, res.Reason)
-			} else {
-				customlog.Printf(customlog.Success, "Real Delay: %dms\n", res.Delay)
-				if speedtest {
-					customlog.Printf(customlog.Success, "Downloaded %dKB - Speed: %f mbps\n", speedtestAmount, res.DownloadSpeed)
-					customlog.Printf(customlog.Success, "Uploaded %dKB - Speed: %f mbps\n", speedtestAmount, res.UploadSpeed)
-				}
-			}
-		}
+			// Instantiate a Result Processor
+			processor := NewResultProcessor(config)
 
-	},
+			// Multiple or Single config
+			if config.ConfigLinksFile != "" {
+				return handleMultipleConfigs(examiner, config, processor)
+			}
+			return handleSingleConfig(examiner, config)
+		},
+	}
+
+	// Add command flags
+	addFlags(cmd, config)
+	return cmd
 }
 
-func init() {
-	HttpCmd.Flags().StringVarP(&configLink, "config", "c", "", "The xray config link")
-	HttpCmd.Flags().StringVarP(&configLinksFile, "file", "f", "", "Read config links from a file")
-	HttpCmd.Flags().Uint16VarP(&threadCount, "thread", "t", 5, "Number of threads to be used for checking links from file")
-	HttpCmd.Flags().StringVarP(&CoreType, "core", "z", "auto", "Core type (auto, singbox, xray)")
-	HttpCmd.Flags().StringVarP(&destURL, "url", "u", "https://cloudflare.com/cdn-cgi/trace", "The url to test config")
-	HttpCmd.Flags().StringVarP(&httpMethod, "method", "m", "GET", "Http method")
-	HttpCmd.Flags().BoolVarP(&showBody, "body", "b", false, "Show response body")
-	HttpCmd.Flags().Uint16VarP(&maximumAllowedDelay, "mdelay", "d", 10000, "Maximum allowed delay (ms)")
-	HttpCmd.Flags().BoolVarP(&insecureTLS, "insecure", "e", false, "Insecure tls connection (fake SNI)")
-	HttpCmd.Flags().BoolVarP(&speedtest, "speedtest", "p", false, "Speed test with speed.cloudflare.com")
-	HttpCmd.Flags().BoolVarP(&getIPInfo, "rip", "r", false, "Send request to XXXX/cdn-cgi/trace to receive config's IP details")
-	HttpCmd.Flags().Uint32VarP(&speedtestAmount, "amount", "a", 10000, "Download and upload amount (KB)")
-	HttpCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose")
-	HttpCmd.Flags().StringVarP(&outputType, "type", "x", "txt", "Output type (csv, txt)")
-	HttpCmd.Flags().StringVarP(&outputFile, "out", "o", "valid.txt", "Output file for valid config links")
-	HttpCmd.Flags().BoolVarP(&sortedByRealDelay, "sort", "s", true, "Sort config links by their delay (fast to slow)")
+// handleMultipleConfigs handles testing multiple configurations
+func handleMultipleConfigs(examiner *pkg.Examiner, config *Config, processor *ResultProcessor) error {
+	links := utils.ParseFileByNewline(config.ConfigLinksFile)
+	printConfiguration(config, len(links))
+
+	if config.Speedtest && config.OutputType != "csv" {
+		customlog.Printf(customlog.Processing, "Speedtest is enabled, switching to CSV output!\n\n")
+		config.OutputType = "csv"
+	}
+
+	testManager := NewTestManager(examiner, processor, config.ThreadCount, true)
+	results := testManager.TestConfigs(links)
+
+	return processor.SaveResults(results)
+}
+
+// handleSingleConfig handles testing a single configuration
+func handleSingleConfig(examiner *pkg.Examiner, config *Config) error {
+	examiner.Verbose = true
+	res, err := examiner.ExamineConfig(config.ConfigLink)
+	if err != nil {
+		return err
+	}
+
+	if res.Status != "passed" {
+		customlog.Printf(customlog.Failure, "%s: %s\n", res.Status, res.Reason)
+		return nil
+	}
+
+	customlog.Printf(customlog.Success, "Real Delay: %dms\n", res.Delay)
+	if config.Speedtest {
+		customlog.Printf(customlog.Success, "Downloaded %dKB - Speed: %f mbps\n",
+			config.SpeedtestAmount, res.DownloadSpeed)
+		customlog.Printf(customlog.Success, "Uploaded %dKB - Speed: %f mbps\n",
+			config.SpeedtestAmount, res.UploadSpeed)
+	}
+	return nil
+}
+
+// printConfiguration prints the current configuration
+func printConfiguration(config *Config, totalConfigs int) {
+	fmt.Printf("%s: %d\n%s: %d\n%s: %dms\n%s: %t\n%s: %s\n%s: %t\n%s: %t\n%s: %s\n%s: %t\n\n",
+		color.RedString("Total configs"), totalConfigs,
+		color.RedString("Thread count"), config.ThreadCount,
+		color.RedString("Maximum delay"), config.MaximumAllowedDelay,
+		color.RedString("Speed test"), config.Speedtest,
+		color.RedString("Test url"), config.DestURL,
+		color.RedString("IP info"), config.GetIPInfo,
+		color.RedString("Insecure TLS"), config.InsecureTLS,
+		color.RedString("Output type"), config.OutputType,
+		color.RedString("Verbose"), config.Verbose)
+}
+
+// addFlags adds all command-line flags to the command
+func addFlags(cmd *cobra.Command, config *Config) {
+	flags := cmd.Flags()
+	flags.StringVarP(&config.ConfigLink, "config", "c", "", "The xray config link")
+	flags.StringVarP(&config.ConfigLinksFile, "file", "f", "", "Read config links from a file")
+	flags.Uint16VarP(&config.ThreadCount, "thread", "t", 5, "Number of threads to be used for checking links from file")
+	flags.StringVarP(&config.CoreType, "core", "z", "auto", "Core type (auto, singbox, xray)")
+	flags.StringVarP(&config.DestURL, "url", "u", "https://cloudflare.com/cdn-cgi/trace", "The url to test config")
+	flags.StringVarP(&config.HTTPMethod, "method", "m", "GET", "Http method")
+	flags.BoolVarP(&config.ShowBody, "body", "b", false, "Show response body")
+	flags.Uint16VarP(&config.MaximumAllowedDelay, "mdelay", "d", 10000, "Maximum allowed delay (ms)")
+	flags.BoolVarP(&config.InsecureTLS, "insecure", "e", false, "Insecure tls connection (fake SNI)")
+	flags.BoolVarP(&config.Speedtest, "speedtest", "p", false, "Speed test with speed.cloudflare.com")
+	flags.BoolVarP(&config.GetIPInfo, "rip", "r", false, "Send request to XXXX/cdn-cgi/trace to receive config's IP details")
+	flags.Uint32VarP(&config.SpeedtestAmount, "amount", "a", 10000, "Download and upload amount (KB)")
+	flags.BoolVarP(&config.Verbose, "verbose", "v", false, "Verbose")
+	flags.StringVarP(&config.OutputType, "type", "x", "txt", "Output type (csv, txt)")
+	flags.StringVarP(&config.OutputFile, "out", "o", "valid.txt", "Output file for valid config links")
+	flags.BoolVarP(&config.SortedByRealDelay, "sort", "s", true, "Sort config links by their delay (fast to slow)")
 }

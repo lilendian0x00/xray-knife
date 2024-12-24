@@ -1,7 +1,7 @@
 package speedtester
 
 import (
-	"github.com/lilendian0x00/xray-knife/speedtester/custom"
+	"github.com/lilendian0x00/xray-knife/v2/speedtester/custom"
 	"net/http"
 )
 

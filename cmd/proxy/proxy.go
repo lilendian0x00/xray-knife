@@ -3,10 +3,10 @@ package proxy
 import (
 	"bufio"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/internal"
-	"github.com/lilendian0x00/xray-knife/internal/protocol"
-	"github.com/lilendian0x00/xray-knife/internal/singbox"
-	"github.com/lilendian0x00/xray-knife/internal/xray"
+	"github.com/lilendian0x00/xray-knife/v2/pkg"
+	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
+	"github.com/lilendian0x00/xray-knife/v2/pkg/singbox"
+	"github.com/lilendian0x00/xray-knife/v2/pkg/xray"
 	"log"
 	"math/rand"
 	"os"
@@ -16,9 +16,9 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/lilendian0x00/xray-knife/cmd/net"
-	"github.com/lilendian0x00/xray-knife/utils"
-	"github.com/lilendian0x00/xray-knife/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v2/cmd/net"
+	"github.com/lilendian0x00/xray-knife/v2/utils"
+	"github.com/lilendian0x00/xray-knife/v2/utils/customlog"
 	"github.com/spf13/cobra"
 )
 
@@ -47,12 +47,12 @@ var ProxyCmd = &cobra.Command{
 			return
 		}
 
-		var core internal.Core
+		var core pkg.Core
 		var inbound protocol.Protocol
 
 		switch CoreType {
 		case "xray":
-			core = internal.CoreFactory(internal.XrayCoreType, insecureTLS, verbose)
+			core = pkg.CoreFactory(pkg.XrayCoreType, insecureTLS, verbose)
 
 			inbound = &xray.Socks{
 				Remark:  "Listener",
@@ -61,7 +61,7 @@ var ProxyCmd = &cobra.Command{
 			}
 			break
 		case "singbox":
-			core = internal.CoreFactory(internal.SingboxCoreType, insecureTLS, verbose)
+			core = pkg.CoreFactory(pkg.SingboxCoreType, insecureTLS, verbose)
 
 			inbound = &singbox.Socks{
 				Remark:  "Listener",
@@ -107,7 +107,7 @@ var ProxyCmd = &cobra.Command{
 		utils.ClearTerminal()
 
 		// Make an examiner
-		examiner, err1 := internal.NewExaminer(internal.Options{
+		examiner, err1 := pkg.NewExaminer(pkg.Options{
 			// TODO: Variable core
 			CoreInstance: core,
 			MaxDelay:     2000,
@@ -171,7 +171,9 @@ var ProxyCmd = &cobra.Command{
 				for currentConfig == nil {
 					// Shuffle all links
 					r.Shuffle(len(links), func(i, j int) { links[i], links[j] = links[j], links[i] })
-					results := net.HttpTestMultipleConfigs(examiner, links[0:testCount-1], 50, false)
+
+					testManager := net.NewTestManager(examiner, nil, 50, false)
+					results := testManager.TestConfigs(links[0 : testCount-1])
 					sort.Sort(results)
 					for _, v := range results {
 						if v.ConfigLink != lastConfig {

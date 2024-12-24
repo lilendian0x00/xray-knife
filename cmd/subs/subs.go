@@ -21,7 +21,7 @@ rm: remove a subscription
 
 func addSubcommandPalettes() {
 	SubsCmd.AddCommand(ShowCmd)
-	SubsCmd.AddCommand(FetchCmd)
+	SubsCmd.AddCommand(NewFetchCommand())
 	SubsCmd.AddCommand(AddCmd)
 	SubsCmd.AddCommand(RmCmd)
 }
