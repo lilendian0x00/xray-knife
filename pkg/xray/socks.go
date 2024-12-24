@@ -3,7 +3,7 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/internal/protocol"
+	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
 	"log"
 	"net"
 	"net/url"

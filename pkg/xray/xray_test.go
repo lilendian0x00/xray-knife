@@ -3,6 +3,7 @@ package xray
 import (
 	"io"
 	"testing"
+	"time"
 )
 
 func TestVless_MakeHttpClient(t *testing.T) {
@@ -20,7 +21,7 @@ func TestVless_MakeHttpClient(t *testing.T) {
 		return
 	}
 
-	client, err := x.MakeHttpClient(protocol)
+	client, _, err := x.MakeHttpClient(protocol, time.Duration(10)*time.Second)
 	if err != nil {
 		t.Errorf(err.Error())
 		return

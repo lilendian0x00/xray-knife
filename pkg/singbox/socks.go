@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/internal/protocol"
+	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/outbound"
@@ -16,7 +16,7 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
-	"github.com/lilendian0x00/xray-knife/utils"
+	"github.com/lilendian0x00/xray-knife/v2/utils"
 	"github.com/xtls/xray-core/infra/conf"
 )
 

@@ -3,8 +3,8 @@ package parse
 import (
 	"bufio"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/internal"
-	"github.com/lilendian0x00/xray-knife/internal/protocol"
+	"github.com/lilendian0x00/xray-knife/v2/pkg"
+	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
 	"log"
 	"net/url"
 	"os"
@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/lilendian0x00/xray-knife/utils"
+	"github.com/lilendian0x00/xray-knife/v2/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -33,9 +33,9 @@ var ParseCmd = &cobra.Command{
 			return
 		}
 
-		xrayCore := internal.CoreFactory(internal.XrayCoreType, false, false)
-		singboxCore := internal.CoreFactory(internal.SingboxCoreType, false, false)
-		SelectedCore := map[string]internal.Core{
+		xrayCore := pkg.CoreFactory(pkg.XrayCoreType, false, false)
+		singboxCore := pkg.CoreFactory(pkg.SingboxCoreType, false, false)
+		SelectedCore := map[string]pkg.Core{
 			protocol.VmessIdentifier:       xrayCore,
 			protocol.VlessIdentifier:       xrayCore,
 			protocol.ShadowsocksIdentifier: xrayCore,
@@ -46,11 +46,11 @@ var ParseCmd = &cobra.Command{
 			"hy2":                          singboxCore,
 		}
 
-		var core internal.Core
+		var core pkg.Core
 
 		if readFromSTDIN {
 			reader := bufio.NewReader(os.Stdin)
-			fmt.Println("Reading config from STDIN:")
+			fmt.Println("Enter your config link:")
 			text, _ := reader.ReadString('\n')
 			configLink = text
 
@@ -104,7 +104,7 @@ var ParseCmd = &cobra.Command{
 }
 
 func init() {
-	ParseCmd.Flags().BoolVarP(&readFromSTDIN, "stdin", "i", false, "Read config link from STDIN")
+	ParseCmd.Flags().BoolVarP(&readFromSTDIN, "stdin", "i", false, "Read config link from the console")
 	ParseCmd.Flags().StringVarP(&configLink, "config", "c", "", "The config link")
 	ParseCmd.Flags().StringVarP(&configLinksFile, "file", "f", "", "Read config links from a file")
 }

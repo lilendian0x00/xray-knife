@@ -3,7 +3,7 @@ package xray
 import (
 	"context"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/internal/protocol"
+	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
 	"github.com/xtls/xray-core/app/dispatcher"
 	applog "github.com/xtls/xray-core/app/log"
 	"github.com/xtls/xray-core/app/proxyman"

@@ -35,7 +35,7 @@ func NewIcmpPacket(dest string, count uint16, opts ...IcmpPacketOption) (*IcmpPa
 	}
 
 	i.DestIP = net.ParseIP(dest)
-	if i.DestIP != nil {
+	if i.DestIP == nil {
 		addr, err := net.LookupIP(dest)
 		if err != nil {
 			return nil, err

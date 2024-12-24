@@ -20,7 +20,7 @@
 # Go workspace file
 go.work
 
-
+build
 .idea
 Todo.md
 valid.txt

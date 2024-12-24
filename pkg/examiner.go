@@ -1,10 +1,10 @@
-package internal
+package pkg
 
 import (
 	"bufio"
 	"errors"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/internal/protocol"
+	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
 	"io"
 	"net/http"
 	"net/url"
@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lilendian0x00/xray-knife/speedtester/cloudflare"
+	"github.com/lilendian0x00/xray-knife/v2/speedtester/cloudflare"
 )
 
 type Result struct {
@@ -106,7 +106,7 @@ func NewExaminer(opts Options) (*Examiner, error) {
 				protocol.ShadowsocksIdentifier: e.xrayCore,
 				protocol.TrojanIdentifier:      e.xrayCore,
 				protocol.SocksIdentifier:       e.xrayCore,
-				protocol.WireguardIdentifier:   e.singboxCore,
+				protocol.WireguardIdentifier:   e.xrayCore,
 				protocol.Hysteria2Identifier:   e.singboxCore,
 				"hy2":                          e.singboxCore,
 			}

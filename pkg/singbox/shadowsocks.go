@@ -1,17 +1,21 @@
-package xray
+package singbox
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/internal/protocol"
+	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
+	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/outbound"
+	"github.com/sagernet/sing/common/logger"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/fatih/color"
 	"github.com/lilendian0x00/xray-knife/v2/utils"
-	"github.com/xtls/xray-core/infra/conf"
 )
 
 func NewShadowsocks(link string) Protocol {
@@ -19,7 +23,7 @@ func NewShadowsocks(link string) Protocol {
 }
 
 func (s *Shadowsocks) Name() string {
-	return "shadowsocks"
+	return protocol.ShadowsocksIdentifier
 }
 
 func (s *Shadowsocks) Parse() error {
@@ -39,10 +43,10 @@ func (s *Shadowsocks) Parse() error {
 	if len(secondPart) > 1 {
 		decoded, err = utils.Base64Decode(secondPart[0])
 		if err != nil {
-			return errors.New("error when decoding secret part")
+			return errors.New("Error when decoding secret part ")
 		}
 	} else {
-		return errors.New("invalid config link")
+		return errors.New("Invalid config link ")
 	}
 
 	//link := "ss://" + string(decoded) + "@" + secondPart[1]
@@ -111,29 +115,42 @@ func (s *Shadowsocks) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	return g
 }
 
-func (s *Shadowsocks) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
-	out := &conf.OutboundDetourConfig{}
-	out.Tag = "proxy"
-	out.Protocol = s.Name()
-
-	streamConf := &conf.StreamConfig{}
-
-	out.StreamSetting = streamConf
-	oset := json.RawMessage([]byte(fmt.Sprintf(`{
-  "servers": [
-	{
-		"address": "%s",
-		"port": %v,
-		"password": "%s",
-		"method": "%s",
-		"uot": true
+func (s *Shadowsocks) CraftInboundOptions() *option.Inbound {
+	return &option.Inbound{
+		Type: "shadowsocks",
 	}
-  ]
-}`, s.Address, s.Port, s.Password, s.Encryption)))
-	out.Settings = &oset
-	return out, nil
 }
 
-func (s *Shadowsocks) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
-	return nil, nil
+func (s *Shadowsocks) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, error) {
+	port, _ := strconv.Atoi(s.Port)
+
+	opts := option.ShadowsocksOutboundOptions{
+		DialerOptions: option.DialerOptions{},
+		ServerOptions: option.ServerOptions{
+			Server:     s.Address,
+			ServerPort: uint16(port),
+		},
+		Password: s.Password,
+		Method:   s.Encryption,
+	}
+
+	return &option.Outbound{
+		Type:               "shadowsocks",
+		ShadowsocksOptions: opts,
+	}, nil
+}
+
+func (s *Shadowsocks) CraftOutbound(ctx context.Context, l logger.ContextLogger, allowInsecure bool) (adapter.Outbound, error) {
+
+	options, err := s.CraftOutboundOptions(allowInsecure)
+	if err != nil {
+		return nil, err
+	}
+
+	out, err := outbound.New(ctx, adapter.RouterFromContext(ctx), l, "out_shadowsocks", *options)
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("failed creating shadowsocks outbound: %v", err))
+	}
+
+	return out, nil
 }
