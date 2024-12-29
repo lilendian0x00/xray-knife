@@ -3,11 +3,11 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/fatih/color"
-	"github.com/xtls/xray-core/infra/conf"
 	"net/url"
 	"reflect"
 	"strings"
+
+	"github.com/xtls/xray-core/infra/conf"
 )
 
 func NewWireguard() Protocol {
@@ -74,17 +74,17 @@ func (w *Wireguard) Parse(configLink string) error {
 }
 
 func (w *Wireguard) DetailsStr() string {
-	info := fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %d\n%s: %s\n%s: %v\n%s: %s\n", w.Name(),
-		color.RedString("Protocol"),
-		color.RedString("Remark"), w.Remark,
-		color.RedString("Endpoint"), w.Endpoint,
-		color.RedString("MTU"), w.Mtu,
-		color.RedString("Local Addresses"), w.LocalAddress,
-		color.RedString("Public Key"), w.PublicKey,
-		color.RedString("Secret Key"), w.SecretKey,
-	)
+	details := [][2]string{
+		{"Protocol", w.Name()},
+		{"Remark", w.Remark},
+		{"Endpoint", w.Endpoint},
+		{"MTU", fmt.Sprintf("%d", w.Mtu)},
+		{"Local Addresses", w.LocalAddress},
+		{"Public Key", w.PublicKey},
+		{"Secret Key", w.SecretKey},
+	}
 
-	return info
+	return detailsToStr(details)
 }
 
 func (w *Wireguard) ConvertToGeneralConfig() GeneralConfig {
@@ -100,7 +100,7 @@ func (w *Wireguard) BuildOutboundDetourConfig(allowInsecure bool) (*conf.Outboun
 	out.Tag = "proxy"
 	out.Protocol = w.Name()
 
-	//c := conf.WireGuardConfig{
+	// c := conf.WireGuardConfig{
 	//	IsClient:   true,
 	//	KernelMode: nil,
 	//	SecretKey:  w.SecretKey,
@@ -116,7 +116,7 @@ func (w *Wireguard) BuildOutboundDetourConfig(allowInsecure bool) (*conf.Outboun
 	//	},
 	//	MTU:            w.Mtu,
 	//	DomainStrategy: "ForceIPv6v4",
-	//}
+	// }
 
 	oset := json.RawMessage([]byte(fmt.Sprintf(`{
   "secretKey": "%s",

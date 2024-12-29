@@ -9,10 +9,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/fatih/color"
-	"github.com/lilendian0x00/xray-knife/v2/utils"
 	net2 "github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/infra/conf"
+
+	"github.com/lilendian0x00/xray-knife/v2/utils"
 )
 
 func NewSocks() Protocol {
@@ -54,22 +54,22 @@ func (s *Socks) Parse(configLink string) error {
 
 func (s *Socks) DetailsStr() string {
 	copyV := *s
-
-	info := fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n",
-		color.RedString("Protocol"), s.Name(),
-		color.RedString("Remark"), copyV.Remark,
-		color.RedString("Network"), "tcp",
-		color.RedString("Address"), copyV.Address,
-		color.RedString("Port"), copyV.Port,
-	)
-
-	if len(copyV.Username) != 0 && len(copyV.Password) != 0 {
-		info += color.RedString("Username") + ": " + copyV.Username
-		info += "\n"
-		info += color.RedString("Password") + ": " + copyV.Password
+	result := [][2]string{
+		{"Protocol", s.Name()},
+		{"Remark", copyV.Remark},
+		{"Network", "tcp"},
+		{"Address", copyV.Address},
+		{"Port", copyV.Port},
 	}
 
-	return info
+	if len(copyV.Username) != 0 && len(copyV.Password) != 0 {
+		result = append(result, [][2]string{
+			{"Username", copyV.Username},
+			{"Password", copyV.Password},
+		}...)
+	}
+
+	return detailsToStr(result)
 }
 
 func (s *Socks) ConvertToGeneralConfig() GeneralConfig {

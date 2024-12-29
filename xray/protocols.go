@@ -2,8 +2,11 @@ package xray
 
 import (
 	"errors"
-	"github.com/xtls/xray-core/infra/conf"
+	"fmt"
 	"strings"
+
+	"github.com/fatih/color"
+	"github.com/xtls/xray-core/infra/conf"
 )
 
 const (
@@ -21,6 +24,24 @@ type Protocol interface {
 	BuildInboundDetourConfig() (*conf.InboundDetourConfig, error)
 	DetailsStr() string
 	ConvertToGeneralConfig() GeneralConfig
+}
+
+func detailsToStr(details [][2]string) string {
+	result := ""
+	for _, d := range details {
+		result += fmt.Sprintf("%s: %s\n", color.RedString(d[0]), d[1])
+	}
+
+	return result
+}
+
+func detailsToMap(details [][2]string) map[string]string {
+	result := make(map[string]string, len(details))
+	for _, d := range details {
+		result[d[0]] = d[1]
+	}
+
+	return result
 }
 
 func CreateProtocol(configLink string) (Protocol, error) {
@@ -82,10 +103,10 @@ type Vmess struct {
 	TlsFingerprint string      `json:"fp"`   // TLS fingerprint
 	Type           string      `json:"type"` // Used for HTTP Obfuscation
 
-	//// It's also possible for Vmess to have REALITY...
-	//PublicKey string `json:"pbk"`
-	//ShortIds  string `json:"sid"` // Mandatory, the shortId list available to the client, which can be used to distinguish different clients
-	//SpiderX   string `json:"spx"` // Reality path
+	// // It's also possible for Vmess to have REALITY...
+	// PublicKey string `json:"pbk"`
+	// ShortIds  string `json:"sid"` // Mandatory, the shortId list available to the client, which can be used to distinguish different clients
+	// SpiderX   string `json:"spx"` // Reality path
 
 	OrigLink string `json:"-"` // Original link
 }

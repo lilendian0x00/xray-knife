@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 
-	"github.com/fatih/color"
-	"github.com/lilendian0x00/xray-knife/v2/utils"
 	"github.com/xtls/xray-core/infra/conf"
+
+	"github.com/lilendian0x00/xray-knife/v2/utils"
 )
 
 func NewVmess() Protocol {
@@ -65,10 +66,10 @@ func method2(v *Vmess, link string) error {
 	if utils.IsIPv6(v.Address) {
 		v.Address = "[" + v.Address + "]"
 	}
-	//parseUint, err := strconv.ParseUint(suhp[2], 10, 16)
-	//if err != nil {
+	// parseUint, err := strconv.ParseUint(suhp[2], 10, 16)
+	// if err != nil {
 	//	return err
-	//}
+	// }
 
 	v.Aid = "0"
 
@@ -109,9 +110,9 @@ func method2(v *Vmess, link string) error {
 	return nil
 }
 
-//func method3(v *Vmess, link string) error {
+// func method3(v *Vmess, link string) error {
 //
-//}
+// }
 
 func (v *Vmess) Parse(configLink string) error {
 	if !strings.HasPrefix(configLink, vmessIdentifier) {
@@ -139,17 +140,19 @@ func (v *Vmess) Parse(configLink string) error {
 
 func (v *Vmess) DetailsStr() string {
 	copyV := *v
-	info := fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n",
-		color.RedString("Protocol"), v.Name(),
-		color.RedString("Remark"), copyV.Remark,
-		color.RedString("Network"), copyV.Network,
-		color.RedString("Address"), copyV.Address,
-		color.RedString("Port"), copyV.Port,
-		color.RedString("UUID"), copyV.ID)
+	result := make([][2]string, 0, 20)
 
-	if copyV.Network == "" {
+	result = append(result, [][2]string{
+		{"Protocol", v.Name()},
+		{"Remark", copyV.Remark},
+		{"Network", copyV.Network},
+		{"Address", copyV.Address},
+		{"Port", fmt.Sprintf("%v", copyV.Port)},
+		{"UUID", copyV.ID},
+	}...)
 
-	} else if copyV.Type == "http" || copyV.Network == "httpupgrade" || copyV.Network == "ws" || copyV.Network == "h2" {
+	switch {
+	case copyV.Type == "http" || slices.Contains([]string{"httpupgrade", "ws", "h2"}, copyV.Network):
 		if copyV.Type == "" {
 			copyV.Type = "none"
 		}
@@ -160,42 +163,45 @@ func (v *Vmess) DetailsStr() string {
 			copyV.Path = "none"
 		}
 
-		info += fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n",
-			color.RedString("Type"), copyV.Type,
-			color.RedString("Host"), copyV.Host,
-			color.RedString("Path"), copyV.Path)
-	} else if copyV.Network == "kcp" {
-		info += fmt.Sprintf("%s: %s\n", color.RedString("KCP Seed"), copyV.Path)
-	} else if copyV.Network == "grpc" {
+		result = append(result, [][2]string{
+			{"Type", copyV.Type},
+			{"Host", copyV.Host},
+			{"Path", copyV.Path},
+		}...)
+	case copyV.Network == "kcp":
+		result = append(result, [2]string{"KCP Seed", copyV.Path})
+	case copyV.Network == "grpc":
 		if copyV.Host == "" {
 			copyV.Host = "none"
 		}
-		info += fmt.Sprintf("%s: %s\n%s: %s\n",
-			color.RedString("ServiceName"), copyV.Path,
-			color.RedString("Authority"), copyV.Host)
+		result = append(result, [][2]string{
+			{"ServiceName", copyV.Path},
+			{"Authority", copyV.Host},
+		}...)
 	}
 
-	if len(copyV.TLS) != 0 && copyV.TLS != "none" {
-		if len(copyV.SNI) == 0 {
+	if copyV.TLS != "" && copyV.TLS != "none" {
+		if copyV.SNI == "" {
+			copyV.SNI = "none"
 			if copyV.Host != "" {
 				copyV.SNI = copyV.Host
-			} else {
-				copyV.SNI = "none"
 			}
 		}
-		if len(copyV.ALPN) == 0 {
+		if copyV.ALPN == "" {
 			copyV.ALPN = "none"
 		}
 		if len(copyV.TlsFingerprint) == 0 {
 			copyV.TlsFingerprint = "none"
 		}
-		info += fmt.Sprintf("%s: tls\n%s: %s\n%s: %s\n%s: %s\n",
-			color.RedString("TLS"),
-			color.RedString("SNI"), copyV.SNI,
-			color.RedString("ALPN"), copyV.ALPN,
-			color.RedString("Fingerprint"), copyV.TlsFingerprint)
+		result = append(result, [][2]string{
+			{"TLS", "tls"},
+			{"SNI", copyV.SNI},
+			{"ALPN", copyV.ALPN},
+			{"Fingerprint", copyV.TlsFingerprint},
+		}...)
 	}
-	return info
+
+	return detailsToStr(result)
 }
 
 func (v *Vmess) ConvertToGeneralConfig() GeneralConfig {

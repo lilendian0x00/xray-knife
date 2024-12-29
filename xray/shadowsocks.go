@@ -8,9 +8,9 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/fatih/color"
-	"github.com/lilendian0x00/xray-knife/v2/utils"
 	"github.com/xtls/xray-core/infra/conf"
+
+	"github.com/lilendian0x00/xray-knife/v2/utils"
 )
 
 func NewShadowsocks() Protocol {
@@ -44,11 +44,11 @@ func (s *Shadowsocks) Parse(configLink string) error {
 		return errors.New("invalid config link")
 	}
 
-	//link := "ss://" + string(decoded) + "@" + secondPart[1]
-	//uri, err := url.Parse(link)
-	//if err != nil {
+	// link := "ss://" + string(decoded) + "@" + secondPart[1]
+	// uri, err := url.Parse(link)
+	// if err != nil {
 	//	return err
-	//}
+	// }
 	creds := strings.SplitN(string(decoded), ":", 2)
 	if len(creds) != 2 {
 		return errors.New("error when decoding secret part")
@@ -57,7 +57,7 @@ func (s *Shadowsocks) Parse(configLink string) error {
 	s.Encryption = creds[0] // Encryption Type
 	s.Password = creds[1]   // Encryption Password
 
-	//hostPortRemark := strings.SplitN(secondPart[1], ":", 2)
+	// hostPortRemark := strings.SplitN(secondPart[1], ":", 2)
 
 	s.Address, s.Port, err = net.SplitHostPort(uri.Host)
 	if err != nil {
@@ -73,31 +73,31 @@ func (s *Shadowsocks) Parse(configLink string) error {
 		s.Remark = uri.Fragment
 	}
 
-	//s.Address = hostPortRemark[0]
+	// s.Address = hostPortRemark[0]
 	//
-	//PortRemark := strings.SplitN(hostPortRemark[1], "#", 2)
-	//s.Port = PortRemark[0]
+	// PortRemark := strings.SplitN(hostPortRemark[1], "#", 2)
+	// s.Port = PortRemark[0]
 
-	//remarkStr, _, _ := strings.Cut(PortRemark[1], "\n")
+	// remarkStr, _, _ := strings.Cut(PortRemark[1], "\n")
 
-	//s.Remark, err = url.PathUnescape(remarkStr)
-	//if err != nil {
+	// s.Remark, err = url.PathUnescape(remarkStr)
+	// if err != nil {
 	//	s.Remark = remarkStr
-	//}
+	// }
 	s.OrigLink = configLink
 
 	return nil
 }
 
 func (s *Shadowsocks) DetailsStr() string {
-	info := fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n%s: %s\n",
-		color.RedString("Protocol"), s.Name(),
-		color.RedString("Remark"), s.Remark,
-		color.RedString("IP"), s.Address,
-		color.RedString("Port"), s.Port,
-		color.RedString("Encryption"), s.Encryption,
-		color.RedString("Password"), s.Password)
-	return info
+	return detailsToStr([][2]string{
+		{"Protocol", s.Name()},
+		{"Remark", s.Remark},
+		{"IP", s.Address},
+		{"Port", s.Port},
+		{"Encryption", s.Encryption},
+		{"Password", s.Password},
+	})
 }
 
 func (s *Shadowsocks) ConvertToGeneralConfig() GeneralConfig {

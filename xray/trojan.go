@@ -3,13 +3,15 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/fatih/color"
-	"github.com/lilendian0x00/xray-knife/v2/utils"
-	"github.com/xtls/xray-core/infra/conf"
 	"net"
 	"net/url"
 	"reflect"
+	"slices"
 	"strings"
+
+	"github.com/xtls/xray-core/infra/conf"
+
+	"github.com/lilendian0x00/xray-knife/v2/utils"
 )
 
 func NewTrojan() Protocol {
@@ -95,68 +97,73 @@ func (t *Trojan) DetailsStr() string {
 	if copyV.Flow == "" || copyV.Type == "grpc" {
 		copyV.Flow = "none"
 	}
-	info := fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %s\n%s: %v\n%s: %s\n%s: %s\n",
-		color.RedString("Protocol"), t.Name(),
-		color.RedString("Remark"), t.Remark,
-		color.RedString("Network"), t.Type,
-		color.RedString("Address"), t.Address,
-		color.RedString("Port"), t.Port,
-		color.RedString("Password"), t.Password,
-		color.RedString("Flow"), copyV.Flow,
-	)
+	result := make([][2]string, 0, 20)
+	result = append(result, [][2]string{
+		{"Protocol", t.Name()},
+		{"Remark", t.Remark},
+		{"Network", t.Type},
+		{"Address", t.Address},
+		{"Port", t.Port},
+		{"Password", t.Password},
+		{"Flow", copyV.Flow},
+	}...)
 
-	if copyV.Type == "" {
-
-	} else if copyV.Type == "http" || copyV.Type == "httpupgrade" || copyV.Type == "ws" || copyV.Type == "h2" || copyV.Type == "splithttp" {
-		info += fmt.Sprintf("%s: %s\n%s: %s\n",
-			color.RedString("Host"), copyV.Host,
-			color.RedString("Path"), copyV.Path)
-	} else if copyV.Type == "kcp" {
-		info += fmt.Sprintf("%s: %s\n", color.RedString("KCP Seed"), copyV.Path)
-	} else if copyV.Type == "grpc" {
+	// Type
+	switch {
+	case slices.Contains([]string{"http", "httpupgrade", "ws", "h2", "splithttp"}, copyV.Type):
+		result = append(result, [][2]string{
+			{"Host", copyV.Host},
+			{"Path", copyV.Path},
+		}...)
+	case copyV.Type == "kcp":
+		result = append(result, [2]string{"KCP Seed", copyV.Path})
+	case copyV.Type == "grpc":
 		if copyV.ServiceName == "" {
 			copyV.ServiceName = "none"
 		}
-		info += fmt.Sprintf("%s: %s\n%s: %s\n",
-			color.RedString("ServiceName"), copyV.ServiceName,
-			color.RedString("Authority"), copyV.Authority)
+		result = append(result, [][2]string{
+			{"ServiceName", copyV.ServiceName},
+			{"Authority", copyV.Authority},
+		}...)
 	}
 
-	if copyV.Security == "reality" {
-		info += fmt.Sprintf("%s: reality\n", color.RedString("TLS"))
+	switch copyV.Security {
+	case "reality":
 		if copyV.SpiderX == "" {
 			copyV.SpiderX = "none"
 		}
-		info += fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %s\n%s: %s\n",
-			color.RedString("Public key"), copyV.PublicKey,
-			color.RedString("SNI"), copyV.SNI,
-			color.RedString("ShortID"), copyV.ShortIds,
-			color.RedString("SpiderX"), copyV.SpiderX,
-			color.RedString("Fingerprint"), copyV.TlsFingerprint,
-		)
-	} else if copyV.Security == "tls" {
-		info += fmt.Sprintf("%s: tls\n", color.RedString("TLS"))
-		if len(copyV.SNI) == 0 {
+		result = append(result, [][2]string{
+			{"TLS", "reality"},
+			{"Public key", copyV.PublicKey},
+			{"SNI", copyV.SNI},
+			{"ShortID", copyV.ShortIds},
+			{"SpiderX", copyV.SpiderX},
+			{"Fingerprint", copyV.TlsFingerprint},
+		}...)
+	case "tls":
+		if copyV.SNI == "" {
+			copyV.SNI = "none"
 			if copyV.Host != "" {
 				copyV.SNI = copyV.Host
-			} else {
-				copyV.SNI = "none"
 			}
 		}
-		if len(copyV.ALPN) == 0 {
+		if copyV.ALPN == "" {
 			copyV.ALPN = "none"
 		}
 		if copyV.TlsFingerprint == "" {
 			copyV.TlsFingerprint = "none"
 		}
-		info += fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n",
-			color.RedString("SNI"), copyV.SNI,
-			color.RedString("ALPN"), copyV.ALPN,
-			color.RedString("Fingerprint"), copyV.TlsFingerprint)
-	} else {
-		info += fmt.Sprintf("%s: none\n", color.RedString("TLS"))
+		result = append(result, [][2]string{
+			{"TLS", "tls"},
+			{"SNI", copyV.SNI},
+			{"ALPN", copyV.ALPN},
+			{"Fingerprint", copyV.TlsFingerprint},
+		}...)
+	default:
+		result = append(result, [2]string{"TLS", "none"})
 	}
-	return info
+
+	return detailsToStr(result)
 }
 
 func (t *Trojan) ConvertToGeneralConfig() GeneralConfig {
