@@ -1,6 +1,7 @@
 package xray
 
 import (
+	"reflect"
 	"testing"
 )
 
@@ -26,5 +27,22 @@ Fingerprint: none
 	t.Logf("%s\n", v.DetailsStr())
 	if expected != v.DetailsStr() {
 		t.Fatalf("expected %q, got %q", expected, v.DetailsStr())
+	}
+
+	expectedMap := map[string]string{
+		"Protocol":    "vmess",
+		"Remark":      "Testremark-b2slxmfi",
+		"Network":     "tcp",
+		"Address":     "127.0.0.1",
+		"Port":        "26635",
+		"UUID":        "930e9444-c55d-4b72-9455-b98116daa4b3",
+		"TLS":         "tls",
+		"SNI":         "none",
+		"ALPN":        "none",
+		"Fingerprint": "none",
+	}
+
+	if !reflect.DeepEqual(expectedMap, v.DetailsMap()) {
+		t.Fatalf("expected %v, got %v", expectedMap, v.DetailsMap())
 	}
 }

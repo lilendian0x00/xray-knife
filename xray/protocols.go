@@ -23,6 +23,7 @@ type Protocol interface {
 	BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error)
 	BuildInboundDetourConfig() (*conf.InboundDetourConfig, error)
 	DetailsStr() string
+	DetailsMap() map[string]string
 	ConvertToGeneralConfig() GeneralConfig
 }
 

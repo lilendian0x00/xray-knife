@@ -92,6 +92,14 @@ func (v *Vless) Parse(configLink string) error {
 }
 
 func (v *Vless) DetailsStr() string {
+	return detailsToStr(v.details())
+}
+
+func (v *Vless) DetailsMap() map[string]string {
+	return detailsToMap(v.details())
+}
+
+func (v *Vless) details() [][2]string {
 	copyV := *v
 	if copyV.Flow == "" || copyV.Type == "grpc" {
 		copyV.Flow = "none"
@@ -166,7 +174,7 @@ func (v *Vless) DetailsStr() string {
 		result = append(result, [2]string{"TLS", "tls"})
 	}
 
-	return detailsToStr(result)
+	return result
 }
 
 func (v *Vless) ConvertToGeneralConfig() GeneralConfig {

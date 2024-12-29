@@ -1,6 +1,9 @@
 package xray
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestTrojan_Parse(t *testing.T) {
 	var ss Trojan
@@ -27,5 +30,25 @@ Fingerprint: chrome
 	t.Logf("%s\n", ss.DetailsStr())
 	if expected != ss.DetailsStr() {
 		t.Fatalf("expected %q, got %q", expected, ss.DetailsStr())
+	}
+
+	expectedMap := map[string]string{
+		"Protocol":    "trojan",
+		"Remark":      "exa",
+		"Network":     "grpc",
+		"Address":     "1.1.1.1",
+		"Port":        "80",
+		"Password":    "fsdfsgfgdfgdfg",
+		"Flow":        "none",
+		"ServiceName": "/gdfgdgdfgdfgdfgfg",
+		"Authority":   "",
+		"TLS":         "tls",
+		"SNI":         "example.com",
+		"ALPN":        "h2,http/1.1",
+		"Fingerprint": "chrome",
+	}
+
+	if !reflect.DeepEqual(expectedMap, ss.DetailsMap()) {
+		t.Fatalf("expected %v, got %v", expectedMap, ss.DetailsMap())
 	}
 }

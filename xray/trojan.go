@@ -93,6 +93,14 @@ func (t *Trojan) Parse(configLink string) error {
 }
 
 func (t *Trojan) DetailsStr() string {
+	return detailsToStr(t.details())
+}
+
+func (t *Trojan) DetailsMap() map[string]string {
+	return detailsToMap(t.details())
+}
+
+func (t *Trojan) details() [][2]string {
 	copyV := *t
 	if copyV.Flow == "" || copyV.Type == "grpc" {
 		copyV.Flow = "none"
@@ -163,7 +171,7 @@ func (t *Trojan) DetailsStr() string {
 		result = append(result, [2]string{"TLS", "none"})
 	}
 
-	return detailsToStr(result)
+	return result
 }
 
 func (t *Trojan) ConvertToGeneralConfig() GeneralConfig {

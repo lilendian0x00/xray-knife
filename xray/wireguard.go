@@ -74,7 +74,15 @@ func (w *Wireguard) Parse(configLink string) error {
 }
 
 func (w *Wireguard) DetailsStr() string {
-	details := [][2]string{
+	return detailsToStr(w.details())
+}
+
+func (w *Wireguard) DetailsMap() map[string]string {
+	return detailsToMap(w.details())
+}
+
+func (w *Wireguard) details() [][2]string {
+	return [][2]string{
 		{"Protocol", w.Name()},
 		{"Remark", w.Remark},
 		{"Endpoint", w.Endpoint},
@@ -83,8 +91,6 @@ func (w *Wireguard) DetailsStr() string {
 		{"Public Key", w.PublicKey},
 		{"Secret Key", w.SecretKey},
 	}
-
-	return detailsToStr(details)
 }
 
 func (w *Wireguard) ConvertToGeneralConfig() GeneralConfig {

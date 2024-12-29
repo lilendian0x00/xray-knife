@@ -139,6 +139,14 @@ func (v *Vmess) Parse(configLink string) error {
 }
 
 func (v *Vmess) DetailsStr() string {
+	return detailsToStr(v.details())
+}
+
+func (v *Vmess) DetailsMap() map[string]string {
+	return detailsToMap(v.details())
+}
+
+func (v *Vmess) details() [][2]string {
 	copyV := *v
 	result := make([][2]string, 0, 20)
 
@@ -201,7 +209,7 @@ func (v *Vmess) DetailsStr() string {
 		}...)
 	}
 
-	return detailsToStr(result)
+	return result
 }
 
 func (v *Vmess) ConvertToGeneralConfig() GeneralConfig {

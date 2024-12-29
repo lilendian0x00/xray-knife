@@ -53,6 +53,14 @@ func (s *Socks) Parse(configLink string) error {
 }
 
 func (s *Socks) DetailsStr() string {
+	return detailsToStr(s.details())
+}
+
+func (s *Socks) DetailsMap() map[string]string {
+	return detailsToMap(s.details())
+}
+
+func (s *Socks) details() [][2]string {
 	copyV := *s
 	result := [][2]string{
 		{"Protocol", s.Name()},
@@ -69,7 +77,7 @@ func (s *Socks) DetailsStr() string {
 		}...)
 	}
 
-	return detailsToStr(result)
+	return result
 }
 
 func (s *Socks) ConvertToGeneralConfig() GeneralConfig {

@@ -1,6 +1,9 @@
 package xray
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestShadowSocks_Parse(t *testing.T) {
 	var ss Shadowsocks
@@ -20,5 +23,18 @@ Password: Example@1234
 	t.Logf("%s\n", ss.DetailsStr())
 	if expected != ss.DetailsStr() {
 		t.Fatalf("expected %q, got %q", expected, ss.DetailsStr())
+	}
+
+	expectedMap := map[string]string{
+		"Protocol":   "shadowsocks",
+		"Remark":     "exa",
+		"IP":         "example.com",
+		"Port":       "443",
+		"Encryption": "aes-256-gcm",
+		"Password":   "Example@1234",
+	}
+
+	if !reflect.DeepEqual(expectedMap, ss.DetailsMap()) {
+		t.Fatalf("expected %v, got %v", expectedMap, ss.DetailsMap())
 	}
 }

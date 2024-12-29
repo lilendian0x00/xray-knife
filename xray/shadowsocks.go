@@ -90,14 +90,22 @@ func (s *Shadowsocks) Parse(configLink string) error {
 }
 
 func (s *Shadowsocks) DetailsStr() string {
-	return detailsToStr([][2]string{
+	return detailsToStr(s.details())
+}
+
+func (s *Shadowsocks) DetailsMap() map[string]string {
+	return detailsToMap(s.details())
+}
+
+func (s *Shadowsocks) details() [][2]string {
+	return [][2]string{
 		{"Protocol", s.Name()},
 		{"Remark", s.Remark},
 		{"IP", s.Address},
 		{"Port", s.Port},
 		{"Encryption", s.Encryption},
 		{"Password", s.Password},
-	})
+	}
 }
 
 func (s *Shadowsocks) ConvertToGeneralConfig() GeneralConfig {
