@@ -8,5 +8,24 @@ func TestTrojan_Parse(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error when parsing: %v", err)
 	}
+
+	expected := `Protocol: trojan
+Remark: exa
+Network: grpc
+Address: 1.1.1.1
+Port: 80
+Password: fsdfsgfgdfgdfg
+Flow: none
+ServiceName: /gdfgdgdfgdfgdfgfg
+Authority: 
+TLS: tls
+SNI: example.com
+ALPN: h2,http/1.1
+Fingerprint: chrome
+`
+
 	t.Logf("%s\n", ss.DetailsStr())
+	if expected != ss.DetailsStr() {
+		t.Fatalf("expected %q, got %q", expected, ss.DetailsStr())
+	}
 }
