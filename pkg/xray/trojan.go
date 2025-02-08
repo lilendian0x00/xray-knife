@@ -71,7 +71,7 @@ func (t *Trojan) Parse() error {
 		t.Remark = uri.Fragment
 	}
 
-	if t.HeaderType == "http" || t.Type == "ws" || t.Type == "h2" {
+	if t.HeaderType == "xhttp" || t.HeaderType == "http" || t.Type == "ws" || t.Type == "h2" {
 		if t.Path == "" {
 			t.Path = "/"
 		}
@@ -107,7 +107,7 @@ func (t *Trojan) DetailsStr() string {
 
 	if copyV.Type == "" {
 
-	} else if copyV.Type == "http" || copyV.Type == "httpupgrade" || copyV.Type == "ws" || copyV.Type == "h2" || copyV.Type == "splithttp" {
+	} else if copyV.Type == "xhttp" || copyV.Type == "http" || copyV.Type == "httpupgrade" || copyV.Type == "ws" || copyV.Type == "h2" || copyV.Type == "splithttp" {
 		info += fmt.Sprintf("%s: %s\n%s: %s\n",
 			color.RedString("Host"), copyV.Host,
 			color.RedString("Path"), copyV.Path)
@@ -231,13 +231,19 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36",
 		}
 		break
-	case "h2", "http":
-		s.HTTPSettings = &conf.HTTPConfig{
+	//case "h2", "http":
+	case "xhttp":
+		s.XHTTPSettings = &conf.SplitHTTPConfig{
+			Host: t.Host,
 			Path: t.Path,
+			Mode: t.Mode,
 		}
-		if t.Host != "" {
-			h := conf.StringList(strings.Split(t.Host, ","))
-			s.HTTPSettings.Host = &h
+		//if v.Host != "" {
+		//	h := conf.StringList(strings.Split(v.Host, ","))
+		//	s.XHTTPSettings.Host = &h
+		//}
+		if t.Mode == "" {
+			s.XHTTPSettings.Mode = "auto"
 		}
 		break
 	case "httpupgrade":
@@ -260,7 +266,7 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 		if t.Mode != "gun" {
 			multiMode = true
 		}
-		s.GRPCConfig = &conf.GRPCConfig{
+		s.GRPCSettings = &conf.GRPCConfig{
 			InitialWindowsSize: 65536,
 			HealthCheckTimeout: 20,
 			MultiMode:          multiMode,
@@ -270,18 +276,18 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 
 		t.Flow = ""
 		break
-	case "quic":
-		tp := "none"
-		if t.HeaderType != "" {
-			tp = t.HeaderType
-		}
-
-		s.QUICSettings = &conf.QUICConfig{
-			Header:   json.RawMessage(fmt.Sprintf(`{ "type": "%s" }`, tp)),
-			Security: t.QuicSecurity,
-			Key:      t.Key,
-		}
-		break
+		//case "quic":
+		//	tp := "none"
+		//	if t.HeaderType != "" {
+		//		tp = t.HeaderType
+		//	}
+		//
+		//	s.QUICSettings = &conf.QUICConfig{
+		//		Header:   json.RawMessage(fmt.Sprintf(`{ "type": "%s" }`, tp)),
+		//		Security: t.QuicSecurity,
+		//		Key:      t.Key,
+		//	}
+		//	break
 	}
 
 	if t.Security == "tls" {

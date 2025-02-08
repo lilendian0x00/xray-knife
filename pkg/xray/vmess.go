@@ -127,7 +127,7 @@ func (v *Vmess) Parse() error {
 		}
 	}
 
-	if v.Type == "http" || v.Network == "ws" || v.Network == "h2" {
+	if v.Type == "xhttp" || v.Type == "http" || v.Network == "ws" || v.Network == "h2" {
 		if v.Path == "" {
 			v.Path = "/"
 		}
@@ -148,7 +148,7 @@ func (v *Vmess) DetailsStr() string {
 
 	if copyV.Network == "" {
 
-	} else if copyV.Type == "http" || copyV.Network == "httpupgrade" || copyV.Network == "ws" || copyV.Network == "h2" {
+	} else if copyV.Type == "xhttp" || copyV.Type == "http" || copyV.Network == "httpupgrade" || copyV.Network == "ws" || copyV.Network == "h2" {
 		if copyV.Type == "" {
 			copyV.Type = "none"
 		}
@@ -259,9 +259,11 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 			}
 			`, string(pathb), string(hostb))))
 		}
+		break
 	case "kcp":
 		s.KCPSettings = &conf.KCPConfig{}
 		s.KCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, v.Type)))
+		break
 	case "ws":
 		s.WSSettings = &conf.WebSocketConfig{}
 		s.WSSettings.Path = v.Path
@@ -269,24 +271,34 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 			"Host":       v.Host,
 			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36",
 		}
-	case "h2", "http":
-		s.HTTPSettings = &conf.HTTPConfig{
+		break
+		//case "h2", "http":
+	case "xhttp":
+		s.XHTTPSettings = &conf.SplitHTTPConfig{
+			Host: v.Host,
 			Path: v.Path,
+			Mode: v.Type,
 		}
-		if v.Host != "" {
-			h := conf.StringList(strings.Split(v.Host, ","))
-			s.HTTPSettings.Host = &h
+		//if v.Host != "" {
+		//	h := conf.StringList(strings.Split(v.Host, ","))
+		//	s.XHTTPSettings.Host = &h
+		//}
+		if v.Type == "" {
+			s.XHTTPSettings.Mode = "auto"
 		}
+		break
 	case "httpupgrade":
 		s.HTTPUPGRADESettings = &conf.HttpUpgradeConfig{
 			Host: v.Host,
 			Path: v.Path,
 		}
+		break
 	case "splithttp":
 		s.SplitHTTPSettings = &conf.SplitHTTPConfig{
 			Host: v.Host,
 			Path: v.Path,
 		}
+		break
 	case "grpc":
 		if len(v.Path) > 0 {
 			if v.Path[0] == '/' {
@@ -297,7 +309,7 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 		if v.Type != "gun" {
 			multiMode = true
 		}
-		s.GRPCConfig = &conf.GRPCConfig{
+		s.GRPCSettings = &conf.GRPCConfig{
 			InitialWindowsSize: 65536,
 			HealthCheckTimeout: 20,
 			MultiMode:          multiMode,
@@ -305,17 +317,18 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 			Authority:          v.Host,
 			ServiceName:        v.Path,
 		}
-	case "quic":
-		t := "none"
-		if v.Type != "" {
-			t = v.Type
-		}
-		s.QUICSettings = &conf.QUICConfig{
-			Header:   json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, t))),
-			Security: v.Host,
-			Key:      v.Path,
-		}
 		break
+		//case "quic":
+		//	t := "none"
+		//	if v.Type != "" {
+		//		t = v.Type
+		//	}
+		//	s.QUICSettings = &conf.QUICConfig{
+		//		Header:   json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, t))),
+		//		Security: v.Host,
+		//		Key:      v.Path,
+		//	}
+		//	break
 	}
 
 	if v.TLS == "tls" {
