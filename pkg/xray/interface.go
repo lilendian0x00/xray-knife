@@ -29,7 +29,7 @@ type Vmess struct {
 	SNI            string      `json:"sni"`  // Server name indication
 	ALPN           string      `json:"alpn"` // Application-Layer Protocol Negotiation
 	TlsFingerprint string      `json:"fp"`   // TLS fingerprint
-	Type           string      `json:"type"` // Used for HTTP Obfuscation
+	Type           string      `json:"type"` // XHTTP - Used for HTTP Obfuscation
 
 	//// It's also possible for Vmess to have REALITY...
 	//PublicKey string `json:"pbk"`
@@ -59,11 +59,11 @@ type Vless struct {
 	ALPN           string `json:"alpn"`          // Application-Layer Protocol Negotiation
 	TlsFingerprint string `json:"fp"`            // TLS fingerprint
 	AllowInsecure  string `json:"allowInsecure"` // Insecure TLS
-	Type           string `json:"type"`          // Network
+	Type           string `json:"type"`          // Network (XHTTP, ...)
 	Remark         string `json:"ps"`            // Config's name
 	Authority      string `json:"authority"`     // GRPC
 	ServiceName    string `json:"serviceName"`   // GRPC
-	Mode           string `json:"mode"`          // GRPC
+	Mode           string `json:"mode"`          // XHTTP - GRPC
 	OrigLink       string `json:"-"`             // Original link
 }
 
@@ -92,10 +92,10 @@ type Trojan struct {
 	ALPN           string `json:"alpn"`          // Application-Layer Protocol Negotiation
 	TlsFingerprint string `json:"fp"`            // TLS fingerprint
 	AllowInsecure  string `json:"allowInsecure"` // Insecure TLS
-	Type           string `json:"type"`          // Network
+	Type           string `json:"type"`          // Network (XHTTP, ...)
 	Remark         string // Config's name
 	ServiceName    string `json:"serviceName"` // GRPC
-	Mode           string `json:"mode"`        // GRPC
+	Mode           string `json:"mode"`        // XHTTP, GRPC
 
 	// Yes, Trojan can have reality too xD
 	PublicKey string `json:"pbk"`
