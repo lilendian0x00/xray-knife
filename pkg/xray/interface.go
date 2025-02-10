@@ -109,6 +109,7 @@ type Wireguard struct {
 	Remark       string
 	PublicKey    string `json:"publickey"`
 	SecretKey    string `json:"secretkey"`
+	PreSharedKey string `json:"presharedkey"`
 	Endpoint     string
 	LocalAddress string `json:"address"` // Local address IPv4/IPv6 seperated by commas
 	Mtu          int32  `json:"mtu"`

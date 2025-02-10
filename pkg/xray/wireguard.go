@@ -75,8 +75,8 @@ func (w *Wireguard) Parse() error {
 }
 
 func (w *Wireguard) DetailsStr() string {
-	info := fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %d\n%s: %s\n%s: %v\n%s: %s\n", w.Name(),
-		color.RedString("Protocol"),
+	info := fmt.Sprintf("%s: %s\n%s: %s\n%s: %s\n%s: %d\n%s: %s\n%s: %v\n%s: %s\n",
+		color.RedString("Protocol"), w.Name(),
 		color.RedString("Remark"), w.Remark,
 		color.RedString("Endpoint"), w.Endpoint,
 		color.RedString("MTU"), w.Mtu,
@@ -93,6 +93,19 @@ func (w *Wireguard) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Address = w.Endpoint
 
 	return g
+}
+
+type Peer struct {
+	Endpoint     string `json:"endpoint"`
+	PublicKey    string `json:"publicKey"`
+	PreSharedKey string `json:"preSharedKey"`
+}
+
+type Config struct {
+	SecretKey string   `json:"secretKey"`
+	Address   []string `json:"address"`
+	Peers     []Peer   `json:"peers"`
+	MTU       int      `json:"mtu"`
 }
 
 func (w *Wireguard) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
@@ -118,20 +131,47 @@ func (w *Wireguard) BuildOutboundDetourConfig(allowInsecure bool) (*conf.Outboun
 	//	DomainStrategy: "ForceIPv6v4",
 	//}
 
-	oset := json.RawMessage(fmt.Sprintf(`{
-  "secretKey": "%s",
-  "address": ["%s", "%s"],
-  "peers": [
-    {
-      "endpoint": "%s",
-      "publicKey": "%s"
-    }
-  ],
-  "mtu": %d
-}
-`, w.SecretKey, strings.Split(w.LocalAddress, ",")[0], strings.Split(w.LocalAddress, ",")[1], w.Endpoint, w.PublicKey, w.Mtu,
-	))
-	out.Settings = &oset
+	//oset := json.RawMessage(fmt.Sprintf({
+	//	"secretKey": "%s",
+	//		"address": ["%s", "%s"],
+	//"peers": [
+	//{
+	//"endpoint": "%s",
+	//"publicKey": "%s"
+	//}
+	//],
+	//"mtu": %d
+	//}
+	//, w.SecretKey, strings.Split(w.LocalAddress, ",")[0], strings.Split(w.LocalAddress, ",")[1], w.Endpoint, w.PublicKey, w.Mtu,
+	//))
+
+	// Prepare the address slice safely.
+	addresses := strings.Split(w.LocalAddress, ",")
+
+	fmt.Println(addresses)
+
+	cfg := Config{
+		SecretKey: w.SecretKey,
+		Address:   addresses,
+		Peers: []Peer{
+			{
+				Endpoint:     w.Endpoint,
+				PublicKey:    w.PublicKey,
+				PreSharedKey: w.PreSharedKey,
+			},
+		},
+		MTU: int(w.Mtu),
+	}
+
+	jsonData, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, err
+		// handle error
+	}
+
+	//out.Settings = &oset
+	rawMSG := json.RawMessage(jsonData)
+	out.Settings = &rawMSG
 
 	return out, nil
 }
