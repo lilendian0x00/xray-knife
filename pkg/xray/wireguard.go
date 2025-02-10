@@ -148,8 +148,6 @@ func (w *Wireguard) BuildOutboundDetourConfig(allowInsecure bool) (*conf.Outboun
 	// Prepare the address slice safely.
 	addresses := strings.Split(w.LocalAddress, ",")
 
-	fmt.Println(addresses)
-
 	cfg := Config{
 		SecretKey: w.SecretKey,
 		Address:   addresses,
