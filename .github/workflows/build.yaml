@@ -80,7 +80,7 @@ jobs:
           mv build_assets Xray-knife-${{ env.ASSET_NAME }}
 
       - name: Upload files to Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: Xray-knife-${{ env.ASSET_NAME }}
           path: ./Xray-knife-${{ env.ASSET_NAME }}/*
