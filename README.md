@@ -23,12 +23,12 @@ You can view the flags of each command by using the `-h` or `--help` option.
 Get the latest version from [GitHub](https://github.com/lilendian0x00/xray-knife/releases/latest).
 
 ## Build instruction
-Only works on golang version 1.21
+Only works on golang version 1.23
 
 1. `Install golang`
 2. `git clone https://github.com/lilendian0x00/xray-knife.git`
 3. `cd xray-knife`
-4. `go build .`
+4. `bash ./build.sh <OS>`
     
 
 # Screenshots
@@ -41,6 +41,9 @@ Only works on golang version 1.21
 
 
 # TODO
+## cores
+- [X] ~~Add [sing-box](https://github.com/sagernet/sing-box) core~~
+
 ## protocols - parse
 - [X] ~~Add Vmess link support (`vmess://...`, full b64 encoded)~~
 - [X] ~~Add Vmess link v2 support (`vmess://...`, semi b64 encoded)~~
@@ -64,6 +67,4 @@ Only works on golang version 1.21
 ## proxy
 - [X] ~~Added CLI client feature~~
 - [X] ~~Option to switch outbound connection automatically based on passed parameter (E.g. interval, availability) (rotating proxy)~~
-
-## scan (under development)
-- [ ] Cloudflare white-list IP scanner
+- [X] ~~Add support for [sing-box](https://github.com/sagernet/sing-box) core~~
