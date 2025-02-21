@@ -310,7 +310,6 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 			multiMode = true
 		}
 		s.GRPCSettings = &conf.GRPCConfig{
-			Authority:          v.Host,
 			InitialWindowsSize: 65536,
 			HealthCheckTimeout: 20,
 			MultiMode:          multiMode,
