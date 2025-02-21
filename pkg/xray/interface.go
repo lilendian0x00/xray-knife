@@ -94,6 +94,7 @@ type Trojan struct {
 	AllowInsecure  string `json:"allowInsecure"` // Insecure TLS
 	Type           string `json:"type"`          // Network (XHTTP, ...)
 	Remark         string // Config's name
+	Authority      string `json:"authority"`   // GRPC
 	ServiceName    string `json:"serviceName"` // GRPC
 	Mode           string `json:"mode"`        // XHTTP, GRPC
 
