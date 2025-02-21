@@ -12,14 +12,13 @@ jobs:
       contents: write
     strategy:
       matrix:
-        # Include amd64 and arm64 on all platforms.
+        # Define the OS and architecture combinations
         goos: [windows, linux, darwin]
         goarch: [amd64, arm64]
         include:
-          # BEGIN Android ARM 8
+          # For Android ARM 8 (added in your original build.sh as a specific case)
           - goos: android
             goarch: arm64
-          # END Android ARM 8
       fail-fast: false
 
     runs-on: ubuntu-latest
@@ -42,21 +41,20 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: '1.21.6'
+          go-version: '1.23.1'
 
-      - name: Donwload Project dependencies
+      - name: Download Project dependencies
         run: go mod download
 
-      - name: Build Xray-knife
+      - name: Build the application
         run: |
           mkdir -p build_assets
-          go build -v -o build_assets/xray-knife -trimpath -ldflags "-s -w -buildid=" 
+          go build -v -o build_assets/xray-knife -tags="with_gvisor,with_quic,with_wireguard,with_ech,with_utls,with_clash_api,with_grpc" -ldflags "-s -w -buildid="
 
-      - name: Rename Windows Xray-knife
+      - name: Rename Windows binary
         if: matrix.goos == 'windows'
         run: |
-          cd ./build_assets || exit 1
-          mv xray-knife xray-knife.exe
+          mv ./build_assets/xray-knife ./build_assets/xray-knife.exe
 
       - name: Copy README.md & LICENSE
         run: |
@@ -72,12 +70,12 @@ jobs:
           popd || exit 1
           FILE=./Xray-knife-${{ env.ASSET_NAME }}.zip
           DGST=$FILE.dgst
-          for METHOD in {"md5","sha1","sha256","sha512"}
+          for METHOD in md5 sha1 sha256 sha512
           do
-          openssl dgst -$METHOD $FILE | sed 's/([^)]*)//g' >>$DGST
+            openssl dgst -$METHOD $FILE | sed 's/([^)]*)//g' >>$DGST
           done
 
-      - name: Change the name
+      - name: Rename build directory
         run: |
           mv build_assets Xray-knife-${{ env.ASSET_NAME }}
 
@@ -85,8 +83,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: Xray-knife-${{ env.ASSET_NAME }}
-          path: |
-            ./Xray-knife-${{ env.ASSET_NAME }}/*
+          path: ./Xray-knife-${{ env.ASSET_NAME }}/*
 
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
