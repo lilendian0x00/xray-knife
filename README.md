@@ -25,7 +25,7 @@ Get the latest version from [GitHub](https://github.com/lilendian0x00/xray-knife
 ## Build instruction
 Only works on golang version 1.23
 
-1. `Install golang`
+1. Install [Golang](https://go.dev/doc/install)
 2. `git clone https://github.com/lilendian0x00/xray-knife.git`
 3. `cd xray-knife`
 4. `bash ./build.sh <OS>`
