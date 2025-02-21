@@ -267,6 +267,7 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 			multiMode = true
 		}
 		s.GRPCSettings = &conf.GRPCConfig{
+			Authority:          t.Authority,
 			InitialWindowsSize: 65536,
 			HealthCheckTimeout: 20,
 			MultiMode:          multiMode,
