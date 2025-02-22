@@ -1,5 +1,5 @@
 # xray-knife
-Swiss army knife tool (cli) for [xray-core](https://github.com/XTLS/Xray-core).
+Swiss army knife tool (cli) for [xray-core](https://github.com/XTLS/Xray-core) and [sing-box](https://github.com/sagernet/sing-box).
 
 **I DEDICATE THIS TOOL TO MY DEAR PERSIAN PEOPLE.**
 
