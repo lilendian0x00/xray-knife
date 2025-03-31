@@ -1,14 +1,15 @@
 package pkg
 
 import (
-	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
-	"github.com/lilendian0x00/xray-knife/v2/pkg/singbox"
-	"github.com/lilendian0x00/xray-knife/v2/pkg/xray"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
+	"github.com/lilendian0x00/xray-knife/v2/pkg/singbox"
+	"github.com/lilendian0x00/xray-knife/v2/pkg/xray"
 )
 
 type CoreType uint8

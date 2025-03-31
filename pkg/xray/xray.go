@@ -3,7 +3,12 @@ package xray
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http"
+	"time"
+
 	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
+
 	"github.com/xtls/xray-core/app/dispatcher"
 	applog "github.com/xtls/xray-core/app/log"
 	"github.com/xtls/xray-core/app/proxyman"
@@ -11,9 +16,6 @@ import (
 	xraynet "github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/common/serial"
 	"github.com/xtls/xray-core/core"
-	"net"
-	"net/http"
-	"time"
 
 	// The following deps are necessary as they register handlers in their init functions.
 	_ "github.com/xtls/xray-core/app/dispatcher"

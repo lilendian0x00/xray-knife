@@ -2,15 +2,17 @@ package singbox
 
 import (
 	"context"
+	"net"
+	"net/http"
+	"time"
+
 	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
+
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
-	"net"
-	"net/http"
-	"time"
 )
 
 type Core struct {

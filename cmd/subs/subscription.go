@@ -1,7 +1,6 @@
 package subs
 
 import (
-	"github.com/imroc/req/v3"
 	"io"
 	"log"
 	"net/url"
@@ -9,6 +8,8 @@ import (
 
 	"github.com/lilendian0x00/xray-knife/v2/utils"
 	"github.com/lilendian0x00/xray-knife/v2/utils/customlog"
+
+	"github.com/imroc/req/v3"
 )
 
 // TODO: Make a database to store subscriptions

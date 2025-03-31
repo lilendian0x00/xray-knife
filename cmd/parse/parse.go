@@ -3,12 +3,13 @@ package parse
 import (
 	"bufio"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/v2/pkg"
 	"os"
 	"time"
-	
-	"github.com/fatih/color"
+
+	"github.com/lilendian0x00/xray-knife/v2/pkg"
 	"github.com/lilendian0x00/xray-knife/v2/utils"
+
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 

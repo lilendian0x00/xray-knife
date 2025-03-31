@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
 	"io"
 	"net/http"
 	"net/url"
@@ -12,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
 	"github.com/lilendian0x00/xray-knife/v2/speedtester/cloudflare"
 )
 
