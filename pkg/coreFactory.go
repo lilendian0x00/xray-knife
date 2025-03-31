@@ -4,7 +4,10 @@ import (
 	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
 	"github.com/lilendian0x00/xray-knife/v2/pkg/singbox"
 	"github.com/lilendian0x00/xray-knife/v2/pkg/xray"
+	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -42,56 +45,70 @@ func CoreFactory(coreType CoreType, insecureTLS bool, verbose bool) Core {
 
 // AutomaticCore implementation of the Core interface
 // Selects Core based on the config link
-//type AutomaticCore struct {
-//	xrayCore 		*xray.Core
-//	singboxCore 	*singbox.Core
-//}
-//
-//
-//func (c *AutomaticCore) Name() string {
-//	return "Automatic"
-//}
-//
-//func NewAutomaticCore(verbose bool, allowInsecure bool) *AutomaticCore {
-//	return &AutomaticCore{
-//		xrayCore: xray.NewXrayService(verbose, allowInsecure),
-//		singboxCore: singbox.NewSingboxService(verbose, allowInsecure),
-//	}
-//}
-//
-//
-//// Defined Core for each protocol
-//var cproto = map[string]string{
-//	protocol.VmessIdentifier:       "xray",
-//	protocol.VlessIdentifier:       "xray",
-//	protocol.ShadowsocksIdentifier: "xray",
-//	protocol.TrojanIdentifier:      "xray",
-//	protocol.SocksIdentifier:       "xray",
-//	protocol.WireguardIdentifier:   "xray",
-//	protocol.Hysteria2Identifier:   "singbox",
-//}
-//
-//func (c *AutomaticCore) CreateProtocol(configLink string) (protocol.Protocol, error) {
-//	// Parse url
-//	uri, err := url.Parse(configLink)
-//	if err != nil {
-//		return nil, err
-//	}
-//
-//	coreType, ok := cproto[uri.Scheme]
-//	if !ok {
-//		return nil, errors.New(fmt.Sprintf("invalid %s protocol", coreType))
-//	}
-//
-//	switch coreType {
-//	case "xray":
-//		return c.xrayCore.CreateProtocol(configLink)
-//	case "singbox":
-//		return c.singboxCore.CreateProtocol(configLink)
-//	default: // TODO: What?
-//		return c.singboxCore.CreateProtocol(configLink)
-//	}
-//}
+type AutomaticCore struct {
+	xrayCore    *xray.Core
+	singboxCore *singbox.Core
+}
+
+func (c *AutomaticCore) Name() string {
+	return "Automatic"
+}
+
+func NewAutomaticCore(verbose bool, allowInsecure bool) *AutomaticCore {
+	return &AutomaticCore{
+		xrayCore:    xray.NewXrayService(verbose, allowInsecure),
+		singboxCore: singbox.NewSingboxService(verbose, allowInsecure),
+	}
+}
+
+// Defined Core for each protocol
+var cproto = map[string]string{
+	protocol.VmessIdentifier:       "xray",
+	protocol.VlessIdentifier:       "xray",
+	protocol.ShadowsocksIdentifier: "xray",
+	protocol.TrojanIdentifier:      "xray",
+	protocol.SocksIdentifier:       "xray",
+	protocol.WireguardIdentifier:   "xray",
+	protocol.Hysteria2Identifier:   "singbox",
+	"hy2":                          "singbox",
+}
+
+func (c *AutomaticCore) CreateProtocol(configLink string) (protocol.Protocol, error) {
+	uri, err := url.Parse(configLink)
+	if err != nil {
+		return nil, err
+	}
+
+	coreType, ok := cproto[uri.Scheme]
+	if !ok {
+		return nil, fmt.Errorf("invalid %s protocol", coreType)
+	}
+
+	if coreType == "" {
+		return nil, errors.New("unsupported protocol")
+	}
+
+	var protocol protocol.Protocol
+
+	switch coreType {
+	case "xray":
+		protocol, err = c.xrayCore.CreateProtocol(configLink)
+	case "singbox":
+		protocol, err = c.singboxCore.CreateProtocol(configLink)
+		// default: // TODO: What?
+		// return c.singboxCore.CreateProtocol(configLink)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	err = protocol.Parse()
+	if err != nil {
+		return nil, err
+	}
+
+	return protocol, err
+}
 
 //func (c *AutomaticCore) MakeHttpClient(outbound protocol.Protocol) (*http.Client, protocol.Instance, error) {
 //	return outbound.
