@@ -29,7 +29,7 @@ var (
 	readConfigFromSTDIN bool
 	listenAddr          string
 	listenPort          string
-	link                string
+	configLink          string
 	verbose             bool
 	insecureTLS         bool
 	chainOutbounds      bool
@@ -42,7 +42,7 @@ var ProxyCmd = &cobra.Command{
 	Short: "Creates proxy server",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		if len(args) < 1 && (!readConfigFromSTDIN && link == "" && configLinksFile == "") {
+		if len(args) < 1 && (!readConfigFromSTDIN && configLink == "" && configLinksFile == "") {
 			cmd.Help()
 			return
 		}
@@ -82,16 +82,16 @@ var ProxyCmd = &cobra.Command{
 		var links []string
 		var configs []protocol.Protocol
 
-		if configLinksFile != "" {
-			// Get configs from file
-			links = utils.ParseFileByNewline(configLinksFile)
-
-		} else if readConfigFromSTDIN {
-			// Get config from STDIN
+		if readConfigFromSTDIN {
 			reader := bufio.NewReader(os.Stdin)
 			fmt.Println("Reading config from STDIN:")
-			link, _ = reader.ReadString('\n')
-			links = append(links, link)
+			text, _ := reader.ReadString('\n')
+			links = append(links, text)
+		} else if configLink != "" {
+			links = append(links, configLink)
+		} else if configLinksFile != "" {
+			links = utils.ParseFileByNewline(configLinksFile)
+			//fmt.Println(links)
 		}
 
 		// Parse all the links
@@ -284,6 +284,7 @@ var ProxyCmd = &cobra.Command{
 			}
 		} else {
 			// Configuring outbound
+			link := links[0]
 			outboundParsed, err := core.CreateProtocol(link)
 			if err != nil {
 				log.Fatalf("Couldn't parse the config : %v", err)
@@ -326,7 +327,7 @@ func init() {
 
 	ProxyCmd.Flags().StringVarP(&listenAddr, "addr", "a", "127.0.0.1", "Listen ip address")
 	ProxyCmd.Flags().StringVarP(&listenPort, "port", "p", "9999", "Listen port number")
-	ProxyCmd.Flags().StringVarP(&link, "config", "c", "", "The xray config link")
+	ProxyCmd.Flags().StringVarP(&configLink, "config", "c", "", "The xray config link")
 
 	ProxyCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose xray-core")
 	ProxyCmd.Flags().BoolVarP(&insecureTLS, "insecure", "e", false, "Insecure tls connection (fake SNI)")
