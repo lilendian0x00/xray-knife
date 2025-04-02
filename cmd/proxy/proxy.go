@@ -158,6 +158,9 @@ var ProxyCmd = &cobra.Command{
 			//var currentIndex int
 			//var lastIndex int
 
+			config := &net.Config{}
+			processor := net.NewResultProcessor(config)
+
 			customlog.Printf(customlog.Processing, "Looking for a working outbound config...\n")
 
 			connect := func() {
@@ -173,7 +176,7 @@ var ProxyCmd = &cobra.Command{
 					// Shuffle all links
 					r.Shuffle(len(links), func(i, j int) { links[i], links[j] = links[j], links[i] })
 
-					testManager := net.NewTestManager(examiner, nil, 50, false)
+					testManager := net.NewTestManager(examiner, processor, 50, false)
 					results := testManager.TestConfigs(links[0 : testCount-1])
 					sort.Sort(results)
 					for _, v := range results {
