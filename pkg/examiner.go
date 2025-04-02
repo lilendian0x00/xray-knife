@@ -190,7 +190,7 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 	if err != nil {
 		r.Status = "broken"
 		r.Reason = err.Error()
-		return r, nil
+		return r, err
 	}
 	// Close xray conn after testing
 	defer instance.Close()
@@ -204,7 +204,7 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 		//customlog.Printf(customlog.Failure, "Config didn't respond!\n\n")
 		r.Status = "failed"
 		r.Reason = err.Error()
-		return r, nil
+		return r, err
 		//os.Exit(1)
 	}
 	r.Delay = delay
@@ -217,7 +217,7 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 
 	if uint16(delay) > e.MaxDelay {
 		r.Status = "timeout"
-		return r, nil
+		return r, errors.New("timeout")
 	}
 
 	if e.DoIPInfo {
