@@ -4,19 +4,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/fatih/color"
-	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
-	"github.com/lilendian0x00/xray-knife/v2/utils"
-	"github.com/sagernet/sing-box/adapter"
-	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing-box/outbound"
-	"github.com/sagernet/sing/common/logger"
-	"github.com/xtls/xray-core/infra/conf"
 	"net"
 	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
+
+	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
+	"github.com/lilendian0x00/xray-knife/v2/utils"
+
+	"github.com/fatih/color"
+	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/outbound"
+	"github.com/sagernet/sing/common/logger"
+	"github.com/xtls/xray-core/infra/conf"
 )
 
 func NewTrojan(link string) Protocol {

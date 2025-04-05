@@ -7,11 +7,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/fatih/color"
-	"github.com/gocarina/gocsv"
 	"github.com/lilendian0x00/xray-knife/v2/pkg"
 	"github.com/lilendian0x00/xray-knife/v2/utils"
 	"github.com/lilendian0x00/xray-knife/v2/utils/customlog"
+
+	"github.com/fatih/color"
+	"github.com/gocarina/gocsv"
 	"github.com/spf13/cobra"
 )
 

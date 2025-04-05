@@ -4,18 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/fatih/color"
-	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
-	"github.com/sagernet/sing-box/adapter"
-	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing-box/outbound"
-	"github.com/sagernet/sing/common/logger"
 	"net"
 	"net/netip"
 	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
+
+	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
+
+	"github.com/fatih/color"
+	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/outbound"
+	"github.com/sagernet/sing/common/logger"
 )
 
 func NewWireguard(link string) Protocol {

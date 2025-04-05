@@ -2,9 +2,10 @@ package singbox
 
 import (
 	"errors"
-	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
 	"net/url"
 	"strings"
+
+	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
 )
 
 func (c *Core) CreateProtocol(configLink string) (protocol.Protocol, error) {

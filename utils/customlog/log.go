@@ -1,8 +1,9 @@
 package customlog
 
 import (
-	"github.com/fatih/color"
 	"time"
+
+	"github.com/fatih/color"
 )
 
 type Type uint8
