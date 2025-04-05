@@ -4,18 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
-	"github.com/sagernet/sing-box/adapter"
-	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing-box/outbound"
-	"github.com/sagernet/sing/common/logger"
 	"net"
 	"net/url"
 	"strconv"
 	"strings"
 
-	"github.com/fatih/color"
+	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
 	"github.com/lilendian0x00/xray-knife/v2/utils"
+
+	"github.com/fatih/color"
+	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/outbound"
+	"github.com/sagernet/sing/common/logger"
 )
 
 func NewShadowsocks(link string) Protocol {

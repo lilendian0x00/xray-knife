@@ -3,10 +3,6 @@ package proxy
 import (
 	"bufio"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/v2/pkg"
-	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
-	"github.com/lilendian0x00/xray-knife/v2/pkg/singbox"
-	"github.com/lilendian0x00/xray-knife/v2/pkg/xray"
 	"log"
 	"math/rand"
 	"os"
@@ -15,10 +11,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/fatih/color"
 	"github.com/lilendian0x00/xray-knife/v2/cmd/net"
+	"github.com/lilendian0x00/xray-knife/v2/pkg"
+	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
+	"github.com/lilendian0x00/xray-knife/v2/pkg/singbox"
+	"github.com/lilendian0x00/xray-knife/v2/pkg/xray"
 	"github.com/lilendian0x00/xray-knife/v2/utils"
 	"github.com/lilendian0x00/xray-knife/v2/utils/customlog"
+
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +30,7 @@ var (
 	readConfigFromSTDIN bool
 	listenAddr          string
 	listenPort          string
-	link                string
+	configLink          string
 	verbose             bool
 	insecureTLS         bool
 	chainOutbounds      bool
@@ -42,7 +43,7 @@ var ProxyCmd = &cobra.Command{
 	Short: "Creates proxy server",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		if len(args) < 1 && (!readConfigFromSTDIN && link == "" && configLinksFile == "") {
+		if len(args) < 1 && (!readConfigFromSTDIN && configLink == "" && configLinksFile == "") {
 			cmd.Help()
 			return
 		}
@@ -82,16 +83,16 @@ var ProxyCmd = &cobra.Command{
 		var links []string
 		var configs []protocol.Protocol
 
-		if configLinksFile != "" {
-			// Get configs from file
-			links = utils.ParseFileByNewline(configLinksFile)
-
-		} else if readConfigFromSTDIN {
-			// Get config from STDIN
+		if readConfigFromSTDIN {
 			reader := bufio.NewReader(os.Stdin)
 			fmt.Println("Reading config from STDIN:")
-			link, _ = reader.ReadString('\n')
-			links = append(links, link)
+			text, _ := reader.ReadString('\n')
+			links = append(links, text)
+		} else if configLink != "" {
+			links = append(links, configLink)
+		} else if configLinksFile != "" {
+			links = utils.ParseFileByNewline(configLinksFile)
+			//fmt.Println(links)
 		}
 
 		// Parse all the links
@@ -157,6 +158,9 @@ var ProxyCmd = &cobra.Command{
 			//var currentIndex int
 			//var lastIndex int
 
+			config := &net.Config{}
+			processor := net.NewResultProcessor(config)
+
 			customlog.Printf(customlog.Processing, "Looking for a working outbound config...\n")
 
 			connect := func() {
@@ -172,7 +176,7 @@ var ProxyCmd = &cobra.Command{
 					// Shuffle all links
 					r.Shuffle(len(links), func(i, j int) { links[i], links[j] = links[j], links[i] })
 
-					testManager := net.NewTestManager(examiner, nil, 50, false)
+					testManager := net.NewTestManager(examiner, processor, 50, false)
 					results := testManager.TestConfigs(links[0 : testCount-1])
 					sort.Sort(results)
 					for _, v := range results {
@@ -284,6 +288,7 @@ var ProxyCmd = &cobra.Command{
 			}
 		} else {
 			// Configuring outbound
+			link := links[0]
 			outboundParsed, err := core.CreateProtocol(link)
 			if err != nil {
 				log.Fatalf("Couldn't parse the config : %v", err)
@@ -326,7 +331,7 @@ func init() {
 
 	ProxyCmd.Flags().StringVarP(&listenAddr, "addr", "a", "127.0.0.1", "Listen ip address")
 	ProxyCmd.Flags().StringVarP(&listenPort, "port", "p", "9999", "Listen port number")
-	ProxyCmd.Flags().StringVarP(&link, "config", "c", "", "The xray config link")
+	ProxyCmd.Flags().StringVarP(&configLink, "config", "c", "", "The xray config link")
 
 	ProxyCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose xray-core")
 	ProxyCmd.Flags().BoolVarP(&insecureTLS, "insecure", "e", false, "Insecure tls connection (fake SNI)")
