@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"strconv"
 
-	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
+	"github.com/lilendian0x00/xray-knife/v3/pkg/protocol"
 
 	"github.com/fatih/color"
 	"github.com/sagernet/sing-box/adapter"

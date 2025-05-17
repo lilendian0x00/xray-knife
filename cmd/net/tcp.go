@@ -5,8 +5,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/lilendian0x00/xray-knife/v2/pkg/xray"
-	"github.com/lilendian0x00/xray-knife/v2/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v3/pkg/xray"
+	"github.com/lilendian0x00/xray-knife/v3/utils/customlog"
 
 	"github.com/spf13/cobra"
 )

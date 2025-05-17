@@ -7,9 +7,9 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
-	"github.com/lilendian0x00/xray-knife/v2/pkg/singbox"
-	"github.com/lilendian0x00/xray-knife/v2/pkg/xray"
+	"github.com/lilendian0x00/xray-knife/v3/pkg/protocol"
+	"github.com/lilendian0x00/xray-knife/v3/pkg/singbox"
+	"github.com/lilendian0x00/xray-knife/v3/pkg/xray"
 )
 
 type CoreType uint8

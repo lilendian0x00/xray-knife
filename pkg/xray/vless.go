@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
-	"github.com/lilendian0x00/xray-knife/v2/utils"
+	"github.com/lilendian0x00/xray-knife/v3/pkg/protocol"
+	"github.com/lilendian0x00/xray-knife/v3/utils"
 
 	"github.com/fatih/color"
 	"github.com/xtls/xray-core/infra/conf"

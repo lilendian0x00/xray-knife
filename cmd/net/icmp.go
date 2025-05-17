@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lilendian0x00/xray-knife/v2/network"
-	"github.com/lilendian0x00/xray-knife/v2/pkg"
-	"github.com/lilendian0x00/xray-knife/v2/pkg/protocol"
-	"github.com/lilendian0x00/xray-knife/v2/pkg/xray"
+	"github.com/lilendian0x00/xray-knife/v3/network"
+	"github.com/lilendian0x00/xray-knife/v3/pkg"
+	"github.com/lilendian0x00/xray-knife/v3/pkg/protocol"
+	"github.com/lilendian0x00/xray-knife/v3/pkg/xray"
 
 	"github.com/spf13/cobra"
 )

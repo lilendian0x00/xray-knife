@@ -3,11 +3,11 @@ package cmd
 import (
 	"os"
 
-	"github.com/lilendian0x00/xray-knife/v2/cmd/net"
-	"github.com/lilendian0x00/xray-knife/v2/cmd/parse"
-	"github.com/lilendian0x00/xray-knife/v2/cmd/proxy"
-	"github.com/lilendian0x00/xray-knife/v2/cmd/scan"
-	"github.com/lilendian0x00/xray-knife/v2/cmd/subs"
+	"github.com/lilendian0x00/xray-knife/v3/cmd/net"
+	"github.com/lilendian0x00/xray-knife/v3/cmd/parse"
+	"github.com/lilendian0x00/xray-knife/v3/cmd/proxy"
+	"github.com/lilendian0x00/xray-knife/v3/cmd/scan"
+	"github.com/lilendian0x00/xray-knife/v3/cmd/subs"
 
 	"github.com/spf13/cobra"
 )
@@ -17,7 +17,7 @@ var rootCmd = &cobra.Command{
 	Use:     "github.com/lilendian0x00/xray-knife",
 	Short:   "Swiss Army Knife for xray-core & sing-box",
 	Long:    ``,
-	Version: "3.20.45",
+	Version: "3.20.46",
 	// Main Tools:
 	//1. parse: Parses xray config link.
 	//2. net: Multiple network tests for xray configs.

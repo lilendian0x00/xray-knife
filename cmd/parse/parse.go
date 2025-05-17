@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/lilendian0x00/xray-knife/v2/pkg"
-	"github.com/lilendian0x00/xray-knife/v2/utils"
+	"github.com/lilendian0x00/xray-knife/v3/pkg"
+	"github.com/lilendian0x00/xray-knife/v3/utils"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
