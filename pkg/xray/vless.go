@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"reflect"
 	"strings"
 
 	"github.com/lilendian0x00/xray-knife/v3/pkg/protocol"
@@ -30,61 +29,62 @@ func (v *Vless) Parse() error {
 
 	uri, err := url.Parse(v.OrigLink)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to parse VLESS link: %w", err)
 	}
 
 	v.ID = uri.User.String()
 
 	v.Address, v.Port, err = net.SplitHostPort(uri.Host)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to split host and port for VLESS link: %w", err)
 	}
 
 	if utils.IsIPv6(v.Address) {
 		v.Address = "[" + v.Address + "]"
 	}
 
-	// Get the type of the struct
-	t := reflect.TypeOf(*v)
+	query := uri.Query()
 
-	// Get the number of fields in the struct
-	numFields := t.NumField()
+	// Explicitly parse known query parameters
+	v.Encryption = query.Get("encryption") // Typically "none" for VLESS
+	v.Security = query.Get("security")     // "tls", "reality", or "" (none)
+	v.SNI = query.Get("sni")
+	v.ALPN = query.Get("alpn")
+	v.TlsFingerprint = query.Get("fp") // fingerprint
+	v.Type = query.Get("type")         // network type: "tcp", "ws", "grpc", "quic", etc.
+	v.Host = query.Get("host")         // for ws, http
+	v.Path = query.Get("path")         // for ws, http path, or kcp seed
+	v.Flow = query.Get("flow")
+	v.PublicKey = query.Get("pbk")               // reality public key
+	v.ShortIds = query.Get("sid")                // reality short ID
+	v.SpiderX = query.Get("spx")                 // reality spiderX
+	v.HeaderType = query.Get("headerType")       // e.g., "http" for TCP HTTP obfuscation
+	v.ServiceName = query.Get("serviceName")     // grpc service name
+	v.Mode = query.Get("mode")                   // grpc mode (gun, multi) or xhttp mode
+	v.AllowInsecure = query.Get("allowInsecure") // "1", "true", or ""
+	v.QuicSecurity = query.Get("quicSecurity")   // QUIC security: "none", "aes-128-gcm", etc.
+	v.Key = query.Get("key")                     // QUIC key
+	v.Authority = query.Get("authority")         // GRPC authority
 
-	// Iterate over each field of the struct
-	for i := 0; i < numFields; i++ {
-		field := t.Field(i)
-		tag := field.Tag.Get("json")
-
-		// If the query value exists for the field, set it
-		if values, ok := uri.Query()[tag]; ok {
-			value := values[0]
-			v := reflect.ValueOf(v).Elem().FieldByName(field.Name)
-
-			switch v.Type().String() {
-			case "string":
-				v.SetString(value)
-			case "int":
-				var intValue int
-				fmt.Sscanf(value, "%d", &intValue)
-				v.SetInt(int64(intValue))
-			}
-		}
-	}
-
-	v.Remark, err = url.PathUnescape(uri.Fragment)
+	unescapedRemark, err := url.PathUnescape(uri.Fragment)
 	if err != nil {
-		v.Remark = uri.Fragment
+		v.Remark = uri.Fragment // Use raw fragment if unescaping fails
+	} else {
+		v.Remark = unescapedRemark
 	}
-	//portUint, err := strconv.ParseUint(address[1], 10, 16)
-	//if err != nil {
-	//	fmt.Fprintf(os.Stderr, "%v", err)
-	//	os.Exit(1)
-	//}
-	//v.Port = uint16(portUint)
 
-	if v.HeaderType == "http" || v.Type == "ws" || v.Type == "h2" {
+	// Apply defaults or adjustments after parsing
+	if v.HeaderType == "http" || v.Type == "ws" || v.Type == "h2" || v.Type == "xhttp" {
 		if v.Path == "" {
 			v.Path = "/"
+		}
+	}
+	if v.Type == "" && (v.Security == "tls" || v.Security == "reality" || v.Security == "") { // Default to tcp if not specified otherwise for typical streams
+		v.Type = "tcp"
+	}
+	if v.Security == "tls" || v.Security == "reality" {
+		if v.TlsFingerprint == "" {
+			v.TlsFingerprint = "chrome" // Default fingerprint if TLS/REALITY is used
 		}
 	}
 
@@ -236,17 +236,12 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36",
 		}
 		break
-	//case "", "http":
 	case "xhttp":
 		s.XHTTPSettings = &conf.SplitHTTPConfig{
 			Host: v.Host,
 			Path: v.Path,
 			Mode: v.Mode,
 		}
-		//if v.Host != "" {
-		//	h := conf.StringList(strings.Split(v.Host, ","))
-		//	s.XHTTPSettings.Host = &h
-		//}
 		if v.Mode == "" {
 			s.XHTTPSettings.Mode = "auto"
 		}
@@ -286,48 +281,39 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 		}
 		v.Flow = ""
 		break
-		//case "quic":
-		//	t := "none"
-		//	if v.HeaderType != "" {
-		//		t = v.HeaderType
-		//	}
-		//
-		//	s.QUICSettings = &conf.QUICConfig{
-		//		Header:   json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, t))),
-		//		Security: v.QuicSecurity,
-		//		Key:      v.Key,
-		//	}
-		//	break
 	}
 
 	if v.Security == "tls" {
-		var insecure = allowInsecure
-		if v.AllowInsecure != "" {
-			if v.AllowInsecure == "1" || v.AllowInsecure == "true" {
-				insecure = true
-			}
+		var insecureFlag = allowInsecure // Use the passed-in parameter
+		if v.AllowInsecure == "1" || v.AllowInsecure == "true" {
+			insecureFlag = true
 		}
 
-		if v.TlsFingerprint == "" {
-			v.TlsFingerprint = "chrome"
+		fp := v.TlsFingerprint
+		if fp == "" {
+			fp = "chrome"
 		}
 		s.TLSSettings = &conf.TLSConfig{
-			Fingerprint: v.TlsFingerprint,
-			Insecure:    insecure,
+			Fingerprint: fp,
+			Insecure:    insecureFlag,
 		}
 		if v.SNI != "" {
 			s.TLSSettings.ServerName = v.SNI
 		} else {
-			s.TLSSettings.ServerName = v.Host
+			s.TLSSettings.ServerName = v.Host // Fallback to Host if SNI is empty
 		}
 		if v.ALPN != "" {
 			alpns := conf.StringList(strings.Split(v.ALPN, ","))
 			s.TLSSettings.ALPN = &alpns
 		}
 	} else if v.Security == "reality" {
+		fp := v.TlsFingerprint
+		if fp == "" {
+			fp = "chrome"
+		}
 		s.REALITYSettings = &conf.REALITYConfig{
 			Show:        false,
-			Fingerprint: v.TlsFingerprint,
+			Fingerprint: fp,
 			ServerName:  v.SNI,
 			PublicKey:   v.PublicKey,
 			ShortId:     v.ShortIds,
@@ -340,7 +326,7 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
   "vnext": [
     {
       "address": "%s",
-      "port": %v,
+      "port": %s, 
       "users": [
         {
           "id": "%s",
