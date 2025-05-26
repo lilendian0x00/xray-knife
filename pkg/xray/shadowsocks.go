@@ -127,7 +127,7 @@ func (s *Shadowsocks) BuildOutboundDetourConfig(allowInsecure bool) (*conf.Outbo
 		"port": %v,
 		"password": "%s",
 		"method": "%s",
-		"uot": true
+		"uot": false
 	}
   ]
 }`, s.Address, s.Port, s.Password, s.Encryption)))
