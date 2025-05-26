@@ -3,11 +3,11 @@ package proxy
 import (
 	"bufio"
 	"fmt"
-	"log"
 	"math/rand"
 	"os"
 	"os/signal"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -15,7 +15,7 @@ import (
 	"github.com/lilendian0x00/xray-knife/v3/pkg"
 	"github.com/lilendian0x00/xray-knife/v3/pkg/protocol"
 	"github.com/lilendian0x00/xray-knife/v3/pkg/singbox"
-	"github.com/lilendian0x00/xray-knife/v3/pkg/xray"
+	pkGxray "github.com/lilendian0x00/xray-knife/v3/pkg/xray" // Alias to avoid conflict
 	"github.com/lilendian0x00/xray-knife/v3/utils"
 	"github.com/lilendian0x00/xray-knife/v3/utils/customlog"
 
@@ -23,7 +23,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
+// proxyCmdConfig holds the configuration for the proxy command
+type proxyCmdConfig struct {
 	CoreType            string
 	interval            uint32
 	configLinksFile     string
@@ -33,308 +34,337 @@ var (
 	configLink          string
 	verbose             bool
 	insecureTLS         bool
-	chainOutbounds      bool
+	chainOutbounds      bool // This flag is defined but seems unused in the core logic
 	maximumAllowedDelay uint16
-)
+}
 
-// ProxyCmd BotCmd represents the bot command
-var ProxyCmd = &cobra.Command{
-	Use:   "proxy",
-	Short: "Creates proxy server",
-	Long:  ``,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) < 1 && (!readConfigFromSTDIN && configLink == "" && configLinksFile == "") {
-			cmd.Help()
-			return nil
-		}
+// ProxyCmd represents the proxy command
+var ProxyCmd = newProxyCommand()
 
-		var core pkg.Core
-		var inbound protocol.Protocol
+func newProxyCommand() *cobra.Command {
+	cfg := &proxyCmdConfig{}
 
-		switch CoreType {
-		case "xray":
-			core = pkg.CoreFactory(pkg.XrayCoreType, insecureTLS, verbose)
-
-			inbound = &xray.Socks{
-				Remark:  "Listener",
-				Address: listenAddr,
-				Port:    listenPort,
+	cmd := &cobra.Command{
+		Use:   "proxy",
+		Short: "Creates proxy server",
+		Long:  ``,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) < 1 && (!cfg.readConfigFromSTDIN && cfg.configLink == "" && cfg.configLinksFile == "") {
+				cmd.Help()
+				return nil
 			}
-			break
-		case "singbox":
-			core = pkg.CoreFactory(pkg.SingboxCoreType, insecureTLS, verbose)
 
-			inbound = &singbox.Socks{
-				Remark:  "Listener",
-				Address: listenAddr,
-				Port:    listenPort,
+			var core pkg.Core
+			var inbound protocol.Protocol
+
+			switch cfg.CoreType {
+			case "xray":
+				core = pkg.CoreFactory(pkg.XrayCoreType, cfg.insecureTLS, cfg.verbose)
+				// Ensure correct type assertion or use the specific struct if known
+				inbound = &pkGxray.Socks{ // Use alias for xray package's Socks
+					Remark:  "Listener",
+					Address: cfg.listenAddr,
+					Port:    cfg.listenPort,
+				}
+			case "singbox":
+				core = pkg.CoreFactory(pkg.SingboxCoreType, cfg.insecureTLS, cfg.verbose)
+				inbound = &singbox.Socks{
+					Remark:  "Listener",
+					Address: cfg.listenAddr,
+					Port:    cfg.listenPort,
+				}
+			default:
+				return fmt.Errorf("allowed core types: (xray, singbox), got: %s", cfg.CoreType)
 			}
-			break
-		default:
-			return fmt.Errorf("allowed core types: (xray, singbox), got: %s", CoreType)
-		}
 
-		inErr := core.SetInbound(inbound)
-		if inErr != nil {
-			return fmt.Errorf("failed to set inbound: %w", inErr)
-		}
-
-		r := rand.New(rand.NewSource(time.Now().Unix()))
-		var links []string
-		var configs []protocol.Protocol
-
-		if readConfigFromSTDIN {
-			reader := bufio.NewReader(os.Stdin)
-			fmt.Println("Reading config from STDIN:")
-			text, _ := reader.ReadString('\n')
-			links = append(links, text)
-		} else if configLink != "" {
-			links = append(links, configLink)
-		} else if configLinksFile != "" {
-			links = utils.ParseFileByNewline(configLinksFile)
-			//fmt.Println(links)
-		}
-
-		// Parse all the links
-		for _, c := range links {
-			conf, err := core.CreateProtocol(c)
-			if err != nil {
-				log.Println(color.RedString("Couldn't parse the config : %v", err))
+			inErr := core.SetInbound(inbound)
+			if inErr != nil {
+				return fmt.Errorf("failed to set inbound: %w", inErr)
 			}
-			configs = append(configs, conf)
-		}
 
-		// Clear the terminal
-		utils.ClearTerminal()
+			r := rand.New(rand.NewSource(time.Now().Unix()))
+			var links []string
+			var parsedConfigs []protocol.Protocol
 
-		// Make an examiner
-		examiner, err1 := pkg.NewExaminer(pkg.Options{
-			// TODO: Variable core
-			CoreInstance: core,
-			MaxDelay:     2000,
-		})
-		if err1 != nil {
-			return fmt.Errorf("failed to create examiner: %w", err1)
-		}
-
-		fmt.Println(color.RedString("\n==========INBOUND=========="))
-		fmt.Printf("%v", inbound.DetailsStr())
-		fmt.Println(color.RedString("============================\n"))
-
-		var instance protocol.Instance = nil
-
-		var err error
-
-		// Create a channel to receive signals.
-		signalChannel := make(chan os.Signal, 1)
-
-		// Notify the signalChannel on receiving interrupt signals (e.g., Ctrl+C).
-		signal.Notify(signalChannel, os.Interrupt, syscall.SIGINT)
-
-		// Create a goroutine to handle the received signals.
-		go func() {
-			// Wait for a signal to be received.
-			sig := <-signalChannel
-
-			// Print the received signal.
-			customlog.Printf(customlog.Processing, "Received signal: %v\n", sig)
-
-			// Perform some actions before exiting.
-			customlog.Printf(customlog.Processing, "Closing xray service...")
-
-			// Close xray service
-			if instance != nil {
-				err := instance.Close()
+			if cfg.readConfigFromSTDIN {
+				reader := bufio.NewReader(os.Stdin)
+				fmt.Println("Reading config from STDIN:")
+				text, err := reader.ReadString('\n')
 				if err != nil {
-
+					return fmt.Errorf("error reading config from stdin: %w", err)
 				}
+				links = append(links, text)
+			} else if cfg.configLink != "" {
+				links = append(links, cfg.configLink)
+			} else if cfg.configLinksFile != "" {
+				links = utils.ParseFileByNewline(cfg.configLinksFile)
 			}
-			// Exit the program.
-			os.Exit(0)
-		}()
 
-		if len(configs) > 1 {
-			//var currentIndex int
-			//var lastIndex int
+			if len(links) == 0 {
+				return fmt.Errorf("no configuration links provided or found")
+			}
 
-			config := &net.Config{}
-			processor := net.NewResultProcessor(config)
-
-			customlog.Printf(customlog.Processing, "Looking for a working outbound config...\n")
-
-			connect := func() {
-				var lastConfig string
-				var currentConfig protocol.Protocol = nil
-
-				// Decide how many configs we are going to test
-				var testCount int = 25
-				if len(links) < 25 {
-					testCount = len(links)
+			for _, cLink := range links {
+				trimmedLink := strings.TrimSpace(cLink)
+				if trimmedLink == "" {
+					continue
 				}
-				for currentConfig == nil {
-					// Shuffle all links
-					r.Shuffle(len(links), func(i, j int) { links[i], links[j] = links[j], links[i] })
+				conf, err := core.CreateProtocol(trimmedLink)
+				if err != nil {
+					customlog.Printf(customlog.Failure, "Couldn't parse the config %s: %v\n", trimmedLink, err)
+					continue // Skip unparseable configs
+				}
+				parsedConfigs = append(parsedConfigs, conf)
+			}
 
-					testManager := net.NewTestManager(examiner, processor, 50, false)
-					results := testManager.TestConfigs(links[0 : testCount-1])
-					sort.Sort(results)
-					for _, v := range results {
-						if v.ConfigLink != lastConfig {
-							currentConfig = v.Protocol
-							lastConfig = v.ConfigLink
-							break
+			if len(parsedConfigs) == 0 {
+				return fmt.Errorf("no valid configs could be parsed from the provided sources")
+			}
+
+			utils.ClearTerminal()
+
+			examinerOpts := pkg.Options{
+				CoreInstance:           core,
+				MaxDelay:               cfg.maximumAllowedDelay,
+				Verbose:                cfg.verbose, // Pass proxy's verbose to examiner
+				InsecureTLS:            cfg.insecureTLS,
+				TestEndpoint:           "https://cloudflare.com/cdn-cgi/trace", // Default, can be exposed if needed
+				TestEndpointHttpMethod: "GET",
+				// Speedtest options can be added if proxy needs to perform them internally
+			}
+			examiner, errExaminer := pkg.NewExaminer(examinerOpts)
+			if errExaminer != nil {
+				return fmt.Errorf("failed to create examiner: %w", errExaminer)
+			}
+
+			fmt.Println(color.RedString("\n==========INBOUND=========="))
+			fmt.Printf("%v", inbound.DetailsStr())
+			fmt.Println(color.RedString("============================\n"))
+
+			var currentInstance protocol.Instance
+			var err error // Local error variable for loops/functions
+
+			signalChannel := make(chan os.Signal, 1)
+			signal.Notify(signalChannel, os.Interrupt, syscall.SIGINT)
+
+			go func() {
+				sig := <-signalChannel
+				customlog.Printf(customlog.Processing, "Received signal: %v\n", sig)
+				customlog.Printf(customlog.Processing, "Closing core service...")
+				if currentInstance != nil {
+					_ = currentInstance.Close() // Best effort
+				}
+				os.Exit(0) // Graceful shutdown on signal
+			}()
+
+			if len(links) > 1 { // Use original links count for rotation logic
+				// This net.Config is for the ResultProcessor, which is part of the TestManager.
+				// If proxy rotation doesn't *save* test results itself, this part could be simplified.
+				// Assuming TestManager needs it for internal processing:
+				netTestConfig := &net.Config{
+					OutputType: "txt", // Default, or expose flags for these too
+				}
+				processor := net.NewResultProcessor(netTestConfig)
+
+				customlog.Printf(customlog.Processing, "Looking for a working outbound config...\n")
+
+				connectAndRun := func() error {
+					var lastConfigLink string
+					var activeOutbound protocol.Protocol
+
+					testCount := 25
+					if len(links) < testCount {
+						testCount = len(links)
+					}
+					if testCount == 0 {
+						return fmt.Errorf("no links available to test for proxy rotation")
+					}
+
+					// Find an initial working config
+					for activeOutbound == nil {
+						r.Shuffle(len(links), func(i, j int) { links[i], links[j] = links[j], links[i] })
+
+						linksToTest := links
+						if len(links) >= testCount {
+							linksToTest = links[:testCount]
+						}
+						if len(linksToTest) == 0 {
+							customlog.Printf(customlog.Processing, "No links to test in current batch, waiting...\n")
+							time.Sleep(10 * time.Second) // Avoid tight loop if all links exhausted or problematic
+							continue
+						}
+
+						// Use cfg.verbose for TestManager if deeper insight into testing is needed
+						testManager := net.NewTestManager(examiner, processor, 50, false)
+						results := testManager.TestConfigs(linksToTest)
+						sort.Sort(results) // Sorts by delay (fastest first)
+
+						foundNew := false
+						for _, res := range results {
+							if res.ConfigLink != lastConfigLink && res.Status == "passed" && res.Protocol != nil {
+								activeOutbound = res.Protocol
+								lastConfigLink = res.ConfigLink
+								foundNew = true
+								break
+							}
+						}
+						if !foundNew {
+							customlog.Printf(customlog.Processing, "Could not find a new working config in this batch, retrying or waiting...\n")
+							// Add a small delay to prevent hammering if no configs work
+							time.Sleep(5 * time.Second)
 						}
 					}
+					if activeOutbound == nil {
+						return fmt.Errorf("failed to find any working outbound configuration")
+					}
+
+					fmt.Println(color.RedString("==========OUTBOUND=========="))
+					fmt.Printf("%v", activeOutbound.DetailsStr())
+					fmt.Println(color.RedString("============================"))
+
+					instance, err := core.MakeInstance(activeOutbound)
+					if err != nil {
+						return fmt.Errorf("error making core instance with '%s': %w", lastConfigLink, err)
+					}
+					currentInstance = instance // Store for cleanup
+
+					err = currentInstance.Start()
+					if err != nil {
+						currentInstance.Close() // Attempt cleanup
+						currentInstance = nil
+						return fmt.Errorf("error starting core instance with '%s': %w", lastConfigLink, err)
+					}
+					customlog.Printf(customlog.Success, "Started listening for new connections...")
+					fmt.Printf("\n")
+
+					// Timer and input logic
+					clickChan := make(chan bool, 1)
+					finishChan := make(chan bool, 1)
+					timeout := time.Duration(cfg.interval) * time.Second
+
+					// Goroutine for countdown display
+					go func() {
+						ticker := time.NewTicker(time.Second)
+						defer ticker.Stop()
+						endTime := time.Now().Add(timeout)
+						for {
+							select {
+							case <-finishChan:
+								return
+							case <-ticker.C:
+								remaining := endTime.Sub(time.Now())
+								if remaining < 0 {
+									remaining = 0
+								}
+								fmt.Printf("\r%s", color.YellowString("[>] Enter to load the next config [Reloading in %v] >>> ", remaining.Round(time.Second)))
+								if remaining == 0 {
+									// Ensure the select in the main part of connectAndRun can timeout
+									return
+								}
+							}
+						}
+					}()
+
+					// Goroutine for Enter key press
+					go func() {
+						consoleReader := bufio.NewReaderSize(os.Stdin, 1)
+						// Non-blocking read attempt or a way to interrupt it
+						for {
+							select {
+							case <-finishChan: // If main loop signals finish (e.g. timeout)
+								return
+							default:
+								// This can block, making the goroutine unresponsive to finishChan if stdin isn't providing input
+								// A more robust way would involve select with a quit channel for this goroutine too.
+								// For simplicity, keeping as is, but it's a known limitation.
+								// Consider os.Stdin.SetReadDeadline for a more advanced solution.
+								input, readErr := consoleReader.ReadByte()
+								if readErr != nil { // EOF or other error
+									return // Exit goroutine on read error
+								}
+								if input == 13 || input == 10 { // Enter or LF
+									clickChan <- true
+									return
+								}
+							}
+						}
+					}()
+
+					select {
+					case <-clickChan:
+						customlog.Printf(customlog.Processing, "\nEnter pressed, switching config...\n")
+					case <-time.After(timeout):
+						customlog.Printf(customlog.Processing, "\nInterval reached, switching config...\n")
+					}
+					// Signal goroutines to stop
+					close(finishChan) // Better to use close to signal multiple goroutines
+
+					return nil // Indicate successful run for this interval
+				} // End of connectAndRun
+
+				for { // Main rotation loop
+					if currentInstance != nil {
+						customlog.Printf(customlog.Processing, "Closing current outbound instance...\n")
+						errClose := currentInstance.Close()
+						if errClose != nil {
+							customlog.Printf(customlog.Failure, "Error closing instance: %v\n", errClose)
+							// Potentially a more serious error, but attempt to continue
+						}
+						currentInstance = nil
+					}
+
+					customlog.Printf(customlog.Processing, "Attempting to connect to a new outbound...\n")
+					err = connectAndRun()
+					if err != nil {
+						customlog.Printf(customlog.Failure, "Error in connection cycle: %v. Retrying rotation after a delay...\n", err)
+						// Depending on the error, might want to exit or have a more sophisticated retry
+						time.Sleep(10 * time.Second) // Wait before retrying the whole cycle
+					}
+					// Loop continues to the next rotation
 				}
+
+			} else { // Single config mode (using the first successfully parsed config)
+				singleOutbound := parsedConfigs[0]
 
 				fmt.Println(color.RedString("==========OUTBOUND=========="))
-				fmt.Printf("%v", currentConfig.DetailsStr())
+				fmt.Printf("%v", singleOutbound.DetailsStr())
 				fmt.Println(color.RedString("============================"))
 
-				// Make xray instance
-				instance, err = core.MakeInstance(currentConfig)
+				instance, err := core.MakeInstance(singleOutbound)
 				if err != nil {
-					customlog.Printf(customlog.Failure, "Error making a xray instance: %s\n", err.Error())
-					// Remove config from slice if it doesn't work
-					//configs = append(configs[:currentIndex], configs[currentIndex+1:]...)
+					return fmt.Errorf("error making instance with single config: %w", err)
 				}
+				currentInstance = instance
 
-				// Start the xray instance
-				err = instance.Start()
+				err = currentInstance.Start()
 				if err != nil {
-					customlog.Printf(customlog.Failure, "Error starting xray instance: %s\n", err.Error())
-					// Remove config from slice if it doesn't work
-					//configs = append(configs[:currentIndex], configs[currentIndex+1:]...)
+					currentInstance.Close() // Attempt cleanup
+					return fmt.Errorf("error starting instance with single config: %w", err)
 				}
 				customlog.Printf(customlog.Success, "Started listening for new connections...")
 				fmt.Printf("\n")
-
-				//time.Sleep(time.Duration(interval) * time.Second)
-
-				clickChan := make(chan bool)
-				defer close(clickChan)
-
-				finishChan := make(chan bool)
-				defer close(finishChan)
-
-				timeout := time.Duration(interval) * time.Second
-
-				go func() {
-					// Timer
-					ticker := time.NewTicker(time.Second)
-					defer ticker.Stop()
-
-					endTime := time.Now().Add(time.Duration(interval) * time.Second)
-
-					for {
-						select {
-						case <-finishChan:
-							return
-						case <-ticker.C:
-							remaining := endTime.Sub(time.Now())
-							if remaining < 0 {
-								remaining = 0
-							}
-							fmt.Printf("\r%s", color.YellowString("[>] Enter to load the next config [Reloading in %v] >>> ", remaining.Round(time.Second)))
-
-							break
-						}
-					}
-				}()
-
-				go func() {
-					for {
-						consoleReader := bufio.NewReaderSize(os.Stdin, 1)
-						select {
-						case <-time.After(timeout):
-							return
-						default:
-							input, _ := consoleReader.ReadByte()
-							ascii := input
-							if ascii == 13 || ascii == 10 { // Enter => 13 || 10 MacOS Return
-								finishChan <- true
-								clickChan <- true
-								return
-							}
-						}
-					}
-				}()
-
-				select {
-				case <-clickChan:
-					return
-				case <-time.After(timeout):
-					finishChan <- true
-					fmt.Printf("\n") // Need new line coz we got input
-					return
-				}
+				select {} // Keep running indefinitely until signal
 			}
+			// This part should ideally not be reached in normal operation due to infinite loops/selects
+			// return nil
+		},
+	}
 
-			for {
-				// The procedure of selecting a new outbound and starting it
-				// Do it for the first time before first tick starts
-				connect()
+	cmd.Flags().BoolVarP(&cfg.readConfigFromSTDIN, "stdin", "i", false, "Read config link from STDIN")
+	cmd.Flags().StringVarP(&cfg.configLinksFile, "file", "f", "", "Read config links from a file")
+	cmd.Flags().Uint32VarP(&cfg.interval, "interval", "t", 300, "Interval to change outbound connection in seconds (for multiple configs)")
+	cmd.Flags().Uint16VarP(&cfg.maximumAllowedDelay, "mdelay", "d", 3000, "Maximum allowed delay (ms) for testing configs during rotation")
 
-				customlog.Printf(customlog.Processing, "Switching outbound connection...\n")
+	cmd.Flags().StringVarP(&cfg.CoreType, "core", "z", "singbox", "Core types: (xray, singbox)")
 
-				// Check if any core is running
-				if instance != nil {
-					err = instance.Close()
-					if err != nil {
-						return fmt.Errorf("error closing existing instance: %w", err)
-					}
-				}
-			}
-		} else {
-			// Configuring outbound
-			link := links[0]
-			outboundParsed, err := core.CreateProtocol(link)
-			if err != nil {
-				return fmt.Errorf("couldn't parse the config %s: %w", link, err)
-			}
+	cmd.Flags().StringVarP(&cfg.listenAddr, "addr", "a", "127.0.0.1", "Listen ip address for the proxy server")
+	cmd.Flags().StringVarP(&cfg.listenPort, "port", "p", "9999", "Listen port number for the proxy server")
+	cmd.Flags().StringVarP(&cfg.configLink, "config", "c", "", "The single xray/sing-box config link to use")
 
-			err = outboundParsed.Parse()
-			if err != nil {
-				return fmt.Errorf("failed to parse outbound config: %w", err)
-			}
+	cmd.Flags().BoolVarP(&cfg.verbose, "verbose", "v", false, "Enable verbose logging for the selected core")
+	cmd.Flags().BoolVarP(&cfg.insecureTLS, "insecure", "e", false, "Allow insecure TLS connections (e.g., self-signed certs, skip verify)")
 
-			fmt.Println(color.RedString("==========OUTBOUND=========="))
-			fmt.Printf("%v", outboundParsed.DetailsStr())
-			fmt.Println(color.RedString("============================"))
+	cmd.Flags().BoolVarP(&cfg.chainOutbounds, "chain", "n", false, "Chain multiple outbounds (This feature is not currently implemented)")
 
-			instance, err = core.MakeInstance(outboundParsed)
-			if err != nil {
-				return fmt.Errorf("error making instance with single config: %w", err)
-			}
-
-			// Start the xray instance
-			err = instance.Start()
-			if err != nil {
-				return fmt.Errorf("error starting instance with single config: %w", err)
-			}
-			customlog.Printf(customlog.Success, "Started listening for new connections...")
-			fmt.Printf("\n")
-			select {}
-		}
-
-	},
-}
-
-func init() {
-	ProxyCmd.Flags().BoolVarP(&readConfigFromSTDIN, "stdin", "i", false, "Read config link from STDIN")
-	ProxyCmd.Flags().StringVarP(&configLinksFile, "file", "f", "", "Read config links from a file")
-	ProxyCmd.Flags().Uint32VarP(&interval, "interval", "t", 300, "Interval to change outbound connection in seconds")
-	ProxyCmd.Flags().Uint16VarP(&maximumAllowedDelay, "mdelay", "d", 3000, "Maximum allowed delay")
-
-	ProxyCmd.Flags().StringVarP(&CoreType, "core", "z", "singbox", "Core types: (xray, singbox)")
-
-	ProxyCmd.Flags().StringVarP(&listenAddr, "addr", "a", "127.0.0.1", "Listen ip address")
-	ProxyCmd.Flags().StringVarP(&listenPort, "port", "p", "9999", "Listen port number")
-	ProxyCmd.Flags().StringVarP(&configLink, "config", "c", "", "The xray config link")
-
-	ProxyCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose xray-core")
-	ProxyCmd.Flags().BoolVarP(&insecureTLS, "insecure", "e", false, "Insecure tls connection (fake SNI)")
-
-	ProxyCmd.Flags().BoolVarP(&chainOutbounds, "chain", "n", false, "Chain multiple outbounds")
-
+	return cmd
 }
