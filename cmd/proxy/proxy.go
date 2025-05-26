@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bufio"
+	"context" // Added for managing goroutine lifecycles
 	"fmt"
 	"math/rand"
 	"os"
@@ -34,12 +35,196 @@ type proxyCmdConfig struct {
 	configLink          string
 	verbose             bool
 	insecureTLS         bool
-	chainOutbounds      bool // This flag is defined but seems unused in the core logic
+	chainOutbounds      bool
 	maximumAllowedDelay uint16
 }
 
 // ProxyCmd represents the proxy command
 var ProxyCmd = newProxyCommand()
+
+// findAndStartWorkingConfig attempts to find a working configuration from the list,
+// starts it, and returns the instance and its link.
+func findAndStartWorkingConfig(
+	cfg *proxyCmdConfig,
+	core pkg.Core,
+	examiner *pkg.Examiner,
+	processor *net.ResultProcessor,
+	allLinks []string,
+	r *rand.Rand,
+	lastUsedLink string,
+) (protocol.Instance, string, error) {
+	var activeOutbound protocol.Protocol
+	var activeOutboundLink string
+
+	if len(allLinks) == 0 {
+		return nil, "", fmt.Errorf("no configuration links available to test")
+	}
+
+	// Create a mutable copy for shuffling
+	availableLinks := make([]string, len(allLinks))
+	copy(availableLinks, allLinks)
+
+	maxAttemptsToFindWorkingConfig := 3 // Try a few broad attempts if the first batch fails
+	for attempt := 0; attempt < maxAttemptsToFindWorkingConfig; attempt++ {
+		r.Shuffle(len(availableLinks), func(i, j int) { availableLinks[i], availableLinks[j] = availableLinks[j], availableLinks[i] })
+
+		testCount := 25 // Number of configs to test in one batch
+		if len(availableLinks) < testCount {
+			testCount = len(availableLinks)
+		}
+		if testCount == 0 {
+			customlog.Printf(customlog.Processing, "No links left to test in current attempt.\n")
+			if attempt < maxAttemptsToFindWorkingConfig-1 {
+				time.Sleep(5 * time.Second) // Wait before next major attempt
+			}
+			continue
+		}
+
+		linksToTestThisRound := availableLinks[:testCount]
+		customlog.Printf(customlog.Processing, "Testing a batch of %d configs (Attempt %d/%d)...\n", len(linksToTestThisRound), attempt+1, maxAttemptsToFindWorkingConfig)
+
+		testManager := net.NewTestManager(examiner, processor, 50, false) // Verbosity for TM itself
+		results := testManager.TestConfigs(linksToTestThisRound)
+		sort.Sort(results) // Sorts by delay (fastest first)
+
+		foundNewWorkingConfig := false
+		for _, res := range results {
+			if res.Status == "passed" && res.Protocol != nil && res.ConfigLink != lastUsedLink {
+				activeOutbound = res.Protocol
+				activeOutboundLink = res.ConfigLink
+				customlog.Printf(customlog.Success, "Found working config: %s (Delay: %dms)\n", res.ConfigLink, res.Delay)
+				foundNewWorkingConfig = true
+				break
+			}
+		}
+
+		if foundNewWorkingConfig {
+			break // Exit attempt loop, we found one
+		} else {
+			customlog.Printf(customlog.Processing, "No new working config found in this batch.\n")
+			if attempt < maxAttemptsToFindWorkingConfig-1 {
+				customlog.Printf(customlog.Processing, "Waiting before trying next batch...\n")
+				time.Sleep(5 * time.Second)
+			}
+		}
+	}
+
+	if activeOutbound == nil {
+		return nil, "", fmt.Errorf("failed to find any working outbound configuration after %d attempts", maxAttemptsToFindWorkingConfig)
+	}
+
+	fmt.Println(color.RedString("==========OUTBOUND=========="))
+	fmt.Printf("%v", activeOutbound.DetailsStr())
+	fmt.Println(color.RedString("============================"))
+
+	instance, err := core.MakeInstance(activeOutbound)
+	if err != nil {
+		return nil, activeOutboundLink, fmt.Errorf("error making core instance with '%s': %w", activeOutboundLink, err)
+	}
+
+	err = instance.Start()
+	if err != nil {
+		instance.Close() // Attempt cleanup
+		return nil, activeOutboundLink, fmt.Errorf("error starting core instance with '%s': %w", activeOutboundLink, err)
+	}
+
+	return instance, activeOutboundLink, nil
+}
+
+// manageActiveProxyPeriod handles the timer and user input for the currently active proxy.
+// It returns an error (e.g., "timer expired", "user input") to signal why rotation should occur.
+// It also takes a parent context to allow cancellation from the main signal handler.
+func manageActiveProxyPeriod(parentCtx context.Context, cfg *proxyCmdConfig) error {
+	customlog.Printf(customlog.Success, "Instance active. Interval: %ds. Press Enter to switch.\n", cfg.interval)
+
+	// Derive a new context from parent for this specific active period.
+	// This allows manageActiveProxyPeriod to manage its own goroutines cleanly.
+	ctx, cancel := context.WithCancel(parentCtx)
+	defer cancel() // Signal local goroutines to stop when this function returns
+
+	inputChan := make(chan bool, 1) // Signals that Enter was pressed
+	timer := time.NewTimer(time.Duration(cfg.interval) * time.Second)
+	defer timer.Stop() // Clean up the timer
+
+	// Goroutine for Enter key press
+	go func() {
+		defer customlog.Printf(customlog.Processing, "Input listener goroutine stopped.\n")
+		consoleReader := bufio.NewReaderSize(os.Stdin, 1)
+
+		// Goroutine to perform the blocking read and send result/error on channels
+		readResultChan := make(chan byte)
+		readErrChan := make(chan error)
+		go func() {
+			defer close(readResultChan) // Important for select below to not hang if this goroutine exits
+			defer close(readErrChan)
+			input, err := consoleReader.ReadByte() // This blocks
+			if err != nil {
+				select {
+				case readErrChan <- err:
+				case <-ctx.Done(): // If context is cancelled while trying to send error
+				}
+				return
+			}
+			select {
+			case readResultChan <- input:
+			case <-ctx.Done(): // If context is cancelled while trying to send result
+			}
+		}()
+
+		// Select loop to wait for read result or context cancellation
+		select {
+		case <-ctx.Done(): // If the main function cancels this active period
+			return
+		case input, ok := <-readResultChan:
+			if ok && (input == 13 || input == 10) { // Enter or LF
+				select {
+				case inputChan <- true:
+				case <-ctx.Done(): // Don't block if context is already done
+				}
+			} else if !ok {
+				// readResultChan was closed, possibly due to error in ReadByte
+			}
+		case err := <-readErrChan:
+			if err != nil {
+				customlog.Printf(customlog.Failure, "Error reading input: %v. Input listener stopping.\n", err)
+			}
+			return
+		}
+	}()
+
+	// Goroutine for countdown display
+	displayTicker := time.NewTicker(time.Second)
+	defer displayTicker.Stop()
+	endTime := time.Now().Add(time.Duration(cfg.interval) * time.Second)
+
+	updateDisplay := func() { // Function to update the display
+		remaining := endTime.Sub(time.Now())
+		if remaining < 0 {
+			remaining = 0
+		}
+		// Ensure terminal output is clear for the prompt
+		fmt.Printf("\r%s\033[K", color.YellowString("[>] Enter to load the next config [Reloading in %v] >>> ", remaining.Round(time.Second)))
+	}
+	updateDisplay() // Initial display
+
+	for {
+		select {
+		case <-ctx.Done(): // If the main function cancels this active period (e.g. SIGINT)
+			fmt.Println() // New line after prompt
+			return fmt.Errorf("active proxy period cancelled by signal or parent context")
+		case <-inputChan:
+			fmt.Println() // New line after prompt
+			// cancel() // No need to call cancel() here, returning will trigger the defer cancel()
+			return fmt.Errorf("user requested config switch")
+		case <-timer.C:
+			fmt.Println() // New line after prompt
+			// cancel()
+			return fmt.Errorf("interval timer expired")
+		case <-displayTicker.C:
+			updateDisplay()
+		}
+	}
+}
 
 func newProxyCommand() *cobra.Command {
 	cfg := &proxyCmdConfig{}
@@ -60,8 +245,7 @@ func newProxyCommand() *cobra.Command {
 			switch cfg.CoreType {
 			case "xray":
 				core = pkg.CoreFactory(pkg.XrayCoreType, cfg.insecureTLS, cfg.verbose)
-				// Ensure correct type assertion or use the specific struct if known
-				inbound = &pkGxray.Socks{ // Use alias for xray package's Socks
+				inbound = &pkGxray.Socks{
 					Remark:  "Listener",
 					Address: cfg.listenAddr,
 					Port:    cfg.listenPort,
@@ -83,8 +267,8 @@ func newProxyCommand() *cobra.Command {
 			}
 
 			r := rand.New(rand.NewSource(time.Now().Unix()))
-			var links []string
-			var parsedConfigs []protocol.Protocol
+			var links []string // Raw links from input
+			//var parsedConfigs []protocol.Protocol // Parsed and validated configs
 
 			if cfg.readConfigFromSTDIN {
 				reader := bufio.NewReader(os.Stdin)
@@ -104,33 +288,34 @@ func newProxyCommand() *cobra.Command {
 				return fmt.Errorf("no configuration links provided or found")
 			}
 
+			// Filter out empty or unparseable links once at the beginning
+			var validRawLinks []string
 			for _, cLink := range links {
 				trimmedLink := strings.TrimSpace(cLink)
 				if trimmedLink == "" {
 					continue
 				}
-				conf, err := core.CreateProtocol(trimmedLink)
-				if err != nil {
-					customlog.Printf(customlog.Failure, "Couldn't parse the config %s: %v\n", trimmedLink, err)
-					continue // Skip unparseable configs
-				}
-				parsedConfigs = append(parsedConfigs, conf)
+				// Basic pre-validation if needed, or let CreateProtocol handle it
+				validRawLinks = append(validRawLinks, trimmedLink)
 			}
 
-			if len(parsedConfigs) == 0 {
-				return fmt.Errorf("no valid configs could be parsed from the provided sources")
+			if len(validRawLinks) == 0 {
+				return fmt.Errorf("no valid (non-empty) configuration links found")
 			}
+			links = validRawLinks // Update links to only contain non-empty, trimmed strings
 
 			utils.ClearTerminal()
 
 			examinerOpts := pkg.Options{
-				CoreInstance:           core,
+				// CoreInstance: core, // Examiner can create its own core or use one if passed for specific tests
+				Core:                   cfg.CoreType, // Let examiner pick based on config
 				MaxDelay:               cfg.maximumAllowedDelay,
-				Verbose:                cfg.verbose, // Pass proxy's verbose to examiner
+				Verbose:                cfg.verbose, // Pass proxy's verbose to examiner for its own logging
 				InsecureTLS:            cfg.insecureTLS,
-				TestEndpoint:           "https://cloudflare.com/cdn-cgi/trace", // Default, can be exposed if needed
+				TestEndpoint:           "https://cloudflare.com/cdn-cgi/trace",
 				TestEndpointHttpMethod: "GET",
-				// Speedtest options can be added if proxy needs to perform them internally
+				// Add speedtest options if examiner needs to do speedtests when selecting proxy
+				DoSpeedtest: false, // Assuming proxy rotation doesn't need speedtest for selection
 			}
 			examiner, errExaminer := pkg.NewExaminer(examinerOpts)
 			if errExaminer != nil {
@@ -141,212 +326,113 @@ func newProxyCommand() *cobra.Command {
 			fmt.Printf("%v", inbound.DetailsStr())
 			fmt.Println(color.RedString("============================\n"))
 
-			var currentInstance protocol.Instance
-			var err error // Local error variable for loops/functions
+			// Context for the main proxy loop, cancelled by SIGINT
+			mainLoopCtx, mainLoopCancel := context.WithCancel(context.Background())
+			defer mainLoopCancel()
 
 			signalChannel := make(chan os.Signal, 1)
-			signal.Notify(signalChannel, os.Interrupt, syscall.SIGINT)
+			signal.Notify(signalChannel, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
+			// Goroutine to handle OS signals and cancel the mainLoopCtx
 			go func() {
 				sig := <-signalChannel
-				customlog.Printf(customlog.Processing, "Received signal: %v\n", sig)
-				customlog.Printf(customlog.Processing, "Closing core service...")
-				if currentInstance != nil {
-					_ = currentInstance.Close() // Best effort
-				}
-				os.Exit(0) // Graceful shutdown on signal
+				customlog.Printf(customlog.Processing, "Received signal: %v. Shutting down...\n", sig)
+				mainLoopCancel() // Cancel the main proxy loop context
 			}()
 
-			if len(links) > 1 { // Use original links count for rotation logic
-				// This net.Config is for the ResultProcessor, which is part of the TestManager.
-				// If proxy rotation doesn't *save* test results itself, this part could be simplified.
-				// Assuming TestManager needs it for internal processing:
-				netTestConfig := &net.Config{
-					OutputType: "txt", // Default, or expose flags for these too
-				}
+			if len(links) > 1 { // Rotation mode
+				netTestConfig := &net.Config{OutputType: "txt"} // For ResultProcessor in TestManager
 				processor := net.NewResultProcessor(netTestConfig)
-
-				customlog.Printf(customlog.Processing, "Looking for a working outbound config...\n")
-
-				connectAndRun := func() error {
-					var lastConfigLink string
-					var activeOutbound protocol.Protocol
-
-					testCount := 25
-					if len(links) < testCount {
-						testCount = len(links)
-					}
-					if testCount == 0 {
-						return fmt.Errorf("no links available to test for proxy rotation")
-					}
-
-					// Find an initial working config
-					for activeOutbound == nil {
-						r.Shuffle(len(links), func(i, j int) { links[i], links[j] = links[j], links[i] })
-
-						linksToTest := links
-						if len(links) >= testCount {
-							linksToTest = links[:testCount]
-						}
-						if len(linksToTest) == 0 {
-							customlog.Printf(customlog.Processing, "No links to test in current batch, waiting...\n")
-							time.Sleep(10 * time.Second) // Avoid tight loop if all links exhausted or problematic
-							continue
-						}
-
-						// Use cfg.verbose for TestManager if deeper insight into testing is needed
-						testManager := net.NewTestManager(examiner, processor, 50, false)
-						results := testManager.TestConfigs(linksToTest)
-						sort.Sort(results) // Sorts by delay (fastest first)
-
-						foundNew := false
-						for _, res := range results {
-							if res.ConfigLink != lastConfigLink && res.Status == "passed" && res.Protocol != nil {
-								activeOutbound = res.Protocol
-								lastConfigLink = res.ConfigLink
-								foundNew = true
-								break
-							}
-						}
-						if !foundNew {
-							customlog.Printf(customlog.Processing, "Could not find a new working config in this batch, retrying or waiting...\n")
-							// Add a small delay to prevent hammering if no configs work
-							time.Sleep(5 * time.Second)
-						}
-					}
-					if activeOutbound == nil {
-						return fmt.Errorf("failed to find any working outbound configuration")
-					}
-
-					fmt.Println(color.RedString("==========OUTBOUND=========="))
-					fmt.Printf("%v", activeOutbound.DetailsStr())
-					fmt.Println(color.RedString("============================"))
-
-					instance, err := core.MakeInstance(activeOutbound)
-					if err != nil {
-						return fmt.Errorf("error making core instance with '%s': %w", lastConfigLink, err)
-					}
-					currentInstance = instance // Store for cleanup
-
-					err = currentInstance.Start()
-					if err != nil {
-						currentInstance.Close() // Attempt cleanup
-						currentInstance = nil
-						return fmt.Errorf("error starting core instance with '%s': %w", lastConfigLink, err)
-					}
-					customlog.Printf(customlog.Success, "Started listening for new connections...")
-					fmt.Printf("\n")
-
-					// Timer and input logic
-					clickChan := make(chan bool, 1)
-					finishChan := make(chan bool, 1)
-					timeout := time.Duration(cfg.interval) * time.Second
-
-					// Goroutine for countdown display
-					go func() {
-						ticker := time.NewTicker(time.Second)
-						defer ticker.Stop()
-						endTime := time.Now().Add(timeout)
-						for {
-							select {
-							case <-finishChan:
-								return
-							case <-ticker.C:
-								remaining := endTime.Sub(time.Now())
-								if remaining < 0 {
-									remaining = 0
-								}
-								fmt.Printf("\r%s", color.YellowString("[>] Enter to load the next config [Reloading in %v] >>> ", remaining.Round(time.Second)))
-								if remaining == 0 {
-									// Ensure the select in the main part of connectAndRun can timeout
-									return
-								}
-							}
-						}
-					}()
-
-					// Goroutine for Enter key press
-					go func() {
-						consoleReader := bufio.NewReaderSize(os.Stdin, 1)
-						// Non-blocking read attempt or a way to interrupt it
-						for {
-							select {
-							case <-finishChan: // If main loop signals finish (e.g. timeout)
-								return
-							default:
-								// This can block, making the goroutine unresponsive to finishChan if stdin isn't providing input
-								// A more robust way would involve select with a quit channel for this goroutine too.
-								// For simplicity, keeping as is, but it's a known limitation.
-								// Consider os.Stdin.SetReadDeadline for a more advanced solution.
-								input, readErr := consoleReader.ReadByte()
-								if readErr != nil { // EOF or other error
-									return // Exit goroutine on read error
-								}
-								if input == 13 || input == 10 { // Enter or LF
-									clickChan <- true
-									return
-								}
-							}
-						}
-					}()
-
-					select {
-					case <-clickChan:
-						customlog.Printf(customlog.Processing, "\nEnter pressed, switching config...\n")
-					case <-time.After(timeout):
-						customlog.Printf(customlog.Processing, "\nInterval reached, switching config...\n")
-					}
-					// Signal goroutines to stop
-					close(finishChan) // Better to use close to signal multiple goroutines
-
-					return nil // Indicate successful run for this interval
-				} // End of connectAndRun
+				var currentInstance protocol.Instance
+				var currentLink string
 
 				for { // Main rotation loop
+					select {
+					case <-mainLoopCtx.Done():
+						customlog.Printf(customlog.Processing, "Main proxy loop exiting due to signal.\n")
+						if currentInstance != nil {
+							customlog.Printf(customlog.Processing, "Closing final active instance...\n")
+							_ = currentInstance.Close()
+						}
+						return nil // Normal exit on signal
+					default:
+						// Proceed with rotation
+					}
+
 					if currentInstance != nil {
-						customlog.Printf(customlog.Processing, "Closing current outbound instance...\n")
+						customlog.Printf(customlog.Processing, "Closing current outbound instance for link: %s\n", currentLink)
 						errClose := currentInstance.Close()
 						if errClose != nil {
 							customlog.Printf(customlog.Failure, "Error closing instance: %v\n", errClose)
-							// Potentially a more serious error, but attempt to continue
 						}
 						currentInstance = nil
+						currentLink = ""
 					}
 
-					customlog.Printf(customlog.Processing, "Attempting to connect to a new outbound...\n")
-					err = connectAndRun()
-					if err != nil {
-						customlog.Printf(customlog.Failure, "Error in connection cycle: %v. Retrying rotation after a delay...\n", err)
-						// Depending on the error, might want to exit or have a more sophisticated retry
-						time.Sleep(10 * time.Second) // Wait before retrying the whole cycle
+					customlog.Printf(customlog.Processing, "Attempting to find and start a new outbound...\n")
+					newInstance, newLink, errConnect := findAndStartWorkingConfig(
+						cfg, core, examiner, processor, links, r, currentLink, /* pass last used link */
+					)
+					if errConnect != nil {
+						customlog.Printf(customlog.Failure, "Error finding/starting config: %v. Retrying rotation after delay...\n", errConnect)
+						select {
+						case <-time.After(10 * time.Second): // Wait before retrying
+						case <-mainLoopCtx.Done(): // If signalled during wait
+							customlog.Printf(customlog.Processing, "Shutdown signalled during retry delay.\n")
+							return nil
+						}
+						continue // Retry finding a config
 					}
-					// Loop continues to the next rotation
+					currentInstance = newInstance
+					currentLink = newLink
+					customlog.Printf(customlog.Success, "Successfully started instance\n")
+
+					// Manage the active period for currentInstance
+					// Pass mainLoopCtx so manageActiveProxyPeriod can also be cancelled by SIGINT
+					errActive := manageActiveProxyPeriod(mainLoopCtx, cfg)
+					if errActive != nil {
+						customlog.Printf(customlog.Processing, "Switching config. Reason: %v\n", errActive)
+						// The loop will now close currentInstance and find a new one
+						// If errActive is due to mainLoopCtx.Done(), the next iteration's select will catch it.
+					} else {
+						// This case should ideally not be reached if manageActiveProxyPeriod always signals rotation
+						customlog.Printf(customlog.Processing, "manageActiveProxyPeriod returned nil, implies clean exit. Shutting down.\n")
+						mainLoopCancel() // Ensure everything winds down
+					}
+				}
+			} else { // Single config mode
+				singleLink := links[0]
+				outboundParsed, err := core.CreateProtocol(singleLink)
+				if err != nil {
+					return fmt.Errorf("couldn't parse the single config %s: %w", singleLink, err)
+				}
+				err = outboundParsed.Parse()
+				if err != nil {
+					return fmt.Errorf("failed to parse single outbound config: %w", err)
 				}
 
-			} else { // Single config mode (using the first successfully parsed config)
-				singleOutbound := parsedConfigs[0]
-
 				fmt.Println(color.RedString("==========OUTBOUND=========="))
-				fmt.Printf("%v", singleOutbound.DetailsStr())
+				fmt.Printf("%v", outboundParsed.DetailsStr())
 				fmt.Println(color.RedString("============================"))
 
-				instance, err := core.MakeInstance(singleOutbound)
+				instance, err := core.MakeInstance(outboundParsed)
 				if err != nil {
 					return fmt.Errorf("error making instance with single config: %w", err)
 				}
-				currentInstance = instance
+				defer instance.Close() // Ensure instance is closed on exit
 
-				err = currentInstance.Start()
+				err = instance.Start()
 				if err != nil {
-					currentInstance.Close() // Attempt cleanup
 					return fmt.Errorf("error starting instance with single config: %w", err)
 				}
-				customlog.Printf(customlog.Success, "Started listening for new connections...")
+				customlog.Printf(customlog.Success, "Started listening for new connections with single config...")
 				fmt.Printf("\n")
-				select {} // Keep running indefinitely until signal
+
+				// Wait for context cancellation (SIGINT)
+				<-mainLoopCtx.Done()
+				customlog.Printf(customlog.Processing, "Shutting down single config proxy due to signal.\n")
+				return nil
 			}
-			// This part should ideally not be reached in normal operation due to infinite loops/selects
-			// return nil
 		},
 	}
 
