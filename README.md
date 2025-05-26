@@ -23,7 +23,7 @@ You can view the flags of each command by using the `-h` or `--help` option.
 Get the latest version from [GitHub](https://github.com/lilendian0x00/xray-knife/releases/latest).
 
 ## Build instruction
-Only works on golang version 1.23
+Only works on golang version 1.24
 
 1. Install [Golang](https://go.dev/doc/install)
 2. `git clone https://github.com/lilendian0x00/xray-knife.git`
