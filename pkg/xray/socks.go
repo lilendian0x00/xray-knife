@@ -3,7 +3,6 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"net/url"
 	"strconv"
@@ -132,7 +131,7 @@ func (s *Socks) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
 	// Convert string to uint32
 	uint32Value, err := strconv.ParseUint(s.Port, 10, 32)
 	if err != nil {
-		log.Fatalln("Error converting string to uint32:", err)
+		return nil, fmt.Errorf("error converting port string to uint32: %w", err)
 	}
 
 	// Convert uint64 to uint32

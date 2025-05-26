@@ -42,10 +42,10 @@ var ProxyCmd = &cobra.Command{
 	Use:   "proxy",
 	Short: "Creates proxy server",
 	Long:  ``,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 && (!readConfigFromSTDIN && configLink == "" && configLinksFile == "") {
 			cmd.Help()
-			return
+			return nil
 		}
 
 		var core pkg.Core
@@ -71,12 +71,12 @@ var ProxyCmd = &cobra.Command{
 			}
 			break
 		default:
-			log.Fatalln("Allowed core types: (xray, singbox)")
+			return fmt.Errorf("allowed core types: (xray, singbox), got: %s", CoreType)
 		}
 
 		inErr := core.SetInbound(inbound)
 		if inErr != nil {
-			log.Fatalln(inErr)
+			return fmt.Errorf("failed to set inbound: %w", inErr)
 		}
 
 		r := rand.New(rand.NewSource(time.Now().Unix()))
@@ -114,8 +114,7 @@ var ProxyCmd = &cobra.Command{
 			MaxDelay:     2000,
 		})
 		if err1 != nil {
-			customlog.Printf(customlog.Failure, "%v", err1)
-			os.Exit(1)
+			return fmt.Errorf("failed to create examiner: %w", err1)
 		}
 
 		fmt.Println(color.RedString("\n==========INBOUND=========="))
@@ -282,7 +281,7 @@ var ProxyCmd = &cobra.Command{
 				if instance != nil {
 					err = instance.Close()
 					if err != nil {
-						log.Fatalf(err.Error())
+						return fmt.Errorf("error closing existing instance: %w", err)
 					}
 				}
 			}
@@ -291,12 +290,12 @@ var ProxyCmd = &cobra.Command{
 			link := links[0]
 			outboundParsed, err := core.CreateProtocol(link)
 			if err != nil {
-				log.Fatalf("Couldn't parse the config : %v", err)
+				return fmt.Errorf("couldn't parse the config %s: %w", link, err)
 			}
 
 			err = outboundParsed.Parse()
 			if err != nil {
-				log.Fatalln(err.Error())
+				return fmt.Errorf("failed to parse outbound config: %w", err)
 			}
 
 			fmt.Println(color.RedString("==========OUTBOUND=========="))
@@ -305,13 +304,13 @@ var ProxyCmd = &cobra.Command{
 
 			instance, err = core.MakeInstance(outboundParsed)
 			if err != nil {
-				log.Fatalln(err.Error())
+				return fmt.Errorf("error making instance with single config: %w", err)
 			}
 
 			// Start the xray instance
 			err = instance.Start()
 			if err != nil {
-				log.Fatalln(err.Error())
+				return fmt.Errorf("error starting instance with single config: %w", err)
 			}
 			customlog.Printf(customlog.Success, "Started listening for new connections...")
 			fmt.Printf("\n")

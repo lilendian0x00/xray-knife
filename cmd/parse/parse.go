@@ -24,10 +24,10 @@ var ParseCmd = &cobra.Command{
 	Use:   "parse",
 	Short: "Gives a detailed info about the config link",
 	Long:  ``,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 && readFromSTDIN != true && configLink == "" && configLinksFile == "" {
 			cmd.Help()
-			return
+			return nil
 		}
 
 		core := pkg.NewAutomaticCore(true, true)
@@ -54,14 +54,14 @@ var ParseCmd = &cobra.Command{
 			fmt.Printf("\n")
 			p, err := core.CreateProtocol(link)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "%v", err)
-				os.Exit(1)
+				return fmt.Errorf("failed to create protocol for link %d: %w", i+1, err)
 			}
 
 			fmt.Println(p.DetailsStr())
 
 			time.Sleep(time.Duration(25) * time.Millisecond)
 		}
+		return nil
 	},
 }
 
