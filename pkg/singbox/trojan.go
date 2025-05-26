@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"reflect"
 	"strconv"
 	"strings"
 
@@ -35,63 +34,61 @@ func (t *Trojan) Parse() error {
 	}
 	uri, err := url.Parse(t.OrigLink)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to parse Trojan link: %w", err)
 	}
 
 	t.Password = uri.User.String()
 	t.Address, t.Port, err = net.SplitHostPort(uri.Host)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to split host and port for Trojan link: %w", err)
 	}
 
 	if utils.IsIPv6(t.Address) {
 		t.Address = "[" + t.Address + "]"
 	}
-	// Get the type of the struct
-	structType := reflect.TypeOf(*t)
 
-	// Get the number of fields in the struct
-	numFields := structType.NumField()
+	query := uri.Query()
 
-	// Iterate over each field of the struct
-	for i := 0; i < numFields; i++ {
-		field := structType.Field(i)
-		tag := field.Tag.Get("json")
+	// Explicitly parse known query parameters
+	t.Flow = query.Get("flow")         // Note: Trojan flow (like xtls-rprx-vision) is Xray-specific, not standard in Sing-box Trojan.
+	t.Security = query.Get("security") // "tls", "reality", or "" (none)
+	t.SNI = query.Get("sni")
+	t.ALPN = query.Get("alpn")
+	t.TlsFingerprint = query.Get("fp")
+	t.Type = query.Get("type")               // network type
+	t.Host = query.Get("host")               // for ws, http
+	t.Path = query.Get("path")               // for ws, http path
+	t.HeaderType = query.Get("headerType")   // For TCP HTTP Obfuscation (more of an Xray thing)
+	t.ServiceName = query.Get("serviceName") // grpc
+	t.Mode = query.Get("mode")               // grpc
+	t.PublicKey = query.Get("pbk")           // reality
+	t.ShortIds = query.Get("sid")            // reality
+	t.SpiderX = query.Get("spx")             // reality
+	t.AllowInsecure = query.Get("allowInsecure")
+	t.QuicSecurity = query.Get("quicSecurity") // For QUIC transport
+	t.Key = query.Get("key")                   // For QUIC transport
+	// t.Authority = query.Get("authority") // Not a standard Trojan query param
 
-		// If the query value exists for the field, set it
-		if values, ok := uri.Query()[tag]; ok {
-			value := values[0]
-			v := reflect.ValueOf(t).Elem().FieldByName(field.Name)
-
-			switch v.Type().String() {
-			case "string":
-				v.SetString(value)
-			case "int":
-				var intValue int
-				fmt.Sscanf(value, "%d", &intValue)
-				v.SetInt(int64(intValue))
-			}
-		}
-	}
-
-	t.Remark, err = url.PathUnescape(uri.Fragment)
+	unescapedRemark, err := url.PathUnescape(uri.Fragment)
 	if err != nil {
 		t.Remark = uri.Fragment
+	} else {
+		t.Remark = unescapedRemark
 	}
 
-	if t.HeaderType == "http" || t.Type == "ws" || t.Type == "h2" {
+	// Apply defaults or adjustments
+	if t.Type == "ws" || t.Type == "http" { // For Sing-box, common transports for Trojan
 		if t.Path == "" {
 			t.Path = "/"
 		}
 	}
-
 	if t.Type == "" {
-		t.Type = "tcp"
+		t.Type = "tcp" // Default for Trojan
 	}
-	if t.Security == "" {
+	if t.Security == "" { // Trojan almost always implies TLS or REALITY
 		t.Security = "tls"
 	}
-	if t.TlsFingerprint == "" {
+	if (t.Security == "tls" || t.Security == "reality") && t.TlsFingerprint == "" {
 		t.TlsFingerprint = "chrome"
 	}
 

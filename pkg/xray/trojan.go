@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"reflect"
 	"strings"
 
 	"github.com/lilendian0x00/xray-knife/v3/pkg/protocol"
@@ -29,63 +28,62 @@ func (t *Trojan) Parse() error {
 	}
 	uri, err := url.Parse(t.OrigLink)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to parse Trojan link: %w", err)
 	}
 
 	t.Password = uri.User.String()
 	t.Address, t.Port, err = net.SplitHostPort(uri.Host)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to split host and port for Trojan link: %w", err)
 	}
 
 	if utils.IsIPv6(t.Address) {
 		t.Address = "[" + t.Address + "]"
 	}
-	// Get the type of the struct
-	structType := reflect.TypeOf(*t)
 
-	// Get the number of fields in the struct
-	numFields := structType.NumField()
+	query := uri.Query()
 
-	// Iterate over each field of the struct
-	for i := 0; i < numFields; i++ {
-		field := structType.Field(i)
-		tag := field.Tag.Get("json")
+	// Explicitly parse known query parameters
+	t.Flow = query.Get("flow")
+	t.Security = query.Get("security") // "tls", "reality", or "" (none)
+	t.SNI = query.Get("sni")
+	t.ALPN = query.Get("alpn")
+	t.TlsFingerprint = query.Get("fp")
+	t.Type = query.Get("type") // network type
+	t.Host = query.Get("host") // for ws, http
+	t.Path = query.Get("path") // for ws, http path
+	t.HeaderType = query.Get("headerType")
+	t.ServiceName = query.Get("serviceName")
+	t.Mode = query.Get("mode")
+	t.PublicKey = query.Get("pbk")
+	t.ShortIds = query.Get("sid")
+	t.SpiderX = query.Get("spx")
+	t.AllowInsecure = query.Get("allowInsecure")
+	t.QuicSecurity = query.Get("quicSecurity")
+	t.Key = query.Get("key")
+	t.Authority = query.Get("authority")
 
-		// If the query value exists for the field, set it
-		if values, ok := uri.Query()[tag]; ok {
-			value := values[0]
-			v := reflect.ValueOf(t).Elem().FieldByName(field.Name)
-
-			switch v.Type().String() {
-			case "string":
-				v.SetString(value)
-			case "int":
-				var intValue int
-				fmt.Sscanf(value, "%d", &intValue)
-				v.SetInt(int64(intValue))
-			}
-		}
-	}
-
-	t.Remark, err = url.PathUnescape(uri.Fragment)
+	unescapedRemark, err := url.PathUnescape(uri.Fragment)
 	if err != nil {
 		t.Remark = uri.Fragment
+	} else {
+		t.Remark = unescapedRemark
 	}
 
-	if t.HeaderType == "xhttp" || t.HeaderType == "http" || t.Type == "ws" || t.Type == "h2" {
+	// Apply defaults or adjustments
+	if t.HeaderType == "xhttp" || t.HeaderType == "http" || t.Type == "ws" || t.Type == "h2" || t.Type == "xhttp" {
 		if t.Path == "" {
 			t.Path = "/"
 		}
 	}
 
 	if t.Type == "" {
-		t.Type = "tcp"
+		t.Type = "tcp" // Default network for Trojan
 	}
-	if t.Security == "" {
+	if t.Security == "" { // Trojan typically implies TLS
 		t.Security = "tls"
 	}
-	if t.TlsFingerprint == "" {
+	if (t.Security == "tls" || t.Security == "reality") && t.TlsFingerprint == "" {
 		t.TlsFingerprint = "chrome"
 	}
 

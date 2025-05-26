@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"reflect"
 	"strconv"
 
 	"github.com/lilendian0x00/xray-knife/v3/pkg/protocol"
@@ -28,51 +27,40 @@ func (h *Hysteria2) Name() string {
 func (h *Hysteria2) Parse() error {
 	uri, err := url.Parse(h.OrigLink)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to parse Hysteria2 link: %w", err)
 	}
 
-	h.Password = uri.User.String()
+	if uri.Scheme != protocol.Hysteria2Identifier && uri.Scheme != "hy2" {
+		return fmt.Errorf("hysteria2/hy2 unrecognized scheme: %s", uri.Scheme)
+	}
+
+	h.Password = uri.User.String() // Hysteria2 password (auth string)
 
 	h.Address, h.Port, err = net.SplitHostPort(uri.Host)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to split host and port for Hysteria2 link: %w", err)
 	}
 
-	//if utils.IsIPv6(h.Address) {
-	//	v.Address = "[" + v.Address + "]"
-	//}
+	query := uri.Query()
 
-	// Get the type of the struct
-	t := reflect.TypeOf(*h)
+	// Explicitly parse known query parameters
+	h.SNI = query.Get("sni")
+	// ALPN for Hysteria2 is often handled by the protocol itself, but if specified:
+	// h.ALPN = query.Get("alpn")
+	h.ObfusType = query.Get("obfs")
+	h.ObfusPassword = query.Get("obfs-password")
+	h.Insecure = query.Get("insecure") // "0", "1", "false", "true"
 
-	// Get the number of fields in the struct
-	numFields := t.NumField()
-
-	// Iterate over each field of the struct
-	for i := 0; i < numFields; i++ {
-		field := t.Field(i)
-		tag := field.Tag.Get("json")
-
-		// If the query value exists for the field, set it
-		if values, ok := uri.Query()[tag]; ok {
-
-			value := values[0]
-			v := reflect.ValueOf(h).Elem().FieldByName(field.Name)
-
-			switch v.Type().String() {
-			case "string":
-				v.SetString(value)
-			case "int":
-				var intValue int
-				fmt.Sscanf(value, "%d", &intValue)
-				v.SetInt(int64(intValue))
-			}
-		}
-	}
-
-	h.Remark, err = url.PathUnescape(uri.Fragment)
+	unescapedRemark, err := url.PathUnescape(uri.Fragment)
 	if err != nil {
 		h.Remark = uri.Fragment
+	} else {
+		h.Remark = unescapedRemark
+	}
+
+	// Default SNI to address if not provided, as Hysteria2 TLS needs it.
+	if h.SNI == "" {
+		h.SNI = h.Address
 	}
 
 	return nil
