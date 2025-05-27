@@ -3,8 +3,6 @@ Swiss army knife tool (cli) for [xray-core](https://github.com/XTLS/Xray-core) a
 
 **I DEDICATE THIS TOOL TO MY DEAR PERSIAN PEOPLE.**
 
-**استفاده از این نرم افزار برای حمایت کنندگان جمهوری اسلامی حرام است.**
-
 ## Description
 Since there was no existing program capable of directly checking xray-core config links in bulk, I took it upon myself to develop such a tool. I have now made it publicly available, enabling everyone to benefit from and enjoy its functionality. (`net http` command).
 You can also benefit from other key features of this program, such as its rotating proxy functionality (`proxy` command).
