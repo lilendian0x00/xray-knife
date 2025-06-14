@@ -72,8 +72,6 @@ func method2(v *Vmess, link string) error {
 	//	return err
 	//}
 
-	v.Aid = "0"
-
 	queryValues := uri.Query()
 	if value := queryValues.Get("remarks"); value != "" {
 		v.Remark = value
@@ -348,6 +346,10 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 		if v.ALPN != "" {
 			s.TLSSettings.ALPN = &conf.StringList{v.ALPN}
 		}
+	}
+
+	if v.Aid == nil {
+		v.Aid = "0"
 	}
 
 	out.StreamSetting = s

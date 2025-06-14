@@ -237,14 +237,19 @@ func (v *Vmess) CraftInboundOptions() *option.Inbound {
 func (v *Vmess) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, error) {
 	// Port type checker
 	var port int
-	p, ok := v.Port.(int)
-	if !ok {
-		p, ok := v.Port.(string)
-		if ok {
-			port, _ = strconv.Atoi(p)
+	switch t := v.Port.(type) {
+	case float64:
+		port = int(t)
+	case int:
+		port = t
+	case string:
+		p, err := strconv.Atoi(t)
+		if err != nil {
+			return nil, fmt.Errorf("invalid port %q: %w", v, err)
 		}
-	} else {
 		port = p
+	default:
+		return nil, fmt.Errorf("invalid port %q: unknown port number", v)
 	}
 
 	var aid int = 0

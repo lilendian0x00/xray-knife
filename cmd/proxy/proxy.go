@@ -24,10 +24,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	BatchAmount = 50 // Number of configs to test in one batch
+)
+
 // proxyCmdConfig holds the configuration for the proxy command
 type proxyCmdConfig struct {
 	CoreType            string
-	interval            uint32
+	rotationInterval    uint32
+	mode                string
 	configLinksFile     string
 	readConfigFromSTDIN bool
 	listenAddr          string
@@ -68,7 +73,7 @@ func findAndStartWorkingConfig(
 	for attempt := 0; attempt < maxAttemptsToFindWorkingConfig; attempt++ {
 		r.Shuffle(len(availableLinks), func(i, j int) { availableLinks[i], availableLinks[j] = availableLinks[j], availableLinks[i] })
 
-		testCount := 25 // Number of configs to test in one batch
+		testCount := BatchAmount
 		if len(availableLinks) < testCount {
 			testCount = len(availableLinks)
 		}
@@ -135,7 +140,7 @@ func findAndStartWorkingConfig(
 // It returns an error (e.g., "timer expired", "user input") to signal why rotation should occur.
 // It also takes a parent context to allow cancellation from the main signal handler.
 func manageActiveProxyPeriod(parentCtx context.Context, cfg *proxyCmdConfig) error {
-	customlog.Printf(customlog.Success, "Instance active. Interval: %ds. Press Enter to switch.\n", cfg.interval)
+	customlog.Printf(customlog.Success, "Instance active. Interval: %ds. Press Enter to switch.\n", cfg.rotationInterval)
 
 	// Derive a new context from parent for this specific active period.
 	// This allows manageActiveProxyPeriod to manage its own goroutines cleanly.
@@ -143,7 +148,7 @@ func manageActiveProxyPeriod(parentCtx context.Context, cfg *proxyCmdConfig) err
 	defer cancel() // Signal local goroutines to stop when this function returns
 
 	inputChan := make(chan bool, 1) // Signals that Enter was pressed
-	timer := time.NewTimer(time.Duration(cfg.interval) * time.Second)
+	timer := time.NewTimer(time.Duration(cfg.rotationInterval) * time.Second)
 	defer timer.Stop() // Clean up the timer
 
 	// Goroutine for Enter key press
@@ -195,7 +200,7 @@ func manageActiveProxyPeriod(parentCtx context.Context, cfg *proxyCmdConfig) err
 	// Goroutine for countdown display
 	displayTicker := time.NewTicker(time.Second)
 	defer displayTicker.Stop()
-	endTime := time.Now().Add(time.Duration(cfg.interval) * time.Second)
+	endTime := time.Now().Add(time.Duration(cfg.rotationInterval) * time.Second)
 
 	updateDisplay := func() { // Function to update the display
 		remaining := endTime.Sub(time.Now())
@@ -241,24 +246,40 @@ func newProxyCommand() *cobra.Command {
 
 			var core pkg.Core
 			var inbound protocol.Protocol
+			var err error
 
-			switch cfg.CoreType {
-			case "xray":
-				core = pkg.CoreFactory(pkg.XrayCoreType, cfg.insecureTLS, cfg.verbose)
-				inbound = &pkGxray.Socks{
-					Remark:  "Listener",
-					Address: cfg.listenAddr,
-					Port:    cfg.listenPort,
+			switch cfg.mode {
+			case "inbound":
+				switch cfg.CoreType {
+				case "xray":
+					core = pkg.CoreFactory(pkg.XrayCoreType, cfg.insecureTLS, cfg.verbose)
+					inbound = &pkGxray.Socks{
+						Remark:  "Listener",
+						Address: cfg.listenAddr,
+						Port:    cfg.listenPort,
+					}
+				case "singbox":
+					core = pkg.CoreFactory(pkg.SingboxCoreType, cfg.insecureTLS, cfg.verbose)
+					inbound = &singbox.Socks{
+						Remark:  "Listener",
+						Address: cfg.listenAddr,
+						Port:    cfg.listenPort,
+					}
+				default:
+					return fmt.Errorf("allowed core types: (xray, singbox), got: %s", cfg.CoreType)
 				}
-			case "singbox":
-				core = pkg.CoreFactory(pkg.SingboxCoreType, cfg.insecureTLS, cfg.verbose)
-				inbound = &singbox.Socks{
-					Remark:  "Listener",
-					Address: cfg.listenAddr,
-					Port:    cfg.listenPort,
-				}
+			//case "system":
+			//	core = pkg.CoreFactory(pkg.SingboxCoreType, cfg.insecureTLS, cfg.verbose)
+			//	inbound = &singbox.Tun{
+			//		Remark:  "Listener",
+			//		Address: cfg.listenAddr,
+			//		Port:    cfg.listenPort,
+			//	}
 			default:
-				return fmt.Errorf("allowed core types: (xray, singbox), got: %s", cfg.CoreType)
+				return fmt.Errorf("unknown --mode %q (must be inbound|system)", cfg.mode)
+			}
+			if err != nil {
+				return err
 			}
 
 			inErr := core.SetInbound(inbound)
@@ -438,7 +459,9 @@ func newProxyCommand() *cobra.Command {
 
 	cmd.Flags().BoolVarP(&cfg.readConfigFromSTDIN, "stdin", "i", false, "Read config link from STDIN")
 	cmd.Flags().StringVarP(&cfg.configLinksFile, "file", "f", "", "Read config links from a file")
-	cmd.Flags().Uint32VarP(&cfg.interval, "interval", "t", 300, "Interval to change outbound connection in seconds (for multiple configs)")
+	cmd.Flags().Uint32VarP(&cfg.rotationInterval, "rotate", "t", 300, "How often to rotate outbounds (seconds)")
+	cmd.Flags().StringVarP(&cfg.mode, "mode", "m", "inbound", "proxy operating mode:  • inbound  – expose local SOCKS/HTTP listener (default)\n"+
+		"                       • system   – create TUN device and route all host traffic through it")
 	cmd.Flags().Uint16VarP(&cfg.maximumAllowedDelay, "mdelay", "d", 3000, "Maximum allowed delay (ms) for testing configs during rotation")
 
 	cmd.Flags().StringVarP(&cfg.CoreType, "core", "z", "singbox", "Core types: (xray, singbox)")

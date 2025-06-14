@@ -236,7 +236,9 @@ func NewHTTPCommand() *cobra.Command {
 				SpeedtestKbAmount:      config.SpeedtestAmount,
 			})
 			if err != nil {
-				return fmt.Errorf("failed to create examiner: %v", err)
+				customlog.Printf(customlog.Failure, "failed to create examiner: %v", err)
+				return nil
+				//fmt.Errorf("failed to create examiner: %v", err)
 			}
 
 			// Instantiate a Result Processor
@@ -244,9 +246,17 @@ func NewHTTPCommand() *cobra.Command {
 
 			// Multiple or Single config
 			if config.ConfigLinksFile != "" {
-				return handleMultipleConfigs(examiner, config, processor)
+				err = handleMultipleConfigs(examiner, config, processor)
+				if err != nil {
+					customlog.Printf(customlog.Failure, "%v", err)
+				}
+				return nil
 			}
-			return handleSingleConfig(examiner, config)
+			err = handleSingleConfig(examiner, config)
+			if err != nil {
+				customlog.Printf(customlog.Failure, "%v", err)
+			}
+			return nil
 		},
 	}
 
@@ -265,7 +275,7 @@ func handleMultipleConfigs(examiner *pkg.Examiner, config *Config, processor *Re
 		config.OutputType = "csv"
 	}
 
-	testManager := NewTestManager(examiner, processor, config.ThreadCount, true)
+	testManager := NewTestManager(examiner, processor, config.ThreadCount, config.Verbose)
 	results := testManager.TestConfigs(links)
 
 	return processor.SaveResults(results)
