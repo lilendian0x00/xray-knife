@@ -113,7 +113,7 @@ func (tm *TestManager) testSingleConfig(link string, index int, results *ConfigR
 		return
 	}
 
-	if res.Status == "passed" && tm.verbose {
+	if res.Status == "passed" {
 		tm.printSuccessDetails(index, res)
 	}
 
