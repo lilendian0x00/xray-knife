@@ -54,6 +54,7 @@ func (v *Vless) Parse() error {
 	v.Type = query.Get("type")         // network type: "tcp", "ws", "grpc", "quic", etc.
 	v.Host = query.Get("host")         // for ws, http
 	v.Path = query.Get("path")         // for ws, http path, or kcp seed
+	v.Extra = query.Get("extra")       // XHTTP extra
 	v.Flow = query.Get("flow")
 	v.PublicKey = query.Get("pbk")               // reality public key
 	v.ShortIds = query.Get("sid")                // reality short ID
@@ -242,10 +243,18 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 			Path: v.Path,
 			Mode: v.Mode,
 		}
+		// decode the percent-encoded JSON from the URL
+		if v.Extra != "" {
+			decoded, err := url.QueryUnescape(v.Extra)
+			if err != nil {
+				return nil, fmt.Errorf("invalid extra parameter: %w", err)
+			}
+			s.XHTTPSettings.Extra = json.RawMessage(decoded)
+		}
+
 		if v.Mode == "" {
 			s.XHTTPSettings.Mode = "auto"
 		}
-		break
 	case "httpupgrade":
 		s.HTTPUPGRADESettings = &conf.HttpUpgradeConfig{
 			Host: v.Host,

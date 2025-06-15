@@ -65,6 +65,7 @@ type Vless struct {
 	Authority      string `json:"authority"`     // GRPC
 	ServiceName    string `json:"serviceName"`   // GRPC
 	Mode           string `json:"mode"`          // XHTTP - GRPC
+	Extra          string `json:"extra"`         // XHTTP - EXTRA
 	OrigLink       string `json:"-"`             // Original link
 }
 
