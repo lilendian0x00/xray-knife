@@ -464,7 +464,7 @@ func newProxyCommand() *cobra.Command {
 		"                       • system   – create TUN device and route all host traffic through it")
 	cmd.Flags().Uint16VarP(&cfg.maximumAllowedDelay, "mdelay", "d", 3000, "Maximum allowed delay (ms) for testing configs during rotation")
 
-	cmd.Flags().StringVarP(&cfg.CoreType, "core", "z", "singbox", "Core types: (xray, singbox)")
+	cmd.Flags().StringVarP(&cfg.CoreType, "core", "z", "xray", "Core types: (xray, singbox)")
 
 	cmd.Flags().StringVarP(&cfg.listenAddr, "addr", "a", "127.0.0.1", "Listen ip address for the proxy server")
 	cmd.Flags().StringVarP(&cfg.listenPort, "port", "p", "9999", "Listen port number for the proxy server")
