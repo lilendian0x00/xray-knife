@@ -24,6 +24,7 @@ type Instance interface {
 type Protocol interface {
 	Parse() error
 	DetailsStr() string
+	GetLink() string
 	ConvertToGeneralConfig() GeneralConfig
 }
 

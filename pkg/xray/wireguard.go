@@ -90,6 +90,10 @@ func (w *Wireguard) DetailsStr() string {
 	return info
 }
 
+func (w *Wireguard) GetLink() string {
+	return w.OrigLink
+}
+
 func (w *Wireguard) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Protocol = w.Name()
 	g.Address = w.Endpoint

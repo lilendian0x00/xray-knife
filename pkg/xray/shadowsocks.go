@@ -101,6 +101,10 @@ func (s *Shadowsocks) DetailsStr() string {
 	return info
 }
 
+func (s *Shadowsocks) GetLink() string {
+	return s.OrigLink
+}
+
 func (s *Shadowsocks) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Protocol = s.Name()
 	g.Address = s.Address

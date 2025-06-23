@@ -107,7 +107,7 @@ func (v *Vless) DetailsStr() string {
 		color.RedString("Flow"), copyV.Flow)
 	if copyV.Type == "" {
 
-	} else if copyV.HeaderType == "xhttp" || copyV.HeaderType == "http" || copyV.Type == "httpupgrade" || copyV.Type == "ws" || copyV.Type == "h2" || copyV.Type == "splithttp" {
+	} else if copyV.Type == "xhttp" || copyV.HeaderType == "http" || copyV.Type == "httpupgrade" || copyV.Type == "ws" || copyV.Type == "h2" || copyV.Type == "splithttp" {
 		info += fmt.Sprintf("%s: %s\n%s: %s\n",
 			color.RedString("Host"), copyV.Host,
 			color.RedString("Path"), copyV.Path)
@@ -164,7 +164,12 @@ func (v *Vless) DetailsStr() string {
 	} else {
 		info += fmt.Sprintf("%s: none\n", color.RedString("TLS"))
 	}
+
 	return info
+}
+
+func (v *Vless) GetLink() string {
+	return v.OrigLink
 }
 
 func (v *Vless) ConvertToGeneralConfig() (g protocol.GeneralConfig) {

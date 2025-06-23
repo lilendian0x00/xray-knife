@@ -73,6 +73,10 @@ func (s *Socks) DetailsStr() string {
 	return info
 }
 
+func (s *Socks) GetLink() string {
+	return s.OrigLink
+}
+
 func (s *Socks) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Protocol = s.Name()
 	g.Address = s.Address

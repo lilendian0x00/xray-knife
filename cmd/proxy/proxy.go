@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context" // Added for managing goroutine lifecycles
 	"fmt"
+	"github.com/xtls/xray-core/common/uuid"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -32,6 +33,7 @@ const (
 type proxyCmdConfig struct {
 	CoreType            string
 	rotationInterval    uint32
+	inboundProtocol     string
 	mode                string
 	configLinksFile     string
 	readConfigFromSTDIN bool
@@ -43,6 +45,8 @@ type proxyCmdConfig struct {
 	chainOutbounds      bool
 	maximumAllowedDelay uint16
 }
+
+var InboundProtocols = []string{"vless", "vmess", "socks"}
 
 // ProxyCmd represents the proxy command
 var ProxyCmd = newProxyCommand()
@@ -253,11 +257,32 @@ func newProxyCommand() *cobra.Command {
 				switch cfg.CoreType {
 				case "xray":
 					core = pkg.CoreFactory(pkg.XrayCoreType, cfg.insecureTLS, cfg.verbose)
-					inbound = &pkGxray.Socks{
-						Remark:  "Listener",
-						Address: cfg.listenAddr,
-						Port:    cfg.listenPort,
+					switch cfg.inboundProtocol {
+					case "socks":
+						inbound = &pkGxray.Socks{
+							Remark:  "Listener",
+							Address: cfg.listenAddr,
+							Port:    cfg.listenPort,
+						}
+						break
+					case "vmess":
+						uuidv4 := uuid.New()
+						inbound = &pkGxray.Vmess{
+							Address:  cfg.listenAddr,
+							Port:     cfg.listenPort,
+							Network:  "ws",
+							Host:     "snapp.ir",
+							Path:     "/",
+							Security: "none",
+							ID:       uuidv4.String(),
+						}
+						break
+
+					case "vless":
+
+						break
 					}
+
 				case "singbox":
 					core = pkg.CoreFactory(pkg.SingboxCoreType, cfg.insecureTLS, cfg.verbose)
 					inbound = &singbox.Socks{
@@ -460,6 +485,7 @@ func newProxyCommand() *cobra.Command {
 	cmd.Flags().BoolVarP(&cfg.readConfigFromSTDIN, "stdin", "i", false, "Read config link from STDIN")
 	cmd.Flags().StringVarP(&cfg.configLinksFile, "file", "f", "", "Read config links from a file")
 	cmd.Flags().Uint32VarP(&cfg.rotationInterval, "rotate", "t", 300, "How often to rotate outbounds (seconds)")
+	cmd.Flags().StringVarP(&cfg.inboundProtocol, "inbound", "j", "socks", "Inbound protocol to use (vless, vmess, socks)")
 	cmd.Flags().StringVarP(&cfg.mode, "mode", "m", "inbound", "proxy operating mode:  • inbound  – expose local SOCKS/HTTP listener (default)\n"+
 		"                       • system   – create TUN device and route all host traffic through it")
 	cmd.Flags().Uint16VarP(&cfg.maximumAllowedDelay, "mdelay", "d", 3000, "Maximum allowed delay (ms) for testing configs during rotation")

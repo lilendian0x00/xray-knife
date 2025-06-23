@@ -203,6 +203,10 @@ func (v *Vmess) DetailsStr() string {
 	return info
 }
 
+func (v *Vmess) GetLink() string {
+	return v.OrigLink
+}
+
 func (v *Vmess) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Protocol = v.Name()
 	g.Address = v.Address

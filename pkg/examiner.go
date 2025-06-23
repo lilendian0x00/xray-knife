@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"github.com/fatih/color"
 	"io"
 	"net/http"
 	"net/url"
@@ -180,7 +181,7 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 	}
 
 	if e.Verbose {
-		fmt.Printf("%v\n", proto.DetailsStr())
+		fmt.Printf("%v%s: %s\n\n", proto.DetailsStr(), color.RedString("Link"), proto.GetLink())
 	}
 
 	r.Protocol = proto

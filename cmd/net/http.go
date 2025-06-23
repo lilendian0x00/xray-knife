@@ -128,7 +128,7 @@ func (tm *TestManager) testSingleConfig(link string, index int, results *ConfigR
 func (tm *TestManager) printSuccessDetails(index int, res pkg.Result) {
 	d := color.New(color.FgCyan, color.Bold)
 	d.Printf("Config Number: %d\n", index+1)
-	fmt.Printf("%v", res.Protocol.DetailsStr())
+	fmt.Printf("%v%s: %s\n", res.Protocol.DetailsStr(), color.RedString("Link"), res.Protocol.GetLink())
 	customlog.Printf(customlog.Success, "Real Delay: %dms\n\n", res.Delay)
 }
 
@@ -252,10 +252,7 @@ func NewHTTPCommand() *cobra.Command {
 				}
 				return nil
 			}
-			err = handleSingleConfig(examiner, config)
-			if err != nil {
-				customlog.Printf(customlog.Failure, "%v", err)
-			}
+			handleSingleConfig(examiner, config)
 			return nil
 		},
 	}
@@ -282,26 +279,25 @@ func handleMultipleConfigs(examiner *pkg.Examiner, config *Config, processor *Re
 }
 
 // handleSingleConfig handles testing a single configuration
-func handleSingleConfig(examiner *pkg.Examiner, config *Config) error {
+func handleSingleConfig(examiner *pkg.Examiner, config *Config) {
 	examiner.Verbose = true
 	res, err := examiner.ExamineConfig(config.ConfigLink)
 	if err != nil {
-		return err
+		customlog.Printf(customlog.Failure, "%v\n", err)
+		return
 	}
 
 	if res.Status != "passed" {
 		customlog.Printf(customlog.Failure, "%s: %s\n", res.Status, res.Reason)
-		return nil
 	}
 
-	customlog.Printf(customlog.Success, "Real Delay: %dms\n", res.Delay)
+	customlog.Printf(customlog.Success, "Real Delay: %dms\n\n", res.Delay)
 	if config.Speedtest {
 		customlog.Printf(customlog.Success, "Downloaded %dKB - Speed: %f mbps\n",
 			config.SpeedtestAmount, res.DownloadSpeed)
 		customlog.Printf(customlog.Success, "Uploaded %dKB - Speed: %f mbps\n",
 			config.SpeedtestAmount, res.UploadSpeed)
 	}
-	return nil
 }
 
 // printConfiguration prints the current configuration

@@ -88,6 +88,10 @@ func (h *Hysteria2) DetailsStr() string {
 	return info
 }
 
+func (h *Hysteria2) GetLink() string {
+	return h.OrigLink
+}
+
 func (h *Hysteria2) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Protocol = h.Name()
 	g.Address = h.Address

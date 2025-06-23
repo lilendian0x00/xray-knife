@@ -11,6 +11,7 @@ type Protocol interface {
 	BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error)
 	BuildInboundDetourConfig() (*conf.InboundDetourConfig, error)
 	DetailsStr() string
+	GetLink() string
 	ConvertToGeneralConfig() protocol.GeneralConfig
 }
 

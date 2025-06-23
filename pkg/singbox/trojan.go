@@ -167,6 +167,10 @@ func (t *Trojan) DetailsStr() string {
 	return info
 }
 
+func (t *Trojan) GetLink() string {
+	return t.OrigLink
+}
+
 func (t *Trojan) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Protocol = t.Name()
 	g.Address = t.Address

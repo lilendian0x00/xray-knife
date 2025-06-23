@@ -167,6 +167,10 @@ func (v *Vless) DetailsStr() string {
 	return info
 }
 
+func (v *Vless) GetLink() string {
+	return v.OrigLink
+}
+
 func (v *Vless) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Protocol = v.Name()
 	g.Address = v.Address

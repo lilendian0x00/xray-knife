@@ -13,6 +13,7 @@ import (
 type Protocol interface {
 	Parse() error
 	DetailsStr() string
+	GetLink() string
 	ConvertToGeneralConfig() protocol.GeneralConfig
 	CraftOutboundOptions(allowInsecure bool) (*option.Outbound, error)
 	CraftInboundOptions() *option.Inbound

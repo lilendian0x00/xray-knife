@@ -54,6 +54,10 @@ func (t *Tun) DetailsStr() string {
 	return fmt.Sprintf("%s (iface=%s, v4=%s, mtu=%d, autoroute=%v)", t.Name(), t.InterfaceName, t.Inet4Address, t.MTU, t.AutoRoute)
 }
 
+func (t *Tun) GetLink() string {
+	return t.InterfaceName
+}
+
 func (t *Tun) ConvertToGeneralConfig() protocol.GeneralConfig {
 	return protocol.GeneralConfig{Protocol: t.Name(), Remark: t.Remark}
 }
