@@ -10,7 +10,7 @@ You can also benefit from other key features of this program, such as its rotati
 You can view the flags of each command by using the `-h` or `--help` option.
 
 ## Features (main commands)
-- `parse`: Detailed info about given xray config link.
+- `parse`: Detailed info about given xray config link + parsing a config link to a xray-core json.
 - `subs`: Subscription management tool.
 - `net`: Network testing tools for one or multiple xray configs.
 - `scan`: Scanning tools needed for bypassing GFW (CF Scanner, REALITY Scanner).
@@ -40,29 +40,38 @@ Only works on golang version 1.24
 
 # TODO
 ## cores
-- [X] ~~Add [sing-box](https://github.com/sagernet/sing-box) core~~
+- [X] Support [sing-box](https://github.com/sagernet/sing-box) core
 
 ## protocols - parse
-- [X] ~~Add Vmess link support (`vmess://...`, full b64 encoded)~~
-- [X] ~~Add Vmess link v2 support (`vmess://...`, semi b64 encoded)~~
-- [X] ~~Add Vless link support (`vless://...`)~~
-- [X] ~~Add Shadowsocks support (`ss://...`)~~
-- [X] ~~Add Trojan support (`trojan://...`)~~
-- [X] ~~Add Socks support (`socks://...`)~~
-- [X] ~~Add Wireguard support (`wireguard://...`)~~
-- [ ] Load config from json file
+- [X] Add Vmess link support (`vmess://...`, full b64 encoded)
+- [X] Add Vmess link v2 support (`vmess://...`, semi b64 encoded)
+- [X] Add Vless link support (`vless://...`)
+- [X] Add Shadowsocks support (`ss://...`)
+- [X] Add Trojan support (`trojan://...`)
+- [X] Add Socks support (`socks://...`)
+- [X] Add Wireguard support (`wireguard://...`)
+- [X] Convert config link to a full xray-core json configuration (parse as an outbound)
+- [ ] Convert config link to a full singbox core json configuration (parse as an outbound)
 
 ## subs
-- [X] ~~Fetch config links inside subscription~~
-- [X] ~~Sort config links based on their real delay test when saving them into a file~~
+- [X] Fetch config links inside subscription
+- [X] Sort config links based on their real delay test when saving them into a file
+
+## net http
+- [X] Test a batch of config links (from file)
+- [X] Speedtest
+- [X] Get real ip address
+- [X] Detailed output in a CSV file
+- [X] Verbose
+- [ ] Load outbound from json (xray-core)
+- - [ ] Load outbound from json (singbox core)
 
 ## net
-- [X] ~~Add icmp (ping) tester~~
-- [X] ~~Add tcp connection delay tester~~
-- [X] ~~Add full connection delay (AKA real delay) tester~~
-- [X] ~~Add speed tester for http~~
+- [X] Add icmp (ping) tester
+- [X] Add tcp connection delay tester
+- [X] Add full connection delay (AKA real delay) tester
 
 ## proxy
-- [X] ~~Added CLI client feature~~
-- [X] ~~Option to switch outbound connection automatically based on passed parameter (E.g. interval, availability) (rotating proxy)~~
-- [X] ~~Add support for [sing-box](https://github.com/sagernet/sing-box) core~~
+- [X] Completed
+- [X] Option to switch outbound connection automatically based on passed parameter (E.g. interval, availability) (rotating proxy)
+- [X] Add support for [sing-box](https://github.com/sagernet/sing-box) core
