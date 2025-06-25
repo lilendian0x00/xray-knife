@@ -64,7 +64,7 @@ Only works on golang version 1.24
 - [X] Detailed output in a CSV file
 - [X] Verbose
 - [ ] Load outbound from json (xray-core)
-- - [ ] Load outbound from json (singbox core)
+- [ ] Load outbound from json (singbox core)
 
 ## net
 - [X] Add icmp (ping) tester
