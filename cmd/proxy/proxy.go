@@ -93,7 +93,7 @@ func findAndStartWorkingConfig(
 		customlog.Printf(customlog.Processing, "Testing a batch of %d configs (Attempt %d/%d)...\n", len(linksToTestThisRound), attempt+1, maxAttemptsToFindWorkingConfig)
 
 		testManager := net.NewTestManager(examiner, processor, 50, false) // Verbosity for TM itself
-		results := testManager.TestConfigs(linksToTestThisRound)
+		results := testManager.TestConfigs(linksToTestThisRound, false)
 		sort.Sort(results) // Sorts by delay (fastest first)
 
 		foundNewWorkingConfig := false
@@ -268,9 +268,10 @@ func newProxyCommand() *cobra.Command {
 					case "vmess":
 						uuidv4 := uuid.New()
 						inbound = &pkGxray.Vmess{
+							Remark:   "Listener",
 							Address:  cfg.listenAddr,
 							Port:     cfg.listenPort,
-							Network:  "ws",
+							Network:  "xhttp",
 							Host:     "snapp.ir",
 							Path:     "/",
 							Security: "none",
@@ -279,7 +280,18 @@ func newProxyCommand() *cobra.Command {
 						break
 
 					case "vless":
-
+						uuidv4 := uuid.New()
+						inbound = &pkGxray.Vless{
+							Remark:   "Listener",
+							Address:  cfg.listenAddr,
+							Port:     cfg.listenPort,
+							Type:     "xhttp",
+							Host:     "snapp.ir",
+							Path:     "/",
+							Security: "none",
+							ID:       uuidv4.String(),
+							Mode:     "auto",
+						}
 						break
 					}
 
@@ -369,7 +381,7 @@ func newProxyCommand() *cobra.Command {
 			}
 
 			fmt.Println(color.RedString("\n==========INBOUND=========="))
-			fmt.Printf("%v", inbound.DetailsStr())
+			fmt.Printf("%v%s: %v\n", inbound.DetailsStr(), color.RedString("Link"), inbound.GetLink())
 			fmt.Println(color.RedString("============================\n"))
 
 			// Context for the main proxy loop, cancelled by SIGINT
@@ -458,7 +470,7 @@ func newProxyCommand() *cobra.Command {
 				}
 
 				fmt.Println(color.RedString("==========OUTBOUND=========="))
-				fmt.Printf("%v", outboundParsed.DetailsStr())
+				fmt.Printf("%v%s: %v\n", outboundParsed.DetailsStr(), color.RedString("Link"), outboundParsed.GetLink())
 				fmt.Println(color.RedString("============================"))
 
 				instance, err := core.MakeInstance(outboundParsed)

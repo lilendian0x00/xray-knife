@@ -1,6 +1,7 @@
 package xray
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -73,8 +74,28 @@ func (s *Socks) DetailsStr() string {
 	return info
 }
 
+// GetLink generates a SOCKS config link from the struct's fields.
 func (s *Socks) GetLink() string {
-	return s.OrigLink
+	if s.OrigLink != "" {
+		return s.OrigLink
+	} else {
+		baseURL := url.URL{
+			Scheme: "socks",
+			Host:   net.JoinHostPort(s.Address, s.Port),
+		}
+
+		if s.Username != "" && s.Password != "" {
+			creds := fmt.Sprintf("%s:%s", s.Username, s.Password)
+			encodedCreds := base64.StdEncoding.EncodeToString([]byte(creds))
+			baseURL.User = url.User(encodedCreds)
+		}
+
+		if s.Remark != "" {
+			baseURL.Fragment = s.Remark
+		}
+
+		return baseURL.String()
+	}
 }
 
 func (s *Socks) ConvertToGeneralConfig() (g protocol.GeneralConfig) {

@@ -1,11 +1,14 @@
 package xray
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	net2 "github.com/xtls/xray-core/common/net"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/lilendian0x00/xray-knife/v3/pkg/protocol"
@@ -102,7 +105,21 @@ func (s *Shadowsocks) DetailsStr() string {
 }
 
 func (s *Shadowsocks) GetLink() string {
-	return s.OrigLink
+	if s.OrigLink != "" {
+		return s.OrigLink
+	} else {
+		creds := fmt.Sprintf("%s:%s", s.Encryption, s.Password)
+		encodedCreds := base64.StdEncoding.EncodeToString([]byte(creds))
+
+		// The Userinfo part in ss links is the base64 encoded string
+		// We construct the final URL string manually as url.URL doesn't handle this specific format directly
+		hostPart := net.JoinHostPort(s.Address, s.Port)
+		link := fmt.Sprintf("ss://%s@%s", encodedCreds, hostPart)
+		if s.Remark != "" {
+			link += "#" + url.PathEscape(s.Remark)
+		}
+		return link
+	}
 }
 
 func (s *Shadowsocks) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
@@ -140,5 +157,28 @@ func (s *Shadowsocks) BuildOutboundDetourConfig(allowInsecure bool) (*conf.Outbo
 }
 
 func (s *Shadowsocks) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
-	return nil, nil
+	port, err := strconv.ParseUint(s.Port, 10, 32)
+	if err != nil {
+		return nil, fmt.Errorf("error converting port string to uint32: %w", err)
+	}
+	uint32Port := uint32(port)
+
+	settingsJSON := fmt.Sprintf(`{
+      "method": "%s",
+      "password": "%s",
+      "network": "tcp,udp"
+    }`, s.Encryption, s.Password)
+
+	settings := json.RawMessage(settingsJSON)
+
+	in := &conf.InboundDetourConfig{
+		Protocol: s.Name(),
+		Tag:      s.Name(),
+		ListenOn: &conf.Address{Address: net2.ParseAddress(s.Address)},
+		PortList: &conf.PortList{Range: []conf.PortRange{
+			{From: uint32Port, To: uint32Port},
+		}},
+		Settings: &settings,
+	}
+	return in, nil
 }

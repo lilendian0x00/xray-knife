@@ -3,8 +3,10 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
+	net2 "github.com/xtls/xray-core/common/net"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/lilendian0x00/xray-knife/v3/pkg/protocol"
@@ -163,7 +165,49 @@ func (t *Trojan) DetailsStr() string {
 }
 
 func (t *Trojan) GetLink() string {
-	return t.OrigLink
+	if t.OrigLink != "" {
+		return t.OrigLink
+	} else {
+		baseURL := url.URL{
+			Scheme: "trojan",
+			User:   url.User(t.Password),
+			Host:   net.JoinHostPort(t.Address, t.Port),
+		}
+
+		params := url.Values{}
+		addQueryParam := func(key, value string) {
+			if value != "" {
+				params.Add(key, value)
+			}
+		}
+
+		addQueryParam("flow", t.Flow)
+		addQueryParam("security", t.Security)
+		addQueryParam("sni", t.SNI)
+		addQueryParam("alpn", t.ALPN)
+		addQueryParam("fp", t.TlsFingerprint)
+		addQueryParam("type", t.Type)
+		addQueryParam("host", t.Host)
+		addQueryParam("path", t.Path)
+		addQueryParam("headerType", t.HeaderType)
+		addQueryParam("serviceName", t.ServiceName)
+		addQueryParam("mode", t.Mode)
+		addQueryParam("pbk", t.PublicKey)
+		addQueryParam("sid", t.ShortIds)
+		addQueryParam("spx", t.SpiderX)
+		addQueryParam("allowInsecure", t.AllowInsecure)
+		addQueryParam("quicSecurity", t.QuicSecurity)
+		addQueryParam("key", t.Key)
+		addQueryParam("authority", t.Authority)
+
+		baseURL.RawQuery = params.Encode()
+
+		if t.Remark != "" {
+			baseURL.Fragment = t.Remark
+		}
+
+		return baseURL.String()
+	}
 }
 
 func (t *Trojan) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
@@ -351,5 +395,105 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 }
 
 func (t *Trojan) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
-	return nil, nil
+	port, err := strconv.ParseUint(t.Port, 10, 32)
+	if err != nil {
+		return nil, fmt.Errorf("error converting port string to uint32: %w", err)
+	}
+	uint32Port := uint32(port)
+
+	// Create the client part of the settings
+	clients := fmt.Sprintf(`{ "password": "%s" }`, t.Password)
+
+	// Create the main settings JSON
+	settings := json.RawMessage(fmt.Sprintf(`{ "clients": [ %s ] }`, clients))
+
+	// Stream settings (copied and adapted from outbound)
+	p := conf.TransportProtocol(t.Type)
+	streamConfig := &conf.StreamConfig{
+		Network:  &p,
+		Security: t.Security,
+	}
+
+	switch t.Type {
+	case "tcp":
+		streamConfig.TCPSettings = &conf.TCPConfig{}
+		if t.HeaderType == "" || t.HeaderType == "none" {
+			streamConfig.TCPSettings.HeaderConfig = json.RawMessage([]byte(`{ "type": "none" }`))
+		} else { // headerType=http
+			pathb, _ := json.Marshal(strings.Split(t.Path, ","))
+			hostb, _ := json.Marshal(strings.Split(t.Host, ","))
+			streamConfig.TCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`
+			{
+				"type": "http",
+				"request": {
+					"path": %s,
+					"headers": {
+						"Host": %s
+					}
+				}
+			}
+			`, string(pathb), string(hostb))))
+		}
+	case "kcp":
+		streamConfig.KCPSettings = &conf.KCPConfig{}
+		streamConfig.KCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, t.Type)))
+	case "ws":
+		streamConfig.WSSettings = &conf.WebSocketConfig{}
+		streamConfig.WSSettings.Path = t.Path
+		streamConfig.WSSettings.Headers = map[string]string{
+			"Host": t.Host,
+		}
+	case "xhttp":
+		streamConfig.XHTTPSettings = &conf.SplitHTTPConfig{
+			Host: t.Host,
+			Path: t.Path,
+			Mode: t.Mode,
+		}
+		if t.Mode == "" {
+			streamConfig.XHTTPSettings.Mode = "auto"
+		}
+	case "httpupgrade":
+		streamConfig.HTTPUPGRADESettings = &conf.HttpUpgradeConfig{
+			Host: t.Host,
+			Path: t.Path,
+		}
+	case "splithttp":
+		streamConfig.SplitHTTPSettings = &conf.SplitHTTPConfig{
+			Host: t.Host,
+			Path: t.Path,
+		}
+	case "grpc":
+		if len(t.ServiceName) > 0 {
+			if t.ServiceName[0] == '/' {
+				t.ServiceName = t.ServiceName[1:]
+			}
+		}
+		multiMode := false
+		if t.Mode != "gun" {
+			multiMode = true
+		}
+		streamConfig.GRPCSettings = &conf.GRPCConfig{
+			Authority:   t.Authority,
+			ServiceName: t.ServiceName,
+			MultiMode:   multiMode,
+		}
+	}
+
+	// Inbound TLS/REALITY requires certs, which aren't in the link. Fallback to none.
+	if streamConfig.Security == "tls" || streamConfig.Security == "reality" {
+		streamConfig.Security = "none"
+	}
+
+	in := &conf.InboundDetourConfig{
+		Protocol: t.Name(),
+		Tag:      t.Name(),
+		ListenOn: &conf.Address{Address: net2.ParseAddress(t.Address)},
+		PortList: &conf.PortList{Range: []conf.PortRange{
+			{From: uint32Port, To: uint32Port},
+		}},
+		Settings:      &settings,
+		StreamSetting: streamConfig,
+	}
+
+	return in, nil
 }

@@ -3,8 +3,10 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
+	net2 "github.com/xtls/xray-core/common/net"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/lilendian0x00/xray-knife/v3/pkg/protocol"
@@ -377,5 +379,119 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 }
 
 func (v *Vmess) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
-	return nil, nil
+	p := conf.TransportProtocol(v.Network)
+	streamConfig := &conf.StreamConfig{
+		Network:  &p,
+		Security: v.TLS,
+	}
+
+	switch v.Network {
+	case "tcp":
+		streamConfig.TCPSettings = &conf.TCPConfig{}
+		if v.Type == "" || v.Type == "none" {
+			streamConfig.TCPSettings.HeaderConfig = json.RawMessage([]byte(`{ "type": "none" }`))
+		} else {
+			pathb, _ := json.Marshal(strings.Split(v.Path, ","))
+			hostb, _ := json.Marshal(strings.Split(v.Host, ","))
+			streamConfig.TCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`
+			{
+				"type": "http",
+				"request": {
+					"path": %s,
+					"headers": {
+						"Host": %s
+					}
+				}
+			}
+			`, string(pathb), string(hostb))))
+		}
+	case "kcp":
+		streamConfig.KCPSettings = &conf.KCPConfig{}
+		streamConfig.KCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, v.Type)))
+	case "ws":
+		streamConfig.WSSettings = &conf.WebSocketConfig{}
+		streamConfig.WSSettings.Path = v.Path
+		streamConfig.WSSettings.Headers = map[string]string{
+			"Host": v.Host,
+		}
+	case "xhttp":
+		streamConfig.XHTTPSettings = &conf.SplitHTTPConfig{
+			Host: v.Host,
+			Path: v.Path,
+			Mode: v.Type,
+		}
+		if v.Type == "" {
+			streamConfig.XHTTPSettings.Mode = "auto"
+		}
+	case "httpupgrade":
+		streamConfig.HTTPUPGRADESettings = &conf.HttpUpgradeConfig{
+			Host: v.Host,
+			Path: v.Path,
+		}
+	case "splithttp":
+		streamConfig.SplitHTTPSettings = &conf.SplitHTTPConfig{
+			Host: v.Host,
+			Path: v.Path,
+		}
+	case "grpc":
+		if len(v.Path) > 0 {
+			if v.Path[0] == '/' {
+				v.Path = v.Path[1:]
+			}
+		}
+		multiMode := false
+		if v.Type != "gun" {
+			multiMode = true
+		}
+		streamConfig.GRPCSettings = &conf.GRPCConfig{
+			InitialWindowsSize: 65536,
+			HealthCheckTimeout: 20,
+			MultiMode:          multiMode,
+			IdleTimeout:        60,
+			Authority:          v.Host,
+			ServiceName:        v.Path,
+		}
+	}
+
+	if v.TLS == "tls" {
+		// Cannot configure inbound TLS from a link as it requires certificate files.
+		// Fallback to no security.
+		streamConfig.Security = "none"
+	}
+
+	clients := fmt.Sprintf(`{
+      "id": "%s",
+      "alterId": %v
+    }`, v.ID, v.Aid)
+
+	settings := json.RawMessage(fmt.Sprintf(`{
+      "clients": [ %s ]
+    }`, clients))
+
+	var port uint32
+	switch p := v.Port.(type) {
+	case string:
+		parsed, err := strconv.ParseUint(p, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("invalid port from string: %s", p)
+		}
+		port = uint32(parsed)
+	case float64:
+		port = uint32(p)
+	default:
+		return nil, fmt.Errorf("unsupported port type: %T for value %v", v.Port, v.Port)
+	}
+
+	in := &conf.InboundDetourConfig{
+		Protocol:      v.Name(),
+		Tag:           v.Name(),
+		Settings:      &settings,
+		StreamSetting: streamConfig,
+		ListenOn:      &conf.Address{Address: net2.ParseAddress(v.Address)},
+		PortList: &conf.PortList{Range: []conf.PortRange{
+			{From: port, To: port},
+		}},
+	}
+
+	return in, nil
 }

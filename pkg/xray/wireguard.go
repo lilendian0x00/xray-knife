@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/lilendian0x00/xray-knife/v3/pkg/protocol"
@@ -90,8 +91,42 @@ func (w *Wireguard) DetailsStr() string {
 	return info
 }
 
+// GetLink generates a WireGuard config link from the struct's fields.
 func (w *Wireguard) GetLink() string {
-	return w.OrigLink
+	if w.OrigLink != "" {
+		return w.OrigLink
+	} else {
+		baseURL := url.URL{
+			Scheme: "wireguard",
+			User:   url.User(w.SecretKey),
+			Host:   w.Endpoint,
+		}
+
+		params := url.Values{}
+		addQueryParam := func(key, value string) {
+			if value != "" {
+				params.Add(key, value)
+			}
+		}
+		addQueryParamInt := func(key string, value int32) {
+			if value != 0 {
+				params.Add(key, strconv.FormatInt(int64(value), 10))
+			}
+		}
+
+		addQueryParam("publickey", w.PublicKey)
+		addQueryParam("presharedkey", w.PreSharedKey)
+		addQueryParam("address", w.LocalAddress)
+		addQueryParamInt("mtu", w.Mtu)
+
+		baseURL.RawQuery = params.Encode()
+
+		if w.Remark != "" {
+			baseURL.Fragment = w.Remark
+		}
+
+		return baseURL.String()
+	}
 }
 
 func (w *Wireguard) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
@@ -181,5 +216,5 @@ func (w *Wireguard) BuildOutboundDetourConfig(allowInsecure bool) (*conf.Outboun
 }
 
 func (w *Wireguard) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
-	return nil, nil
+	return nil, fmt.Errorf("creating a WireGuard inbound from a client link is not supported")
 }

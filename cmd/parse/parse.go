@@ -2,9 +2,13 @@ package parse
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
+	"github.com/lilendian0x00/xray-knife/v3/pkg/xray"
 	"github.com/lilendian0x00/xray-knife/v3/utils/customlog"
+	"github.com/xtls/xray-core/infra/conf"
 	"os"
+	"reflect"
 	"strings"
 	"time"
 
@@ -20,10 +24,157 @@ type parseCmdConfig struct {
 	readFromSTDIN   bool
 	configLink      string
 	configLinksFile string
+	outputJSON      bool
 }
 
 // ParseCmd represents the parse command
 var ParseCmd = newParseCommand()
+
+// removeEmptyValues recursively traverses a map or slice and removes keys/elements
+// that are nil, false, 0, empty strings, or empty collections.
+func removeEmptyValues(data interface{}) interface{} {
+	if data == nil {
+		return nil
+	}
+
+	val := reflect.ValueOf(data)
+
+	switch val.Kind() {
+	case reflect.Map:
+		// Create a new map to hold the non-empty values
+		cleanMap := make(map[string]interface{})
+		for _, key := range val.MapKeys() {
+			v := val.MapIndex(key)
+			// Recurse on the value
+			cleanedValue := removeEmptyValues(v.Interface())
+			// Check if the cleaned value is non-empty before adding it
+			if cleanedValue != nil {
+				cleanMap[key.String()] = cleanedValue
+			}
+		}
+		// If the cleaned map is empty, return nil to remove it from parent
+		if len(cleanMap) == 0 {
+			return nil
+		}
+		return cleanMap
+
+	case reflect.Slice:
+		// If the slice is empty, return nil
+		if val.Len() == 0 {
+			return nil
+		}
+		// Create a new slice to hold non-empty elements
+		var cleanSlice []interface{}
+		for i := 0; i < val.Len(); i++ {
+			cleanedElement := removeEmptyValues(val.Index(i).Interface())
+			if cleanedElement != nil {
+				cleanSlice = append(cleanSlice, cleanedElement)
+			}
+		}
+		// If the cleaned slice is empty, return nil
+		if len(cleanSlice) == 0 {
+			return nil
+		}
+		return cleanSlice
+
+	case reflect.Ptr, reflect.Interface:
+		if val.IsNil() {
+			return nil
+		}
+		// Recurse on the element pointed to by the pointer/interface
+		return removeEmptyValues(val.Elem().Interface())
+
+	case reflect.String:
+		if val.String() == "" {
+			return nil
+		}
+	case reflect.Bool:
+		if !val.Bool() {
+			return nil
+		}
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if val.Int() == 0 {
+			return nil
+		}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		if val.Uint() == 0 {
+			return nil
+		}
+	case reflect.Float32, reflect.Float64:
+		if val.Float() == 0 {
+			return nil
+		}
+	}
+
+	// If the value is not considered empty, return it
+	return data
+}
+
+// generateAndPrintXrayJSON creates a full xray-core configuration from a link and prints it.
+func generateAndPrintXrayJSON(configLink string) error {
+	xrayCore := xray.NewXrayService(false, false)
+
+	// Create and parse the outbound protocol from the provided link
+	outboundProto, err := xrayCore.CreateProtocol(configLink)
+	if err != nil {
+		return fmt.Errorf("failed to create outbound protocol from link: %w", err)
+	}
+	xrayOutbound, ok := outboundProto.(xray.Protocol)
+	if !ok {
+		return fmt.Errorf("provided link is not a supported xray-core protocol")
+	}
+
+	if err := xrayOutbound.Parse(); err != nil {
+		return fmt.Errorf("failed to parse outbound protocol: %w", err)
+	}
+	outboundDetour, err := xrayOutbound.BuildOutboundDetourConfig(false)
+	if err != nil {
+		return fmt.Errorf("failed to build outbound detour: %w", err)
+	}
+
+	// Create a default SOCKS inbound
+	defaultInbound := &xray.Socks{
+		Address: "127.0.0.1",
+		Port:    "1080",
+	}
+	inboundDetour, err := defaultInbound.BuildInboundDetourConfig()
+	if err != nil {
+		return fmt.Errorf("failed to build default inbound detour: %w", err)
+	}
+
+	// Assemble the final configuration structure
+	finalConfig := &conf.Config{
+		LogConfig: &conf.LogConfig{
+			LogLevel: "warning",
+		},
+		InboundConfigs:  []conf.InboundDetourConfig{*inboundDetour},
+		OutboundConfigs: []conf.OutboundDetourConfig{*outboundDetour},
+	}
+
+	// Marshal to verbose JSON first
+	verboseBytes, err := json.Marshal(finalConfig)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config to verbose JSON: %w", err)
+	}
+
+	// Unmarshal into a generic map
+	var genericConfig map[string]interface{}
+	if err := json.Unmarshal(verboseBytes, &genericConfig); err != nil {
+		return fmt.Errorf("failed to unmarshal verbose JSON to map: %w", err)
+	}
+
+	// Clean the map by removing empty/zero values
+	cleanedConfig := removeEmptyValues(genericConfig)
+
+	// Marshal the cleaned map back to indented JSON and print
+	cleanBytes, err := json.MarshalIndent(cleanedConfig, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal cleaned config to JSON: %w", err)
+	}
+
+	fmt.Println(string(cleanBytes))
+	return nil
+}
 
 func newParseCommand() *cobra.Command {
 	cfg := &parseCmdConfig{}
@@ -38,7 +189,6 @@ func newParseCommand() *cobra.Command {
 				return nil
 			}
 
-			core := pkg.NewAutomaticCore(true, true)
 			var links []string
 
 			if cfg.readFromSTDIN {
@@ -67,6 +217,20 @@ func newParseCommand() *cobra.Command {
 				return fmt.Errorf("no config links provided or found")
 			}
 
+			// New logic branch for JSON output
+			if cfg.outputJSON {
+				if len(links) > 1 {
+					return fmt.Errorf("--json flag only supports one config link at a time")
+				}
+				trimmedLink := strings.TrimSpace(links[0])
+				if trimmedLink == "" {
+					return fmt.Errorf("provided config link is empty")
+				}
+				return generateAndPrintXrayJSON(trimmedLink)
+			}
+
+			core := pkg.NewAutomaticCore(true, true)
+
 			d := color.New(color.FgCyan, color.Bold)
 			for i, link := range links {
 				trimmedLink := strings.TrimSpace(link)
@@ -94,5 +258,6 @@ func newParseCommand() *cobra.Command {
 	cmd.Flags().BoolVarP(&cfg.readFromSTDIN, "stdin", "i", false, "Read config link from the console")
 	cmd.Flags().StringVarP(&cfg.configLink, "config", "c", "", "The config link")
 	cmd.Flags().StringVarP(&cfg.configLinksFile, "file", "f", "", "Read config links from a file")
+	cmd.Flags().BoolVarP(&cfg.outputJSON, "json", "j", false, "Output full xray-core JSON configuration with a default inbound")
 	return cmd
 }

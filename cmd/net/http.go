@@ -82,7 +82,7 @@ func NewTestManager(examiner *pkg.Examiner, processor *ResultProcessor, threadCo
 }
 
 // TestConfigs tests multiple configurations concurrently
-func (tm *TestManager) TestConfigs(links []string) ConfigResults {
+func (tm *TestManager) TestConfigs(links []string, printSuccess bool) ConfigResults {
 	semaphore := make(chan int, tm.threadCount)
 	var wg sync.WaitGroup
 	var results ConfigResults
@@ -90,7 +90,7 @@ func (tm *TestManager) TestConfigs(links []string) ConfigResults {
 	for i := range links {
 		semaphore <- 1
 		wg.Add(1)
-		go tm.testSingleConfig(links[i], i, &results, semaphore, &wg)
+		go tm.testSingleConfig(links[i], i, &results, semaphore, &wg, printSuccess)
 	}
 
 	wg.Wait()
@@ -99,7 +99,7 @@ func (tm *TestManager) TestConfigs(links []string) ConfigResults {
 }
 
 // testSingleConfig tests a single configuration
-func (tm *TestManager) testSingleConfig(link string, index int, results *ConfigResults, semaphore chan int, wg *sync.WaitGroup) {
+func (tm *TestManager) testSingleConfig(link string, index int, results *ConfigResults, semaphore chan int, wg *sync.WaitGroup, printSuccess bool) {
 	defer func() {
 		<-semaphore
 		wg.Done()
@@ -113,7 +113,7 @@ func (tm *TestManager) testSingleConfig(link string, index int, results *ConfigR
 		return
 	}
 
-	if res.Status == "passed" {
+	if res.Status == "passed" && printSuccess {
 		tm.printSuccessDetails(index, res)
 	}
 
@@ -273,7 +273,7 @@ func handleMultipleConfigs(examiner *pkg.Examiner, config *Config, processor *Re
 	}
 
 	testManager := NewTestManager(examiner, processor, config.ThreadCount, config.Verbose)
-	results := testManager.TestConfigs(links)
+	results := testManager.TestConfigs(links, true)
 
 	return processor.SaveResults(results)
 }

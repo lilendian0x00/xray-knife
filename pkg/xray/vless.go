@@ -3,8 +3,10 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
+	net2 "github.com/xtls/xray-core/common/net"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/lilendian0x00/xray-knife/v3/pkg/protocol"
@@ -169,7 +171,51 @@ func (v *Vless) DetailsStr() string {
 }
 
 func (v *Vless) GetLink() string {
-	return v.OrigLink
+	if v.OrigLink != "" {
+		return v.OrigLink
+	} else {
+		baseURL := url.URL{
+			Scheme: "vless",
+			User:   url.User(v.ID),
+			Host:   net.JoinHostPort(v.Address, v.Port),
+		}
+
+		params := url.Values{}
+
+		addQueryParam := func(key, value string) {
+			if value != "" {
+				params.Add(key, value)
+			}
+		}
+
+		addQueryParam("encryption", v.Encryption)
+		addQueryParam("security", v.Security)
+		addQueryParam("sni", v.SNI)
+		addQueryParam("alpn", v.ALPN)
+		addQueryParam("fp", v.TlsFingerprint)
+		addQueryParam("type", v.Type)
+		addQueryParam("host", v.Host)
+		addQueryParam("path", v.Path)
+		addQueryParam("flow", v.Flow)
+		addQueryParam("pbk", v.PublicKey)
+		addQueryParam("sid", v.ShortIds)
+		addQueryParam("spx", v.SpiderX)
+		addQueryParam("headerType", v.HeaderType)
+		addQueryParam("serviceName", v.ServiceName)
+		addQueryParam("mode", v.Mode)
+		addQueryParam("allowInsecure", v.AllowInsecure)
+		addQueryParam("quicSecurity", v.QuicSecurity)
+		addQueryParam("key", v.Key)
+		addQueryParam("authority", v.Authority)
+
+		baseURL.RawQuery = params.Encode()
+
+		if v.Remark != "" {
+			baseURL.Fragment = v.Remark
+		}
+
+		return baseURL.String()
+	}
 }
 
 func (v *Vless) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
@@ -358,5 +404,115 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 }
 
 func (v *Vless) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
-	return nil, nil
+	p := conf.TransportProtocol(v.Type)
+	streamConfig := &conf.StreamConfig{
+		Network:  &p,
+		Security: v.Security,
+	}
+
+	switch v.Type {
+	case "tcp":
+		streamConfig.TCPSettings = &conf.TCPConfig{}
+		if v.HeaderType == "" || v.HeaderType == "none" {
+			streamConfig.TCPSettings.HeaderConfig = json.RawMessage([]byte(`{ "type": "none" }`))
+		} else { // headerType=http
+			pathb, _ := json.Marshal(strings.Split(v.Path, ","))
+			hostb, _ := json.Marshal(strings.Split(v.Host, ","))
+			streamConfig.TCPSettings.HeaderConfig = []byte(fmt.Sprintf(`
+			{
+				"type": "http",
+				"request": {
+					"path": %s,
+					"headers": {
+						"Host": %s
+					}
+				}
+			}
+			`, string(pathb), string(hostb)))
+		}
+	case "kcp":
+		streamConfig.KCPSettings = &conf.KCPConfig{}
+		streamConfig.KCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, v.Type)))
+	case "ws":
+		streamConfig.WSSettings = &conf.WebSocketConfig{}
+		streamConfig.WSSettings.Path = v.Path
+		streamConfig.WSSettings.Headers = map[string]string{
+			"Host": v.Host,
+		}
+	case "xhttp":
+		streamConfig.XHTTPSettings = &conf.SplitHTTPConfig{
+			Host: v.Host,
+			Path: v.Path,
+			Mode: v.Mode,
+		}
+		if v.Mode == "" {
+			streamConfig.XHTTPSettings.Mode = "auto"
+		}
+	case "httpupgrade":
+		streamConfig.HTTPUPGRADESettings = &conf.HttpUpgradeConfig{
+			Host: v.Host,
+			Path: v.Path,
+		}
+	case "splithttp":
+		streamConfig.SplitHTTPSettings = &conf.SplitHTTPConfig{
+			Host: v.Host,
+			Path: v.Path,
+		}
+	case "grpc":
+		if len(v.ServiceName) > 0 {
+			if v.ServiceName[0] == '/' {
+				v.ServiceName = v.ServiceName[1:]
+			}
+		}
+		multiMode := false
+		if v.Mode != "gun" {
+			multiMode = true
+		}
+
+		streamConfig.GRPCSettings = &conf.GRPCConfig{
+			Authority:           v.Authority,
+			ServiceName:         v.ServiceName,
+			MultiMode:           multiMode,
+			IdleTimeout:         60,
+			HealthCheckTimeout:  20,
+			PermitWithoutStream: false,
+			InitialWindowsSize:  65536,
+			UserAgent:           "",
+		}
+	}
+
+	if v.Security == "tls" || v.Security == "reality" {
+		// Cannot configure inbound TLS from a link as it requires certificate files.
+		// Fallback to no security.
+		streamConfig.Security = "none"
+	}
+
+	clients := fmt.Sprintf(`{
+      "id": "%s",
+      "flow": "%s"
+    }`, v.ID, v.Flow)
+
+	settings := json.RawMessage(fmt.Sprintf(`{
+	  "clients": [ %s ],
+      "decryption": "none"
+	}`, clients))
+
+	uint32Value, err := strconv.ParseUint(v.Port, 10, 32)
+	if err != nil {
+		return nil, fmt.Errorf("error converting port string to uint32: %w", err)
+	}
+	uint32Result := uint32(uint32Value)
+
+	in := &conf.InboundDetourConfig{
+		Protocol:      v.Name(),
+		Tag:           v.Name(),
+		Settings:      &settings,
+		StreamSetting: streamConfig,
+		ListenOn:      &conf.Address{Address: net2.ParseAddress(v.Address)},
+		PortList: &conf.PortList{Range: []conf.PortRange{
+			{From: uint32Result, To: uint32Result},
+		}},
+	}
+
+	return in, nil
 }
