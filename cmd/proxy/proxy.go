@@ -35,6 +35,7 @@ type proxyCmdConfig struct {
 	rotationInterval    uint32
 	inboundProtocol     string
 	inboundTransport    string
+	inboundUUID         string
 	mode                string
 	configLinksFile     string
 	readConfigFromSTDIN bool
@@ -249,6 +250,7 @@ func newProxyCommand() *cobra.Command {
 				return nil
 			}
 
+			u := uuid.New()
 			var core pkg.Core
 			var inbound protocol.Protocol
 			var err error
@@ -267,7 +269,10 @@ func newProxyCommand() *cobra.Command {
 						}
 						break
 					case "vmess":
-						uuidv4 := uuid.New()
+						uuidv4 := cfg.inboundUUID
+						if cfg.inboundUUID == "random" {
+							uuidv4 = u.String()
+						}
 						switch cfg.inboundTransport {
 						case "xhttp":
 							inbound = &pkGxray.Vmess{
@@ -278,7 +283,7 @@ func newProxyCommand() *cobra.Command {
 								Host:     "snapp.ir",
 								Path:     "/",
 								Security: "none",
-								ID:       uuidv4.String(),
+								ID:       uuidv4,
 							}
 						case "tcp":
 							inbound = &pkGxray.Vmess{
@@ -286,13 +291,16 @@ func newProxyCommand() *cobra.Command {
 								Address: cfg.listenAddr,
 								Port:    cfg.listenPort,
 								Type:    "tcp",
-								ID:      uuidv4.String(),
+								ID:      uuidv4,
 							}
 						}
 						break
 
 					case "vless":
-						uuidv4 := uuid.New()
+						uuidv4 := cfg.inboundUUID
+						if cfg.inboundUUID == "random" {
+							uuidv4 = u.String()
+						}
 						switch cfg.inboundTransport {
 						case "xhttp":
 							inbound = &pkGxray.Vless{
@@ -303,7 +311,7 @@ func newProxyCommand() *cobra.Command {
 								Host:     "snapp.ir",
 								Path:     "/",
 								Security: "none",
-								ID:       uuidv4.String(),
+								ID:       uuidv4,
 								Mode:     "auto",
 							}
 						case "tcp":
@@ -312,7 +320,7 @@ func newProxyCommand() *cobra.Command {
 								Address: cfg.listenAddr,
 								Port:    cfg.listenPort,
 								Type:    "tcp",
-								ID:      uuidv4.String(),
+								ID:      uuidv4,
 							}
 						}
 						break
@@ -520,16 +528,18 @@ func newProxyCommand() *cobra.Command {
 	cmd.Flags().BoolVarP(&cfg.readConfigFromSTDIN, "stdin", "i", false, "Read config link from STDIN")
 	cmd.Flags().StringVarP(&cfg.configLinksFile, "file", "f", "", "Read config links from a file")
 	cmd.Flags().Uint32VarP(&cfg.rotationInterval, "rotate", "t", 300, "How often to rotate outbounds (seconds)")
-	cmd.Flags().StringVarP(&cfg.inboundProtocol, "inbound", "j", "socks", "Inbound protocol to use (vless, vmess, socks)")
-	cmd.Flags().StringVarP(&cfg.inboundTransport, "transport", "u", "tcp", "Inbound transport to use (tcp, xhttp)")
-	cmd.Flags().StringVarP(&cfg.mode, "mode", "m", "inbound", "proxy operating mode:  • inbound  – expose local SOCKS/HTTP listener (default)\n"+
-		"                       • system   – create TUN device and route all host traffic through it")
-	cmd.Flags().Uint16VarP(&cfg.maximumAllowedDelay, "mdelay", "d", 3000, "Maximum allowed delay (ms) for testing configs during rotation")
-
-	cmd.Flags().StringVarP(&cfg.CoreType, "core", "z", "xray", "Core types: (xray, singbox)")
 
 	cmd.Flags().StringVarP(&cfg.listenAddr, "addr", "a", "127.0.0.1", "Listen ip address for the proxy server")
 	cmd.Flags().StringVarP(&cfg.listenPort, "port", "p", "9999", "Listen port number for the proxy server")
+	cmd.Flags().StringVarP(&cfg.inboundProtocol, "inbound", "j", "socks", "Inbound protocol to use (vless, vmess, socks)")
+	cmd.Flags().StringVarP(&cfg.inboundTransport, "transport", "u", "tcp", "Inbound transport to use (tcp, xhttp)")
+	cmd.Flags().StringVarP(&cfg.inboundUUID, "uuid", "g", "random", "Inbound custom UUID to use (default: random)")
+	cmd.Flags().StringVarP(&cfg.mode, "mode", "m", "inbound", "proxy operating mode:  • inbound  – expose local SOCKS/HTTP listener (default)\n"+
+		"                       • system   – create TUN device and route all host traffic through it")
+
+	cmd.Flags().Uint16VarP(&cfg.maximumAllowedDelay, "mdelay", "d", 3000, "Maximum allowed delay (ms) for testing configs during rotation")
+
+	cmd.Flags().StringVarP(&cfg.CoreType, "core", "z", "xray", "Core types: (xray, singbox)")
 	cmd.Flags().StringVarP(&cfg.configLink, "config", "c", "", "The single xray/sing-box config link to use")
 
 	cmd.Flags().BoolVarP(&cfg.verbose, "verbose", "v", false, "Enable verbose logging for the selected core")
