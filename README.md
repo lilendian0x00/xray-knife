@@ -12,9 +12,10 @@ You can view the flags of each command by using the `-h` or `--help` option.
 ## Features (main commands)
 - `parse`: Detailed info about given xray config link + parsing a config link to a xray-core json.
 - `subs`: Subscription management tool.
-- `net`: Network testing tools for one or multiple xray configs.
+- `http`: Test proxy configurations for latency, speed, and IP info using HTTP requests.
+- `net`: Access a suite of network tools to diagnose and test configs (e.g., TCP, ICMP)
 - `scan`: Scanning tools needed for bypassing GFW (CF Scanner, REALITY Scanner).
-- `proxy`: Creates proxy server to work as a client for xray-core configs.
+- `proxy`: Run a local inbound proxy that tunnels traffic through a remote configuration. Supports automatic rotation of outbound proxies.
 
 ## Download
 
