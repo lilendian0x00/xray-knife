@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/lilendian0x00/xray-knife/v3/cmd/http"
 	"os"
 
 	"github.com/lilendian0x00/xray-knife/v3/cmd/net"
@@ -17,7 +18,7 @@ var rootCmd = &cobra.Command{
 	Use:     "github.com/lilendian0x00/xray-knife",
 	Short:   "Swiss Army Knife for xray-core & sing-box",
 	Long:    ``,
-	Version: "3.27.64",
+	Version: "4.0.0",
 	// Main Tools:
 	//1. parse: Parses xray config link.
 	//2. net: Multiple network tests for xray configs.
@@ -40,6 +41,7 @@ func Execute() {
 func addSubcommandPalettes() {
 	rootCmd.AddCommand(parse.ParseCmd)
 	rootCmd.AddCommand(subs.SubsCmd)
+	rootCmd.AddCommand(http.HttpCmd)
 	rootCmd.AddCommand(net.NetCmd)
 	rootCmd.AddCommand(scan.ScanCmd)
 	rootCmd.AddCommand(proxy.ProxyCmd)

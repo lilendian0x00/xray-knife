@@ -7,7 +7,7 @@ import (
 // SubsCmd represents the subs command
 var SubsCmd = &cobra.Command{
 	Use:   "subs",
-	Short: "Subscription management tool",
+	Short: "Fetch and manage proxy configurations from subscription links.",
 	Long: `
 show: shows all subscriptions available in DB
 fetch: fetches all configs from the subscription url to a file 

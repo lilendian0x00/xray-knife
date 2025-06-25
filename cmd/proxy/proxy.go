@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context" // Added for managing goroutine lifecycles
 	"fmt"
+	"github.com/lilendian0x00/xray-knife/v3/cmd/http"
 	"github.com/xtls/xray-core/common/uuid"
 	"math/rand"
 	"os"
@@ -13,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/lilendian0x00/xray-knife/v3/cmd/net"
 	"github.com/lilendian0x00/xray-knife/v3/pkg"
 	"github.com/lilendian0x00/xray-knife/v3/pkg/protocol"
 	"github.com/lilendian0x00/xray-knife/v3/pkg/singbox"
@@ -34,6 +34,7 @@ type proxyCmdConfig struct {
 	CoreType            string
 	rotationInterval    uint32
 	inboundProtocol     string
+	inboundTransport    string
 	mode                string
 	configLinksFile     string
 	readConfigFromSTDIN bool
@@ -57,7 +58,7 @@ func findAndStartWorkingConfig(
 	cfg *proxyCmdConfig,
 	core pkg.Core,
 	examiner *pkg.Examiner,
-	processor *net.ResultProcessor,
+	processor *http.ResultProcessor,
 	allLinks []string,
 	r *rand.Rand,
 	lastUsedLink string,
@@ -92,7 +93,7 @@ func findAndStartWorkingConfig(
 		linksToTestThisRound := availableLinks[:testCount]
 		customlog.Printf(customlog.Processing, "Testing a batch of %d configs (Attempt %d/%d)...\n", len(linksToTestThisRound), attempt+1, maxAttemptsToFindWorkingConfig)
 
-		testManager := net.NewTestManager(examiner, processor, 50, false) // Verbosity for TM itself
+		testManager := http.NewTestManager(examiner, processor, 50, false) // Verbosity for TM itself
 		results := testManager.TestConfigs(linksToTestThisRound, false)
 		sort.Sort(results) // Sorts by delay (fastest first)
 
@@ -240,7 +241,7 @@ func newProxyCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "proxy",
-		Short: "Creates proxy server",
+		Short: "Run a local inbound proxy that tunnels traffic through a remote configuration. Supports automatic rotation of outbound proxies.",
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) < 1 && (!cfg.readConfigFromSTDIN && cfg.configLink == "" && cfg.configLinksFile == "") {
@@ -267,30 +268,52 @@ func newProxyCommand() *cobra.Command {
 						break
 					case "vmess":
 						uuidv4 := uuid.New()
-						inbound = &pkGxray.Vmess{
-							Remark:   "Listener",
-							Address:  cfg.listenAddr,
-							Port:     cfg.listenPort,
-							Network:  "xhttp",
-							Host:     "snapp.ir",
-							Path:     "/",
-							Security: "none",
-							ID:       uuidv4.String(),
+						switch cfg.inboundTransport {
+						case "xhttp":
+							inbound = &pkGxray.Vmess{
+								Remark:   "Listener",
+								Address:  cfg.listenAddr,
+								Port:     cfg.listenPort,
+								Network:  "xhttp",
+								Host:     "snapp.ir",
+								Path:     "/",
+								Security: "none",
+								ID:       uuidv4.String(),
+							}
+						case "tcp":
+							inbound = &pkGxray.Vmess{
+								Remark:  "Listener",
+								Address: cfg.listenAddr,
+								Port:    cfg.listenPort,
+								Type:    "tcp",
+								ID:      uuidv4.String(),
+							}
 						}
 						break
 
 					case "vless":
 						uuidv4 := uuid.New()
-						inbound = &pkGxray.Vless{
-							Remark:   "Listener",
-							Address:  cfg.listenAddr,
-							Port:     cfg.listenPort,
-							Type:     "xhttp",
-							Host:     "snapp.ir",
-							Path:     "/",
-							Security: "none",
-							ID:       uuidv4.String(),
-							Mode:     "auto",
+						switch cfg.inboundTransport {
+						case "xhttp":
+							inbound = &pkGxray.Vless{
+								Remark:   "Listener",
+								Address:  cfg.listenAddr,
+								Port:     cfg.listenPort,
+								Type:     "xhttp",
+								Host:     "snapp.ir",
+								Path:     "/",
+								Security: "none",
+								ID:       uuidv4.String(),
+								Mode:     "auto",
+							}
+						case "tcp":
+							inbound = &pkGxray.Vless{
+								Remark:  "Listener",
+								Address: cfg.listenAddr,
+								Port:    cfg.listenPort,
+								Type:    "tcp",
+								ID:      uuidv4.String(),
+							}
 						}
 						break
 					}
@@ -399,8 +422,8 @@ func newProxyCommand() *cobra.Command {
 			}()
 
 			if len(links) > 1 { // Rotation mode
-				netTestConfig := &net.Config{OutputType: "txt"} // For ResultProcessor in TestManager
-				processor := net.NewResultProcessor(netTestConfig)
+				netTestConfig := &http.Config{OutputType: "txt"} // For ResultProcessor in TestManager
+				processor := http.NewResultProcessor(netTestConfig)
 				var currentInstance protocol.Instance
 				var currentLink string
 
@@ -498,6 +521,7 @@ func newProxyCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&cfg.configLinksFile, "file", "f", "", "Read config links from a file")
 	cmd.Flags().Uint32VarP(&cfg.rotationInterval, "rotate", "t", 300, "How often to rotate outbounds (seconds)")
 	cmd.Flags().StringVarP(&cfg.inboundProtocol, "inbound", "j", "socks", "Inbound protocol to use (vless, vmess, socks)")
+	cmd.Flags().StringVarP(&cfg.inboundTransport, "transport", "u", "tcp", "Inbound transport to use (tcp, xhttp)")
 	cmd.Flags().StringVarP(&cfg.mode, "mode", "m", "inbound", "proxy operating mode:  • inbound  – expose local SOCKS/HTTP listener (default)\n"+
 		"                       • system   – create TUN device and route all host traffic through it")
 	cmd.Flags().Uint16VarP(&cfg.maximumAllowedDelay, "mdelay", "d", 3000, "Maximum allowed delay (ms) for testing configs during rotation")

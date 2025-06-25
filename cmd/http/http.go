@@ -1,4 +1,4 @@
-package net
+package http
 
 import (
 	"fmt"
@@ -15,6 +15,9 @@ import (
 	"github.com/gocarina/gocsv"
 	"github.com/spf13/cobra"
 )
+
+// HttpCmd represents the http command
+var HttpCmd = newHttpCommand()
 
 // Config holds all command configuration options
 type Config struct {
@@ -208,13 +211,13 @@ func validateConfig(cfg *Config) error {
 	return nil
 }
 
-// NewHTTPCommand creates and returns the HTTP command
-func NewHTTPCommand() *cobra.Command {
+// newHttpCommand creates and returns the HTTP command
+func newHttpCommand() *cobra.Command {
 	config := &Config{}
 
 	cmd := &cobra.Command{
 		Use:   "http",
-		Short: "Examine config[s] real delay using http request",
+		Short: "Test proxy configurations for latency, speed, and IP info using HTTP requests.",
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Validate the values of the flags

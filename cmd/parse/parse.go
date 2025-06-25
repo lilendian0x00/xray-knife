@@ -181,7 +181,7 @@ func newParseCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "parse",
-		Short: "Gives a detailed info about the config link",
+		Short: "Decode and display a detailed, human-readable breakdown of a proxy configuration link.",
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) < 1 && !cfg.readFromSTDIN && cfg.configLink == "" && cfg.configLinksFile == "" {

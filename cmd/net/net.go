@@ -7,7 +7,7 @@ import (
 // NetCmd represents the net command
 var NetCmd = &cobra.Command{
 	Use:   "net",
-	Short: "Multiple network testing tool for one or multiple xray configs",
+	Short: "Access a suite of network tools to diagnose and test proxy configurations (e.g., TCP, ICMP)",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Help()
@@ -17,7 +17,7 @@ var NetCmd = &cobra.Command{
 func addSubcommandPalettes() {
 	NetCmd.AddCommand(NewICMPCommand())
 	NetCmd.AddCommand(TcpCmd)
-	NetCmd.AddCommand(NewHTTPCommand())
+	//NetCmd.AddCommand(NewHTTPCommand())
 }
 
 func init() {

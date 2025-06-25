@@ -415,6 +415,25 @@ func (t *Trojan) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
 	}
 
 	switch t.Type {
+	case "raw":
+		streamConfig.RAWSettings = &conf.TCPConfig{}
+		if t.HeaderType == "" || t.HeaderType == "none" {
+			streamConfig.TCPSettings.HeaderConfig = json.RawMessage([]byte(`{ "type": "none" }`))
+		} else { // headerType=http
+			pathb, _ := json.Marshal(strings.Split(t.Path, ","))
+			hostb, _ := json.Marshal(strings.Split(t.Host, ","))
+			streamConfig.TCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`
+			{
+				"type": "http",
+				"request": {
+					"path": %s,
+					"headers": {
+						"Host": %s
+					}
+				}
+			}
+			`, string(pathb), string(hostb))))
+		}
 	case "tcp":
 		streamConfig.TCPSettings = &conf.TCPConfig{}
 		if t.HeaderType == "" || t.HeaderType == "none" {
