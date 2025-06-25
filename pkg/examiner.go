@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lilendian0x00/xray-knife/v3/pkg/protocol"
-	"github.com/lilendian0x00/xray-knife/v3/speedtester/cloudflare"
+	"github.com/lilendian0x00/xray-knife/v4/pkg/protocol"
+	"github.com/lilendian0x00/xray-knife/v4/speedtester/cloudflare"
 )
 
 type Result struct {

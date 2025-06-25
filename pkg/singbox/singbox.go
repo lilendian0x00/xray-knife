@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/lilendian0x00/xray-knife/v3/pkg/protocol"
+	"github.com/lilendian0x00/xray-knife/v4/pkg/protocol"
 
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/log"

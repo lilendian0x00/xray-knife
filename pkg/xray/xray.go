@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/lilendian0x00/xray-knife/v3/pkg/protocol"
+	"github.com/lilendian0x00/xray-knife/v4/pkg/protocol"
 
 	"github.com/xtls/xray-core/app/dispatcher"
 	applog "github.com/xtls/xray-core/app/log"

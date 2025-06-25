@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"context" // Added for managing goroutine lifecycles
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/v3/cmd/http"
+	"github.com/lilendian0x00/xray-knife/v4/cmd/http"
 	"github.com/xtls/xray-core/common/uuid"
 	"math/rand"
 	"os"
@@ -14,12 +14,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/lilendian0x00/xray-knife/v3/pkg"
-	"github.com/lilendian0x00/xray-knife/v3/pkg/protocol"
-	"github.com/lilendian0x00/xray-knife/v3/pkg/singbox"
-	pkGxray "github.com/lilendian0x00/xray-knife/v3/pkg/xray" // Alias to avoid conflict
-	"github.com/lilendian0x00/xray-knife/v3/utils"
-	"github.com/lilendian0x00/xray-knife/v3/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v4/pkg"
+	"github.com/lilendian0x00/xray-knife/v4/pkg/protocol"
+	"github.com/lilendian0x00/xray-knife/v4/pkg/singbox"
+	pkGxray "github.com/lilendian0x00/xray-knife/v4/pkg/xray" // Alias to avoid conflict
+	"github.com/lilendian0x00/xray-knife/v4/utils"
+	"github.com/lilendian0x00/xray-knife/v4/utils/customlog"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"

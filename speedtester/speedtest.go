@@ -3,7 +3,7 @@ package speedtester
 import (
 	"net/http"
 
-	"github.com/lilendian0x00/xray-knife/v3/speedtester/custom"
+	"github.com/lilendian0x00/xray-knife/v4/speedtester/custom"
 )
 
 type SpeedTester struct {

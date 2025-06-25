@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lilendian0x00/xray-knife/v3/pkg/protocol"
-	"github.com/lilendian0x00/xray-knife/v3/utils"
+	"github.com/lilendian0x00/xray-knife/v4/pkg/protocol"
+	"github.com/lilendian0x00/xray-knife/v4/utils"
 
 	"github.com/fatih/color"
 	net2 "github.com/xtls/xray-core/common/net"
