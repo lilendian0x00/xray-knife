@@ -389,11 +389,11 @@ func (v *Vmess) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
 	case "raw":
 		streamConfig.RAWSettings = &conf.TCPConfig{}
 		if v.Type == "" || v.Type == "none" {
-			streamConfig.TCPSettings.HeaderConfig = json.RawMessage([]byte(`{ "type": "none" }`))
+			streamConfig.RAWSettings.HeaderConfig = json.RawMessage([]byte(`{ "type": "none" }`))
 		} else {
 			pathb, _ := json.Marshal(strings.Split(v.Path, ","))
 			hostb, _ := json.Marshal(strings.Split(v.Host, ","))
-			streamConfig.TCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`
+			streamConfig.RAWSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`
 			{
 				"type": "http",
 				"request": {

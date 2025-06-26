@@ -258,11 +258,11 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 	case "raw":
 		s.RAWSettings = &conf.TCPConfig{}
 		if v.HeaderType == "" || v.HeaderType == "none" {
-			s.TCPSettings.HeaderConfig = json.RawMessage([]byte(`{ "type": "none" }`))
+			s.RAWSettings.HeaderConfig = json.RawMessage([]byte(`{ "type": "none" }`))
 		} else { // headerType=http
 			pathb, _ := json.Marshal(strings.Split(v.Path, ","))
 			hostb, _ := json.Marshal(strings.Split(v.Host, ","))
-			s.TCPSettings.HeaderConfig = []byte(fmt.Sprintf(`
+			s.RAWSettings.HeaderConfig = []byte(fmt.Sprintf(`
 			{
 				"type": "http",
 				"request": {
