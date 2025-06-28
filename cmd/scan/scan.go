@@ -20,5 +20,5 @@ func addSubcommandPalettes() {
 }
 
 func init() {
-
+	addSubcommandPalettes()
 }
