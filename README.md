@@ -28,16 +28,6 @@ Only works on golang version 1.24
 2. `git clone https://github.com/lilendian0x00/xray-knife.git`
 3. `cd xray-knife`
 4. `bash ./build.sh <OS>`
-    
-
-# Screenshots
-### http test CSV report
-<img src="./images/httpCSV.png" width="600" alt="sample1">
-
-
-### http test log
-<img src="./images/httpTest.png" width="1357" alt="sample2">
-
 
 # Task List
 ## cores
