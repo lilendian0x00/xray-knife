@@ -15,8 +15,8 @@ import (
 	"github.com/imroc/req/v3"
 
 	"github.com/alitto/pond/v2"
-	"github.com/lilendian0x00/xray-knife/v4/utils"
-	"github.com/lilendian0x00/xray-knife/v4/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v5/utils"
+	"github.com/lilendian0x00/xray-knife/v5/utils/customlog"
 
 	"github.com/spf13/cobra"
 )

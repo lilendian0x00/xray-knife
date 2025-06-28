@@ -7,9 +7,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/lilendian0x00/xray-knife/v4/pkg"
-	"github.com/lilendian0x00/xray-knife/v4/utils"
-	"github.com/lilendian0x00/xray-knife/v4/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v5/pkg"
+	"github.com/lilendian0x00/xray-knife/v5/utils"
+	"github.com/lilendian0x00/xray-knife/v5/utils/customlog"
 
 	"github.com/fatih/color"
 	"github.com/gocarina/gocsv"

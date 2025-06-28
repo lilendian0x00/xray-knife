@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lilendian0x00/xray-knife/v4/utils"
-	"github.com/lilendian0x00/xray-knife/v4/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v5/utils"
+	"github.com/lilendian0x00/xray-knife/v5/utils/customlog"
 
 	"github.com/spf13/cobra"
 )

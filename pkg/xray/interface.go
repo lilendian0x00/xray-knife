@@ -1,7 +1,7 @@
 package xray
 
 import (
-	"github.com/lilendian0x00/xray-knife/v4/pkg/protocol"
+	"github.com/lilendian0x00/xray-knife/v5/pkg/protocol"
 
 	"github.com/xtls/xray-core/infra/conf"
 )
