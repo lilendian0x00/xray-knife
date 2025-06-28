@@ -39,7 +39,7 @@ Only works on golang version 1.24
 <img src="./images/httpTest.png" width="1357" alt="sample2">
 
 
-# TODO
+# Task List
 ## cores
 - [X] Support [sing-box](https://github.com/sagernet/sing-box) core
 
@@ -54,11 +54,11 @@ Only works on golang version 1.24
 - [X] Convert config link to a full xray-core json configuration (parse as an outbound)
 - [ ] Convert config link to a full singbox core json configuration (parse as an outbound)
 
-## subs
+## `subs`
 - [X] Fetch config links inside subscription
 - [X] Sort config links based on their real delay test when saving them into a file
 
-## net http
+## `http`
 - [X] Test a batch of config links (from file)
 - [X] Speedtest
 - [X] Get real ip address
@@ -67,12 +67,24 @@ Only works on golang version 1.24
 - [ ] Load outbound from json (xray-core)
 - [ ] Load outbound from json (singbox core)
 
-## net
+## `scan cfscanner`
+- [X] Completed
+- [X] Speedtest flag
+- [X] Retry flag
+- [X] Download & Upload custom amount flag
+- [X] Live file output flag
+- [X] Shuffle list of IPs flag
+- [X] Shuffle list of Subnets flag
+- [X] Detailed output in a CSV file
+- [ ] Implement offline cloudflare subnets
+- [ ] Fetch cloudflare subnets 
+
+## `net`
 - [X] Add icmp (ping) tester
 - [X] Add tcp connection delay tester
 - [X] Add full connection delay (AKA real delay) tester
 
-## proxy
+## `proxy`
 - [X] Completed
 - [X] Option to switch outbound connection automatically based on passed parameter (E.g. interval, availability) (rotating proxy)
 - [X] Add support for [sing-box](https://github.com/sagernet/sing-box) core
