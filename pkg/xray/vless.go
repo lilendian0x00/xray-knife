@@ -50,13 +50,23 @@ func (v *Vless) Parse() error {
 	// Explicitly parse known query parameters
 	v.Encryption = query.Get("encryption") // Typically "none" for VLESS
 	v.Security = query.Get("security")     // "tls", "reality", or "" (none)
-	v.SNI = query.Get("sni")
 	v.ALPN = query.Get("alpn")
 	v.TlsFingerprint = query.Get("fp") // fingerprint
 	v.Type = query.Get("type")         // network type: "tcp", "ws", "grpc", "quic", etc.
-	v.Host = query.Get("host")         // for ws, http
-	v.Path = query.Get("path")         // for ws, http path, or kcp seed
-	v.Extra = query.Get("extra")       // XHTTP extra
+
+	// Validate host and sni parameters before assigning them
+	sni := query.Get("sni")
+	if !utils.IsValidHostOrSNI(sni) {
+		return fmt.Errorf("invalid characters in 'sni' parameter: %s", sni)
+	}
+	host := query.Get("host")
+	if !utils.IsValidHostOrSNI(host) {
+		return fmt.Errorf("invalid characters in 'host' parameter: %s", host)
+	}
+
+	v.Host = query.Get("host")   // for ws, http
+	v.Path = query.Get("path")   // for ws, http path, or kcp seed
+	v.Extra = query.Get("extra") // XHTTP extra
 	v.Flow = query.Get("flow")
 	v.PublicKey = query.Get("pbk")               // reality public key
 	v.ShortIds = query.Get("sid")                // reality short ID

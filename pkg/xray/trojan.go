@@ -48,11 +48,20 @@ func (t *Trojan) Parse() error {
 	// Explicitly parse known query parameters
 	t.Flow = query.Get("flow")
 	t.Security = query.Get("security") // "tls", "reality", or "" (none)
-	t.SNI = query.Get("sni")
 	t.ALPN = query.Get("alpn")
 	t.TlsFingerprint = query.Get("fp")
 	t.Type = query.Get("type") // network type
-	t.Host = query.Get("host") // for ws, http
+
+	// Validate host and sni parameters before assigning them
+	sni := query.Get("sni")
+	if !utils.IsValidHostOrSNI(sni) {
+		return fmt.Errorf("invalid characters in 'sni' parameter: %s", sni)
+	}
+	host := query.Get("host")
+	if !utils.IsValidHostOrSNI(host) {
+		return fmt.Errorf("invalid characters in 'host' parameter: %s", host)
+	}
+
 	t.Path = query.Get("path") // for ws, http path
 	t.HeaderType = query.Get("headerType")
 	t.ServiceName = query.Get("serviceName")

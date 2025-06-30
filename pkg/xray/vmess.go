@@ -34,6 +34,14 @@ func method1(v *Vmess, link string) error {
 		return err
 	}
 
+	// SNI & HOST Validation
+	if !utils.IsValidHostOrSNI(v.Host) {
+		return fmt.Errorf("invalid characters in 'host' parameter: %s", v.Host)
+	}
+	if !utils.IsValidHostOrSNI(v.SNI) {
+		return fmt.Errorf("invalid characters in 'sni' parameter: %s", v.SNI)
+	}
+
 	if utils.IsIPv6(v.Address) {
 		v.Address = "[" + v.Address + "]"
 	}
@@ -97,16 +105,29 @@ func method2(v *Vmess, link string) error {
 			v.Type = "none"
 		}
 	}
+	host := ""
 	if value := queryValues.Get("obfsParam"); value != "" {
-		v.Host = value
+		host = value
 	}
+	sni := ""
 	if value := queryValues.Get("peer"); value != "" {
-		v.SNI = value
+		sni = value
 	} else {
 		if v.TLS == "tls" {
-			v.SNI = v.Host
+			sni = host
 		}
 	}
+
+	// SNI & HOST Validation
+	if !utils.IsValidHostOrSNI(host) {
+		return fmt.Errorf("invalid characters in 'host' parameter: %s", host)
+	}
+	v.Host = host
+
+	if !utils.IsValidHostOrSNI(sni) {
+		return fmt.Errorf("invalid characters in 'sni' parameter: %s", sni)
+	}
+	v.SNI = sni
 
 	return nil
 }
