@@ -103,20 +103,20 @@ xray-knife proxy -c "vless://..." --port 9999
 
 ---
 
-### 🌐 Scanning for Cloudflare IPs (`scan cfscanner`)
+### 🌐 Scanning for Cloudflare IPs (`scanner cfscanner`)
 
 Find the fastest Cloudflare edge IPs for your location.
 
 **1. Scan a Subnet with Speed Test**
 Scan a CIDR subnet with 100 threads, including a speed test for each IP, and save the sorted results.
 ```bash
-xray-knife scan cfscanner -s "104.16.0.0/16" -t 100 -p -o cf_results.txt
+xray-knife scanner cfscanner -s "104.16.0.0/16" -t 100 -p -o cf_results.txt
 ```
 
 **2. Scan from a File with Live Output**
 Scan multiple subnets from a file (`subnets.txt`) and save results to `live_results.txt` as they are found (unsorted), in addition to the final sorted file.
 ```bash
-xray-knife scan cfscanner -s subnets.txt -t 200 -l live_results.txt -o final_results.txt
+xray-knife scanner cfscanner -s subnets.txt -t 200 -l live_results.txt -o final_results.txt
 ```
 
 ---

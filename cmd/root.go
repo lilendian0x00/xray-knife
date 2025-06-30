@@ -2,12 +2,12 @@ package cmd
 
 import (
 	"github.com/lilendian0x00/xray-knife/v5/cmd/http"
+	"github.com/lilendian0x00/xray-knife/v5/cmd/scanner"
 	"os"
 
 	"github.com/lilendian0x00/xray-knife/v5/cmd/net"
 	"github.com/lilendian0x00/xray-knife/v5/cmd/parse"
 	"github.com/lilendian0x00/xray-knife/v5/cmd/proxy"
-	"github.com/lilendian0x00/xray-knife/v5/cmd/scan"
 	"github.com/lilendian0x00/xray-knife/v5/cmd/subs"
 
 	"github.com/spf13/cobra"
@@ -18,7 +18,7 @@ var rootCmd = &cobra.Command{
 	Use:     "github.com/lilendian0x00/xray-knife",
 	Short:   "Swiss Army Knife for xray-core & sing-box",
 	Long:    ``,
-	Version: "5.2.3",
+	Version: "5.3.4",
 	// Main Tools:
 	//1. parse: Parses xray config link.
 	//2. net: Multiple network tests for xray configs.
@@ -43,7 +43,7 @@ func addSubcommandPalettes() {
 	rootCmd.AddCommand(subs.SubsCmd)
 	rootCmd.AddCommand(http.HttpCmd)
 	rootCmd.AddCommand(net.NetCmd)
-	rootCmd.AddCommand(scan.ScanCmd)
+	rootCmd.AddCommand(scanner.ScanCmd)
 	rootCmd.AddCommand(proxy.ProxyCmd)
 }
 
