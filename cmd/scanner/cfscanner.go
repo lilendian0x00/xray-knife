@@ -338,7 +338,6 @@ func measureSpeed(ctx context.Context, ip string) (downSpeed float64, upSpeed fl
 
 	client := &http.Client{
 		Transport: transport,
-		Timeout:   time.Duration(speedtestTimeout) * time.Second,
 	}
 
 	// --- Download test ---
@@ -360,7 +359,7 @@ func measureSpeed(ctx context.Context, ip string) (downSpeed float64, upSpeed fl
 			customlog.Printf(customlog.Warning, "Verbose (IP: %s): Download request execution failed: %v\n", ip, err)
 		}
 		// The client timeout will manifest as a context.DeadlineExceeded error.
-		if errors.Is(err, context.DeadlineExceeded) {
+		if errors.Is(err, context.DeadlineExceeded) || os.IsTimeout(err) {
 			return 0, 0, errors.New("speed test timed out during download")
 		}
 		return 0, 0, fmt.Errorf("download test failed: %w", err)
@@ -565,9 +564,12 @@ func (b *BypassJA3Transport) httpsRoundTrip(req *http.Request) (*http.Response, 
 	}
 
 	if deadline, ok := req.Context().Deadline(); ok {
-		// SetDeadline applies to all future I/O operations.
+		// SetDeadline applies to all future I/O operations on this connection.
+		// It's critical for making the Body.Read (used by io.Copy) respect the timeout.
 		tlsConn.SetDeadline(deadline)
-		defer tlsConn.SetDeadline(time.Time{})
+		// DO NOT clear the deadline here with a defer. The Response.Body.Close()
+		// will close the entire tlsConn, which is the correct way to manage its lifecycle.
+		// defer tlsConn.SetDeadline(time.Time{}) // <-- REMOVED THIS LINE
 	}
 
 	httpVersion := tlsConn.ConnectionState().NegotiatedProtocol
