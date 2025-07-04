@@ -123,7 +123,6 @@ Example: xray-knife scan cfscanner -s "104.16.124.0/24" -t 100 -p -c 10 -sc 4 -s
 			defer resultsMutex.Unlock()
 			results = append(results, result)
 			if liveFile != nil {
-				// MODIFICATION: Use the fixed formatResult function
 				line := formatResult(*result, false)
 				if _, err := fmt.Fprintln(liveFile, line); err != nil {
 					customlog.Printf(customlog.Warning, "Failed to write live result for IP %s: %v\n", result.IP, err)
@@ -191,12 +190,17 @@ Example: xray-knife scan cfscanner -s "104.16.124.0/24" -t 100 -p -c 10 -sc 4 -s
 			for _, result := range topResults {
 				speedTestPool.Submit(func(res *ScanResult) func() {
 					return func() {
+						// The context is still useful for cancellation, especially in the dialer and TLS handshake.
 						ctx, cancel := context.WithTimeout(context.Background(), time.Duration(speedtestTimeout)*time.Second)
 						defer cancel()
 
 						downSpeed, upSpeed, err := measureSpeed(ctx, res.IP)
 						if err != nil {
-							customlog.Printf(customlog.Warning, "IP %s failed speed test: %v\n", res.IP, err)
+							if os.IsTimeout(err) || errors.Is(err, context.DeadlineExceeded) {
+								customlog.Printf(customlog.Warning, "IP %s failed speed test: Timeout exceeded\n", res.IP)
+							} else {
+								customlog.Printf(customlog.Warning, "IP %s failed speed test: %v\n", res.IP, err)
+							}
 						}
 						res.DownSpeed = downSpeed
 						res.UpSpeed = upSpeed
@@ -254,6 +258,10 @@ func createDialerWithRetry(ip string, retries int) func(ctx context.Context, net
 		var lastErr error
 
 		for i := 0; i <= retries; i++ {
+			// Check if context has been cancelled before retrying
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			if Verbose && i > 0 {
 				customlog.Printf(customlog.Info, "Retrying connection to %s (attempt %d/%d)...\n", ip, i+1, retries+1)
 			}
@@ -327,10 +335,15 @@ func measureSpeed(ctx context.Context, ip string) (downSpeed float64, upSpeed fl
 
 	transport := NewBypassJA3Transport(utls.HelloChrome_Auto)
 	transport.DialContext = createDialerWithRetry(ip, retryCount)
-	client := &http.Client{Transport: transport}
+
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   time.Duration(speedtestTimeout) * time.Second,
+	}
 
 	// --- Download test ---
 	downURL := fmt.Sprintf("https://%s/__down?bytes=%d", cloudflareSpeedTestURL, downloadBytesTotal)
+	// We still create the request with the context, as it's used by the dialer and TLS handshake.
 	reqDown, err := http.NewRequestWithContext(ctx, "GET", downURL, nil)
 	if err != nil {
 		if Verbose {
@@ -346,6 +359,7 @@ func measureSpeed(ctx context.Context, ip string) (downSpeed float64, upSpeed fl
 		if Verbose {
 			customlog.Printf(customlog.Warning, "Verbose (IP: %s): Download request execution failed: %v\n", ip, err)
 		}
+		// The client timeout will manifest as a context.DeadlineExceeded error.
 		if errors.Is(err, context.DeadlineExceeded) {
 			return 0, 0, errors.New("speed test timed out during download")
 		}
@@ -366,6 +380,7 @@ func measureSpeed(ctx context.Context, ip string) (downSpeed float64, upSpeed fl
 		if Verbose {
 			customlog.Printf(customlog.Warning, "Verbose (IP: %s): Failed reading download stream after %d bytes: %v\n", ip, written, err)
 		}
+		// An error here could also be due to the client timeout firing during the copy.
 		return 0, 0, fmt.Errorf("failed while reading download stream: %w", err)
 	}
 	downDuration := time.Since(startDown).Seconds()
@@ -374,8 +389,9 @@ func measureSpeed(ctx context.Context, ip string) (downSpeed float64, upSpeed fl
 		downSpeed = (float64(written) * 8) / (downDuration * 1e6)
 	}
 
+	// Check if context was cancelled (e.g., by CTRL+C), even if the client timeout didn't fire.
 	if ctx.Err() != nil {
-		return downSpeed, 0, errors.New("speed test timed out before upload")
+		return downSpeed, 0, errors.New("operation cancelled before upload")
 	}
 
 	// --- Upload test ---
@@ -421,7 +437,6 @@ func measureSpeed(ctx context.Context, ip string) (downSpeed float64, upSpeed fl
 	return downSpeed, upSpeed, nil
 }
 
-// **MODIFICATION 1: formatResult is now consistent based on the doSpeedtest flag.**
 func formatResult(result ScanResult, speedtestEnabled bool) string {
 	if speedtestEnabled {
 		return fmt.Sprintf("%-20s | %-10v | %-15.2f | %-15.2f", result.IP, result.Latency.Round(time.Millisecond), result.DownSpeed, result.UpSpeed)
@@ -549,9 +564,17 @@ func (b *BypassJA3Transport) httpsRoundTrip(req *http.Request) (*http.Response, 
 		return nil, fmt.Errorf("tls connect failed: %w", err)
 	}
 
+	if deadline, ok := req.Context().Deadline(); ok {
+		// SetDeadline applies to all future I/O operations.
+		tlsConn.SetDeadline(deadline)
+		defer tlsConn.SetDeadline(time.Time{})
+	}
+
 	httpVersion := tlsConn.ConnectionState().NegotiatedProtocol
 	switch httpVersion {
 	case "h2":
+		// The http2.Transport is more robust and handles contexts correctly,
+		// so it doesn't need the same manual deadline management.
 		t2 := b.tr2
 		t2.DialTLS = nil // We've already dialed.
 		clientConn, err := t2.NewClientConn(tlsConn)
@@ -561,13 +584,16 @@ func (b *BypassJA3Transport) httpsRoundTrip(req *http.Request) (*http.Response, 
 		}
 		return clientConn.RoundTrip(req)
 	case "http/1.1", "":
-		// **MODIFICATION 2: Removed `defer tlsConn.Close()` to prevent premature closure.**
-		// The caller is now responsible for closing the response body, which closes the connection.
 		if err := req.Write(tlsConn); err != nil {
 			tlsConn.Close() // Close connection on write error
 			return nil, fmt.Errorf("failed to write http1 request: %w", err)
 		}
-		return http.ReadResponse(bufio.NewReader(tlsConn), req)
+		resp, err := http.ReadResponse(bufio.NewReader(tlsConn), req)
+		if err != nil {
+			tlsConn.Close()
+			return nil, err
+		}
+		return resp, nil
 	default:
 		tlsConn.Close()
 		return nil, fmt.Errorf("unsupported http version: %s", httpVersion)
