@@ -50,14 +50,25 @@ func (t *Trojan) Parse() error {
 
 	query := uri.Query()
 
+	// Validate host and sni parameters before assigning them
+	sni := query.Get("sni")
+	if !utils.IsValidHostOrSNI(sni) {
+		return fmt.Errorf("invalid characters in 'sni' parameter: %s", sni)
+	}
+	host := query.Get("host")
+	if !utils.IsValidHostOrSNI(host) {
+		return fmt.Errorf("invalid characters in 'host' parameter: %s", host)
+	}
+
+	t.SNI = sni
+	t.Host = host
+
 	// Explicitly parse known query parameters
 	t.Flow = query.Get("flow")         // Note: Trojan flow (like xtls-rprx-vision) is Xray-specific, not standard in Sing-box Trojan.
 	t.Security = query.Get("security") // "tls", "reality", or "" (none)
-	t.SNI = query.Get("sni")
 	t.ALPN = query.Get("alpn")
 	t.TlsFingerprint = query.Get("fp")
 	t.Type = query.Get("type")               // network type
-	t.Host = query.Get("host")               // for ws, http
 	t.Path = query.Get("path")               // for ws, http path
 	t.HeaderType = query.Get("headerType")   // For TCP HTTP Obfuscation (more of an Xray thing)
 	t.ServiceName = query.Get("serviceName") // grpc

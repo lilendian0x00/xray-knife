@@ -62,6 +62,8 @@ func (t *Trojan) Parse() error {
 		return fmt.Errorf("invalid characters in 'host' parameter: %s", host)
 	}
 
+	t.SNI = sni
+	t.Host = host
 	t.Path = query.Get("path") // for ws, http path
 	t.HeaderType = query.Get("headerType")
 	t.ServiceName = query.Get("serviceName")

@@ -64,6 +64,8 @@ func (v *Vless) Parse() error {
 		return fmt.Errorf("invalid characters in 'host' parameter: %s", host)
 	}
 
+	v.SNI = sni
+	v.Host = host
 	v.Host = query.Get("host")   // for ws, http
 	v.Path = query.Get("path")   // for ws, http path, or kcp seed
 	v.Extra = query.Get("extra") // XHTTP extra
