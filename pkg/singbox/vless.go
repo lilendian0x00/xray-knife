@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"reflect"
 	"strconv"
@@ -196,9 +197,49 @@ func (v *Vless) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 }
 
 func (v *Vless) CraftInboundOptions() *option.Inbound {
+	port, _ := strconv.Atoi(v.Port)
+	addr, _ := netip.ParseAddr(v.Address)
+
+	// TODO: Inbound TLS requires certificates, which are not available from a client link.
+	// Therefore, TLS is not configured for the inbound.
+
+	var transport = &option.V2RayTransportOptions{
+		Type: v.Type,
+	}
+
+	switch v.Type {
+	case "ws":
+		transport.WebsocketOptions = option.V2RayWebsocketOptions{
+			Path: v.Path,
+		}
+	case "grpc":
+		if len(v.ServiceName) > 0 && v.ServiceName[0] == '/' {
+			v.ServiceName = v.ServiceName[1:]
+		}
+		transport.GRPCOptions = option.V2RayGRPCOptions{
+			ServiceName: v.ServiceName,
+		}
+	}
+
+	opts := option.VLESSInboundOptions{
+		ListenOptions: option.ListenOptions{
+			Listen:     option.NewListenAddress(addr),
+			ListenPort: uint16(port),
+		},
+		Users: []option.VLESSUser{
+			{
+				Name: "user", // sing-box requires a name
+				UUID: v.ID,
+				Flow: v.Flow,
+			},
+		},
+		Transport: transport,
+	}
 
 	return &option.Inbound{
-		Type: v.Name(),
+		Type:         v.Name(),
+		Tag:          "vless-in",
+		VLESSOptions: opts,
 	}
 }
 

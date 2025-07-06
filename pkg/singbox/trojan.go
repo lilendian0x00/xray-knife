@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -196,8 +197,48 @@ func (t *Trojan) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 }
 
 func (t *Trojan) CraftInboundOptions() *option.Inbound {
+	port, _ := strconv.Atoi(t.Port)
+	addr, _ := netip.ParseAddr(t.Address)
+
+	// TODO: Inbound TLS requires certificates, which are not available from a client link.
+	// Therefore, TLS is not configured for the inbound.
+
+	var transport = &option.V2RayTransportOptions{
+		Type: t.Type,
+	}
+
+	switch t.Type {
+	case "ws":
+		transport.WebsocketOptions = option.V2RayWebsocketOptions{
+			Path: t.Path,
+		}
+	case "grpc":
+		if len(t.ServiceName) > 0 && t.ServiceName[0] == '/' {
+			t.ServiceName = t.ServiceName[1:]
+		}
+		transport.GRPCOptions = option.V2RayGRPCOptions{
+			ServiceName: t.ServiceName,
+		}
+	}
+
+	opts := option.TrojanInboundOptions{
+		ListenOptions: option.ListenOptions{
+			Listen:     option.NewListenAddress(addr),
+			ListenPort: uint16(port),
+		},
+		Users: []option.TrojanUser{
+			{
+				Name:     "user",
+				Password: t.Password,
+			},
+		},
+		Transport: transport,
+	}
+
 	return &option.Inbound{
-		Type: t.Name(),
+		Type:          t.Name(),
+		Tag:           "trojan-in",
+		TrojanOptions: opts,
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/sagernet/sing/common/auth"
 	"net"
 	"net/netip"
 	"net/url"
@@ -71,8 +72,8 @@ func (s *Socks) DetailsStr() string {
 		info += color.RedString("Username") + ": " + copyV.Username
 		info += "\n"
 		info += color.RedString("Password") + ": " + copyV.Password
+		info += "\n"
 	}
-
 	return info
 }
 
@@ -144,6 +145,16 @@ func (s *Socks) CraftInboundOptions() *option.Inbound {
 		},
 		Users: nil,
 	}
+
+	if s.Username != "" && s.Password != "" {
+		opts.Users = []auth.User{
+			{
+				Username: s.Username,
+				Password: s.Password,
+			},
+		}
+	}
+
 	return &option.Inbound{
 		Type:         s.Name(),
 		SocksOptions: opts,

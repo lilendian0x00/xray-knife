@@ -46,6 +46,7 @@ type proxyCmdConfig struct {
 	insecureTLS         bool
 	chainOutbounds      bool
 	maximumAllowedDelay uint16
+	inboundConfigLink   string
 }
 
 var InboundProtocols = []string{"vless", "vmess", "socks"}
@@ -255,99 +256,145 @@ func newProxyCommand() *cobra.Command {
 			var inbound protocol.Protocol
 			var err error
 
-			switch cfg.mode {
-			case "inbound":
-				switch cfg.CoreType {
-				case "xray":
-					core = pkg.CoreFactory(pkg.XrayCoreType, cfg.insecureTLS, cfg.verbose)
-					switch cfg.inboundProtocol {
-					case "socks":
-						inbound = &pkGxray.Socks{
-							Remark:  "Listener",
-							Address: cfg.listenAddr,
-							Port:    cfg.listenPort,
-						}
-						break
-					case "vmess":
-						uuidv4 := cfg.inboundUUID
-						if cfg.inboundUUID == "random" {
-							uuidv4 = u.String()
-						}
-						switch cfg.inboundTransport {
-						case "xhttp":
-							inbound = &pkGxray.Vmess{
-								Remark:   "Listener",
-								Address:  cfg.listenAddr,
-								Port:     cfg.listenPort,
-								Network:  "xhttp",
-								Host:     "snapp.ir",
-								Path:     "/",
-								Security: "none",
-								ID:       uuidv4,
-							}
-						case "tcp":
-							inbound = &pkGxray.Vmess{
-								Remark:  "Listener",
-								Address: cfg.listenAddr,
-								Port:    cfg.listenPort,
-								Type:    "tcp",
-								ID:      uuidv4,
-							}
-						}
-						break
-
-					case "vless":
-						uuidv4 := cfg.inboundUUID
-						if cfg.inboundUUID == "random" {
-							uuidv4 = u.String()
-						}
-						switch cfg.inboundTransport {
-						case "xhttp":
-							inbound = &pkGxray.Vless{
-								Remark:   "Listener",
-								Address:  cfg.listenAddr,
-								Port:     cfg.listenPort,
-								Type:     "xhttp",
-								Host:     "snapp.ir",
-								Path:     "/",
-								Security: "none",
-								ID:       uuidv4,
-								Mode:     "auto",
-							}
-						case "tcp":
-							inbound = &pkGxray.Vless{
-								Remark:  "Listener",
-								Address: cfg.listenAddr,
-								Port:    cfg.listenPort,
-								Type:    "tcp",
-								ID:      uuidv4,
-							}
-						}
-						break
-					}
-
-				case "singbox":
-					core = pkg.CoreFactory(pkg.SingboxCoreType, cfg.insecureTLS, cfg.verbose)
-					inbound = &singbox.Socks{
-						Remark:  "Listener",
-						Address: cfg.listenAddr,
-						Port:    cfg.listenPort,
-					}
-				default:
-					return fmt.Errorf("allowed core types: (xray, singbox), got: %s", cfg.CoreType)
-				}
-			//case "system":
-			//	core = pkg.CoreFactory(pkg.SingboxCoreType, cfg.insecureTLS, cfg.verbose)
-			//	inbound = &singbox.Tun{
-			//		Remark:  "Listener",
-			//		Address: cfg.listenAddr,
-			//		Port:    cfg.listenPort,
-			//	}
+			// Instantiate core based on type first. This is needed for creating protocols from links.
+			switch cfg.CoreType {
+			case "xray":
+				core = pkg.CoreFactory(pkg.XrayCoreType, cfg.insecureTLS, cfg.verbose)
+			case "singbox":
+				core = pkg.CoreFactory(pkg.SingboxCoreType, cfg.insecureTLS, cfg.verbose)
 			default:
-				return fmt.Errorf("unknown --mode %q (must be inbound|system)", cfg.mode)
+				return fmt.Errorf("allowed core types: (xray, singbox), got: %s", cfg.CoreType)
 			}
-			if err != nil {
-				return err
+
+			// If a custom inbound config link is provided, use it to create the inbound.
+			if cfg.inboundConfigLink != "" {
+				inbound, err = core.CreateProtocol(cfg.inboundConfigLink)
+				if err != nil {
+					return fmt.Errorf("failed to create inbound from config link: %w", err)
+				}
+				if err := inbound.Parse(); err != nil {
+					return fmt.Errorf("failed to parse inbound config link: %w", err)
+				}
+			} else {
+				switch cfg.mode {
+				case "inbound":
+					switch cfg.CoreType {
+					case "xray":
+						switch cfg.inboundProtocol {
+						case "socks":
+							user, errUsr := utils.GeneratePassword(4)
+							if errUsr != nil {
+								return errUsr
+							}
+
+							pass, errPass := utils.GeneratePassword(4)
+							if errPass != nil {
+								return errPass
+							}
+
+							inbound = &pkGxray.Socks{
+								Remark:   "Listener",
+								Address:  cfg.listenAddr,
+								Port:     cfg.listenPort,
+								Username: user,
+								Password: pass,
+							}
+							break
+						case "vmess":
+							uuidv4 := cfg.inboundUUID
+							if cfg.inboundUUID == "random" {
+								uuidv4 = u.String()
+							}
+							switch cfg.inboundTransport {
+							case "xhttp":
+								inbound = &pkGxray.Vmess{
+									Remark:   "Listener",
+									Address:  cfg.listenAddr,
+									Port:     cfg.listenPort,
+									Network:  "xhttp",
+									Host:     "snapp.ir",
+									Path:     "/",
+									Security: "none",
+									ID:       uuidv4,
+								}
+							case "tcp":
+								inbound = &pkGxray.Vmess{
+									Remark:  "Listener",
+									Address: cfg.listenAddr,
+									Port:    cfg.listenPort,
+									Type:    "tcp",
+									ID:      uuidv4,
+								}
+							}
+							break
+
+						case "vless":
+							uuidv4 := cfg.inboundUUID
+							if cfg.inboundUUID == "random" {
+								uuidv4 = u.String()
+							}
+							switch cfg.inboundTransport {
+							case "xhttp":
+								inbound = &pkGxray.Vless{
+									Remark:   "Listener",
+									Address:  cfg.listenAddr,
+									Port:     cfg.listenPort,
+									Type:     "xhttp",
+									Host:     "snapp.ir",
+									Path:     "/",
+									Security: "none",
+									ID:       uuidv4,
+									Mode:     "auto",
+								}
+							case "tcp":
+								inbound = &pkGxray.Vless{
+									Remark:  "Listener",
+									Address: cfg.listenAddr,
+									Port:    cfg.listenPort,
+									Type:    "tcp",
+									ID:      uuidv4,
+								}
+							}
+							break
+						}
+
+					case "singbox":
+						user, errUsr := utils.GeneratePassword(4)
+						if errUsr != nil {
+							return errUsr
+						}
+						pass, errPass := utils.GeneratePassword(4)
+						if errPass != nil {
+							return errPass
+						}
+
+						inbound = &singbox.Socks{
+							Remark:   "Listener",
+							Address:  cfg.listenAddr,
+							Port:     cfg.listenPort,
+							Username: user,
+							Password: pass,
+						}
+					default:
+						return fmt.Errorf("allowed core types: (xray, singbox), got: %s", cfg.CoreType)
+					}
+				//case "system":
+				//	core = pkg.CoreFactory(pkg.SingboxCoreType, cfg.insecureTLS, cfg.verbose)
+				//	inbound = &singbox.Tun{
+				//		Remark:  "Listener",
+				//		Address: cfg.listenAddr,
+				//		Port:    cfg.listenPort,
+				//	}
+				default:
+					return fmt.Errorf("unknown --mode %q (must be inbound|system)", cfg.mode)
+				}
+				if err != nil {
+					return err
+				}
+			}
+
+			if inbound == nil {
+				return fmt.Errorf("inbound configuration could not be created. Please provide an --inbound-config or use flags like --inbound, --port, etc")
 			}
 
 			inErr := core.SetInbound(inbound)
@@ -541,6 +588,7 @@ func newProxyCommand() *cobra.Command {
 
 	cmd.Flags().StringVarP(&cfg.CoreType, "core", "z", "xray", "Core types: (xray, singbox)")
 	cmd.Flags().StringVarP(&cfg.configLink, "config", "c", "", "The single xray/sing-box config link to use")
+	cmd.Flags().StringVarP(&cfg.inboundConfigLink, "inbound-config", "I", "", "Custom config link for the inbound proxy")
 
 	cmd.Flags().BoolVarP(&cfg.verbose, "verbose", "v", false, "Enable verbose logging for the selected core")
 	cmd.Flags().BoolVarP(&cfg.insecureTLS, "insecure", "e", false, "Allow insecure TLS connections (e.g., self-signed certs, skip verify)")

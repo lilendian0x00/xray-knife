@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -233,8 +234,70 @@ func (v *Vmess) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 }
 
 func (v *Vmess) CraftInboundOptions() *option.Inbound {
+	var port int
+	switch p := v.Port.(type) {
+	case float64:
+		port = int(p)
+	case int:
+		port = p
+	case string:
+		intPort, err := strconv.Atoi(p)
+		if err == nil {
+			port = intPort
+		}
+	}
+
+	addr, _ := netip.ParseAddr(v.Address)
+
+	var aid int = 0
+	if v.Aid != nil {
+		switch aidT := v.Aid.(type) {
+		case int:
+			aid = aidT
+		case float64:
+			aid = int(aidT)
+		case string:
+			aid, _ = strconv.Atoi(aidT)
+		}
+	}
+
+	var transport = &option.V2RayTransportOptions{
+		Type: v.Network,
+	}
+
+	switch v.Network {
+	case "ws":
+		transport.WebsocketOptions = option.V2RayWebsocketOptions{
+			Path: v.Path,
+		}
+	case "grpc":
+		if len(v.Path) > 0 && v.Path[0] == '/' {
+			v.Path = v.Path[1:]
+		}
+		transport.GRPCOptions = option.V2RayGRPCOptions{
+			ServiceName: v.Path,
+		}
+	}
+
+	opts := option.VMessInboundOptions{
+		ListenOptions: option.ListenOptions{
+			Listen:     option.NewListenAddress(addr),
+			ListenPort: uint16(port),
+		},
+		Users: []option.VMessUser{
+			{
+				Name:    "user",
+				UUID:    v.ID,
+				AlterId: aid,
+			},
+		},
+		Transport: transport,
+	}
+
 	return &option.Inbound{
-		Type: v.Name(),
+		Type:         v.Name(),
+		Tag:          "vmess-in",
+		VMessOptions: opts,
 	}
 }
 

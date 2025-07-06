@@ -69,8 +69,8 @@ func (s *Socks) DetailsStr() string {
 		info += color.RedString("Username") + ": " + copyV.Username
 		info += "\n"
 		info += color.RedString("Password") + ": " + copyV.Password
+		info += "\n"
 	}
-
 	return info
 }
 

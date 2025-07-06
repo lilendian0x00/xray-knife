@@ -2,8 +2,10 @@ package utils
 
 import (
 	"bufio"
+	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -76,4 +78,33 @@ func ClearTerminal() {
 
 	cmd.Stdout = os.Stdout
 	cmd.Run()
+}
+
+const (
+	charSet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	// Storing the length of the character set avoids recalculating it.
+	charSetLength = len(charSet)
+)
+
+func GeneratePassword(length int) (string, error) {
+	// Validate the input length. A password cannot have a zero or negative length.
+	if length <= 0 {
+		return "", fmt.Errorf("password length must be greater than 0")
+	}
+
+	password := make([]byte, length)
+
+	randomBytes := make([]byte, length)
+
+	if _, err := io.ReadFull(rand.Reader, randomBytes); err != nil {
+		return "", fmt.Errorf("failed to read random bytes: %w", err)
+	}
+
+	for i := 0; i < length; i++ {
+		randomByte := randomBytes[i]
+		charIndex := int(randomByte) % charSetLength
+		password[i] = charSet[charIndex]
+	}
+
+	return string(password), nil
 }
