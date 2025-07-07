@@ -6,11 +6,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/lilendian0x00/xray-knife/v5/pkg"
+	"github.com/lilendian0x00/xray-knife/v5/pkg/protocol"
 	"io"
 	"math/rand"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -42,6 +46,12 @@ var (
 	speedtestTop         int
 	speedtestConcurrency int
 	speedtestTimeout     int
+	configLink           string
+	insecureTLS          bool
+
+	xrayCore        pkg.Core
+	singboxCore     pkg.Core
+	selectedCoreMap map[string]pkg.Core
 )
 
 // ScanResult holds the result of a scan for a single IP.
@@ -79,6 +89,19 @@ Example: xray-knife scan cfscanner -s "104.16.124.0/24" -t 100 -p -c 10 -sc 4 -s
 		var results []*ScanResult // Use slice of pointers for easier in-place updates
 		var resultsMutex sync.Mutex
 		var hasIPs bool // Used to check if any scannable IPs were found
+
+		if configLink != "" {
+			customlog.Printf(customlog.Info, "Using config link to test IPs: %s\n", configLink)
+			xrayCore = pkg.CoreFactory(pkg.XrayCoreType, insecureTLS, Verbose)
+			singboxCore = pkg.CoreFactory(pkg.SingboxCoreType, insecureTLS, Verbose)
+
+			selectedCoreMap = map[string]pkg.Core{
+				protocol.VmessIdentifier: xrayCore, protocol.VlessIdentifier: xrayCore,
+				protocol.ShadowsocksIdentifier: xrayCore, protocol.TrojanIdentifier: xrayCore,
+				protocol.SocksIdentifier: xrayCore, protocol.WireguardIdentifier: xrayCore,
+				protocol.Hysteria2Identifier: singboxCore, "hy2": singboxCore,
+			}
+		}
 
 		r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
@@ -145,7 +168,7 @@ Example: xray-knife scan cfscanner -s "104.16.124.0/24" -t 100 -p -c 10 -sc 4 -s
 				}
 				r.Shuffle(len(listIP), func(i, j int) { listIP[i], listIP[j] = listIP[j], listIP[i] })
 				for _, ip := range listIP {
-					pool.Submit(func(ip string) func() { return func() { handleLatencyResult(scanIPForLatency(ip)) } }(ip))
+					pool.Submit(func(ip string) func() { return func() { handleLatencyResult(scanIPForLatency(ip, configLink)) } }(ip))
 				}
 			} else {
 				ip, ipnet, err := net.ParseCIDR(cidr)
@@ -159,7 +182,7 @@ Example: xray-knife scan cfscanner -s "104.16.124.0/24" -t 100 -p -c 10 -sc 4 -s
 					}
 					ipToScan := make(net.IP, len(currentIP))
 					copy(ipToScan, currentIP)
-					pool.Submit(func(ip string) func() { return func() { handleLatencyResult(scanIPForLatency(ip)) } }(ipToScan.String()))
+					pool.Submit(func(ip string) func() { return func() { handleLatencyResult(scanIPForLatency(ip, configLink)) } }(ipToScan.String()))
 				}
 			}
 		}
@@ -194,7 +217,7 @@ Example: xray-knife scan cfscanner -s "104.16.124.0/24" -t 100 -p -c 10 -sc 4 -s
 						ctx, cancel := context.WithTimeout(context.Background(), time.Duration(speedtestTimeout)*time.Second)
 						defer cancel()
 
-						downSpeed, upSpeed, err := measureSpeed(ctx, res.IP)
+						downSpeed, upSpeed, err := measureSpeed(ctx, res.IP, configLink)
 						if err != nil {
 							if os.IsTimeout(err) || errors.Is(err, context.DeadlineExceeded) {
 								customlog.Printf(customlog.Warning, "IP %s failed speed test: Timeout exceeded\n", res.IP)
@@ -279,20 +302,33 @@ func createDialerWithRetry(ip string, retries int) func(ctx context.Context, net
 	}
 }
 
-func scanIPForLatency(ip string) *ScanResult {
+func scanIPForLatency(ip, baseConfigLink string) *ScanResult {
 	result := &ScanResult{IP: ip}
+	var client *http.Client
+	var instance protocol.Instance
+	var err error
 
-	transport := NewBypassJA3Transport(utls.HelloChrome_Auto)
-	transport.DialContext = createDialerWithRetry(ip, retryCount)
+	if baseConfigLink != "" {
+		client, instance, err = createClientFromConfig(ip, baseConfigLink, time.Duration(requestTimeout)*time.Millisecond)
+		if err != nil {
+			result.Error = fmt.Errorf("failed creating client from config for latency test: %w", err)
+			return result
+		}
+		defer instance.Close()
+	} else {
+		transport := NewBypassJA3Transport(utls.HelloChrome_Auto)
+		transport.DialContext = createDialerWithRetry(ip, retryCount)
 
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   time.Duration(requestTimeout) * time.Millisecond,
+		client = &http.Client{
+			Transport: transport,
+			Timeout:   time.Duration(requestTimeout) * time.Millisecond,
+		}
 	}
 
 	req, err := http.NewRequest("GET", cloudflareTraceURL, nil)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to create request: %w", err)
+
 		return result
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
@@ -329,18 +365,26 @@ func scanIPForLatency(ip string) *ScanResult {
 	return result
 }
 
-func measureSpeed(ctx context.Context, ip string) (downSpeed float64, upSpeed float64, err error) {
+func measureSpeed(ctx context.Context, ip, baseConfigLink string) (downSpeed float64, upSpeed float64, err error) {
 	downloadBytesTotal := int64(downloadMB * 1024 * 1024)
 	uploadBytesTotal := int64(uploadMB * 1024 * 1024)
+	var client *http.Client
+	var instance protocol.Instance
 
-	transport := NewBypassJA3Transport(utls.HelloChrome_Auto)
-	transport.DialContext = createDialerWithRetry(ip, retryCount)
-
-	client := &http.Client{
-		Transport: transport,
+	if baseConfigLink != "" {
+		client, instance, err = createClientFromConfig(ip, baseConfigLink, time.Duration(speedtestTimeout)*time.Second)
+		if err != nil {
+			return 0, 0, fmt.Errorf("failed to create speedtest client from config: %w", err)
+		}
+		defer instance.Close()
+	} else {
+		transport := NewBypassJA3Transport(utls.HelloChrome_Auto)
+		transport.DialContext = createDialerWithRetry(ip, retryCount)
+		client = &http.Client{
+			Transport: transport,
+		}
 	}
 
-	// --- Download test ---
 	downURL := fmt.Sprintf("https://%s/__down?bytes=%d", cloudflareSpeedTestURL, downloadBytesTotal)
 	// We still create the request with the context, as it's used by the dialer and TLS handshake.
 	reqDown, err := http.NewRequestWithContext(ctx, "GET", downURL, nil)
@@ -502,6 +546,8 @@ func init() {
 	CFscannerCmd.Flags().StringVarP(&liveOutputFile, "live-output", "l", "", "Live output file to save results as they are found (unsorted)")
 	CFscannerCmd.Flags().BoolVarP(&onlySpeedtestResults, "only-speedtest", "k", false, "Only save results that have successful speedtest data (download or upload)")
 	CFscannerCmd.Flags().IntVarP(&downloadMB, "download-mb", "d", 20, "Custom amount of data to download for speedtest (in MB)")
+	CFscannerCmd.Flags().StringVarP(&configLink, "config", "C", "", "Use a config link as a proxy to test IPs")
+	CFscannerCmd.Flags().BoolVarP(&insecureTLS, "insecure", "E", false, "Allow insecure TLS connections for the proxy config (when using --config)")
 	CFscannerCmd.Flags().IntVarP(&uploadMB, "upload-mb", "m", 10, "Custom amount of data to upload for speedtest (in MB)")
 
 	_ = CFscannerCmd.MarkFlagRequired("subnets")
@@ -606,7 +652,7 @@ func (b *BypassJA3Transport) httpsRoundTrip(req *http.Request) (*http.Response, 
 func (b *BypassJA3Transport) getTLSConfig(req *http.Request) *utls.Config {
 	return &utls.Config{
 		ServerName:         req.URL.Host,
-		InsecureSkipVerify: true, // We are connecting to an IP, so we can't verify the hostname.
+		InsecureSkipVerify: false, // We are connecting to an IP, so we can't verify the hostname.
 		NextProtos:         []string{"h2", "http/1.1"},
 	}
 }
@@ -622,4 +668,75 @@ func (b *BypassJA3Transport) tlsConnect(ctx context.Context, conn net.Conn, req 
 		return nil, fmt.Errorf("uTLS handshake failed: %w", err)
 	}
 	return tlsConn, nil
+}
+
+func setAddress(p interface{}, newAddr string) error {
+	val := reflect.ValueOf(p)
+
+	// If it's a pointer, get the element it points to
+	if val.Kind() == reflect.Ptr {
+		val = val.Elem()
+	}
+
+	// Check if it's a struct
+	if val.Kind() != reflect.Struct {
+		return fmt.Errorf("provided interface is not a struct or a pointer to a struct")
+	}
+
+	// Try to set 'Address' field first
+	addressField := val.FieldByName("Address")
+	if addressField.IsValid() {
+		if !addressField.CanSet() {
+			return fmt.Errorf("'Address' field is not settable")
+		}
+		if addressField.Kind() != reflect.String {
+			return fmt.Errorf("'Address' field is not a string")
+		}
+		addressField.SetString(newAddr)
+		return nil
+	}
+
+	// If 'Address' not found, try 'Endpoint' for WireGuard
+	endpointField := val.FieldByName("Endpoint")
+	if endpointField.IsValid() {
+		if !endpointField.CanSet() {
+			return fmt.Errorf("'Endpoint' field is not settable")
+		}
+		if endpointField.Kind() != reflect.String {
+			return fmt.Errorf("'Endpoint' field is not a string")
+		}
+
+		currentEndpoint := endpointField.String()
+		_, port, err := net.SplitHostPort(currentEndpoint)
+		if err != nil {
+			return fmt.Errorf("could not split host:port from endpoint '%s': %w", currentEndpoint, err)
+		}
+		newEndpoint := net.JoinHostPort(newAddr, port)
+		endpointField.SetString(newEndpoint)
+		return nil
+	}
+
+	return fmt.Errorf("struct has no 'Address' or 'Endpoint' field")
+}
+
+func createClientFromConfig(ip, baseConfigLink string, timeout time.Duration) (*http.Client, protocol.Instance, error) {
+	uri, err := url.Parse(baseConfigLink)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse config link for core selection: %w", err)
+	}
+	selectedCore, ok := selectedCoreMap[uri.Scheme]
+	if !ok {
+		return nil, nil, fmt.Errorf("unsupported protocol scheme for auto core: %s", uri.Scheme)
+	}
+	proto, errProto := selectedCore.CreateProtocol(baseConfigLink)
+	if errProto != nil {
+		return nil, nil, fmt.Errorf("failed to create protocol: %w", errProto)
+	}
+	if err = proto.Parse(); err != nil {
+		return nil, nil, fmt.Errorf("failed to parse protocol: %w", err)
+	}
+	if err = setAddress(proto, ip); err != nil {
+		return nil, nil, fmt.Errorf("failed to set IP on protocol: %w", err)
+	}
+	return selectedCore.MakeHttpClient(proto, timeout)
 }
