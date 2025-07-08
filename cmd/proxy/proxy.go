@@ -3,9 +3,8 @@ package proxy
 import (
 	"bufio"
 	"context" // Added for managing goroutine lifecycles
+	"errors"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/v5/cmd/http"
-	"github.com/xtls/xray-core/common/uuid"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -13,6 +12,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/lilendian0x00/xray-knife/v5/cmd/http"
+	"github.com/xtls/xray-core/common/uuid"
 
 	"github.com/lilendian0x00/xray-knife/v5/pkg"
 	"github.com/lilendian0x00/xray-knife/v5/pkg/protocol"
@@ -244,7 +246,6 @@ func newProxyCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "proxy",
 		Short: "Run a local inbound proxy that tunnels traffic through a remote configuration. Supports automatic rotation of outbound proxies.",
-		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) < 1 && (!cfg.readConfigFromSTDIN && cfg.configLink == "" && cfg.configLinksFile == "") {
 				cmd.Help()
@@ -260,7 +261,7 @@ func newProxyCommand() *cobra.Command {
 			switch cfg.CoreType {
 			case "xray":
 				core = pkg.CoreFactory(pkg.XrayCoreType, cfg.insecureTLS, cfg.verbose)
-			case "singbox":
+			case "sing-box":
 				core = pkg.CoreFactory(pkg.SingboxCoreType, cfg.insecureTLS, cfg.verbose)
 			default:
 				return fmt.Errorf("allowed core types: (xray, singbox), got: %s", cfg.CoreType)
@@ -358,7 +359,7 @@ func newProxyCommand() *cobra.Command {
 							break
 						}
 
-					case "singbox":
+					case "sing-box":
 						user, errUsr := utils.GeneratePassword(4)
 						if errUsr != nil {
 							return errUsr
@@ -376,20 +377,12 @@ func newProxyCommand() *cobra.Command {
 							Password: pass,
 						}
 					default:
-						return fmt.Errorf("allowed core types: (xray, singbox), got: %s", cfg.CoreType)
+						return fmt.Errorf("allowed core types: (xray, sing-box), got: %s", cfg.CoreType)
 					}
-				//case "system":
-				//	core = pkg.CoreFactory(pkg.SingboxCoreType, cfg.insecureTLS, cfg.verbose)
-				//	inbound = &singbox.Tun{
-				//		Remark:  "Listener",
-				//		Address: cfg.listenAddr,
-				//		Port:    cfg.listenPort,
-				//	}
+				case "system":
+					return errors.New(`mode "system" hasn't yet implemented`)
 				default:
 					return fmt.Errorf("unknown --mode %q (must be inbound|system)", cfg.mode)
-				}
-				if err != nil {
-					return err
 				}
 			}
 
@@ -439,8 +432,6 @@ func newProxyCommand() *cobra.Command {
 				return fmt.Errorf("no valid (non-empty) configuration links found")
 			}
 			links = validRawLinks // Update links to only contain non-empty, trimmed strings
-
-			utils.ClearTerminal()
 
 			examinerOpts := pkg.Options{
 				// CoreInstance: core, // Examiner can create its own core or use one if passed for specific tests
@@ -584,11 +575,20 @@ func newProxyCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&cfg.mode, "mode", "m", "inbound", "proxy operating mode:  • inbound  – expose local SOCKS/HTTP listener (default)\n"+
 		"                       • system   – create TUN device and route all host traffic through it")
 
+	cmd.RegisterFlagCompletionFunc("mode", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string {"system", "inbound"}, cobra.ShellCompDirectiveNoFileComp
+	})
+
 	cmd.Flags().Uint16VarP(&cfg.maximumAllowedDelay, "mdelay", "d", 3000, "Maximum allowed delay (ms) for testing configs during rotation")
 
-	cmd.Flags().StringVarP(&cfg.CoreType, "core", "z", "xray", "Core types: (xray, singbox)")
+	cmd.Flags().StringVarP(&cfg.CoreType, "core", "z", "xray", "Core types: (xray, sing-box)")
+	cmd.RegisterFlagCompletionFunc("core", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string {"xray", "sing-box"}, cobra.ShellCompDirectiveNoFileComp
+	})
 	cmd.Flags().StringVarP(&cfg.configLink, "config", "c", "", "The single xray/sing-box config link to use")
 	cmd.Flags().StringVarP(&cfg.inboundConfigLink, "inbound-config", "I", "", "Custom config link for the inbound proxy")
+	// only one can exist as they override each other. runtime error better than unexpected behavior
+	cmd.MarkFlagsMutuallyExclusive("inbound-config", "mode", "inbound")
 
 	cmd.Flags().BoolVarP(&cfg.verbose, "verbose", "v", false, "Enable verbose logging for the selected core")
 	cmd.Flags().BoolVarP(&cfg.insecureTLS, "insecure", "e", false, "Allow insecure TLS connections (e.g., self-signed certs, skip verify)")

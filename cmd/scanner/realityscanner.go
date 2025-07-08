@@ -10,7 +10,6 @@ import (
 var RealityscannerCmd = &cobra.Command{
 	Use:   "realityscanner",
 	Short: "xray-core TLS REALITY scanner",
-	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println("realityscanner called")
 	},

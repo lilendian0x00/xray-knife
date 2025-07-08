@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
-	"runtime"
 	"strings"
 
 	"github.com/lilendian0x00/xray-knife/v5/utils/customlog"
@@ -61,23 +59,6 @@ func WriteIntoFile(fileName string, data []byte) error {
 		return err
 	}
 	return nil
-}
-
-func ClearTerminal() {
-	var cmd *exec.Cmd
-
-	switch runtime.GOOS {
-	case "linux", "darwin":
-		cmd = exec.Command("clear")
-	case "windows":
-		cmd = exec.Command("cmd", "/c", "cls")
-	default:
-		fmt.Println("Unsupported operating system")
-		return
-	}
-
-	cmd.Stdout = os.Stdout
-	cmd.Run()
 }
 
 const (

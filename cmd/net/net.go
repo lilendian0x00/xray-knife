@@ -8,7 +8,6 @@ import (
 var NetCmd = &cobra.Command{
 	Use:   "net",
 	Short: "Access a suite of network tools to diagnose and test proxy configurations (e.g., TCP, ICMP)",
-	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Help()
 	},

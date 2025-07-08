@@ -15,18 +15,9 @@ import (
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:     "github.com/lilendian0x00/xray-knife",
+	Use:     "xray-knife",
 	Short:   "Swiss Army Knife for xray-core & sing-box",
-	Long:    ``,
 	Version: "5.6.9",
-	// Main Tools:
-	//1. parse: Parses xray config link.
-	//2. net: Multiple network tests for xray configs.
-	//3. bot: A service to automatically switch outbound connections from a subscription or a file of configs.
-
-	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Help()
-	},
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.

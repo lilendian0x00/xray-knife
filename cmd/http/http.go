@@ -218,7 +218,6 @@ func newHttpCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "http",
 		Short: "Test proxy configurations for latency, speed, and IP info using HTTP requests.",
-		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Validate the values of the flags
 			if err := validateConfig(config); err != nil {

@@ -38,11 +38,6 @@ func (fc *FetchCommand) createCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "fetch",
 		Short: "Fetches all config links from a subscription to a file",
-		Long: `Fetch command options:
-  --url, -u: subscription url
-  --method, -m: http method to be used
-  --out, -o: output file
-  --useragent, -x: useragent to be used`,
 		RunE: fc.runCommand,
 	}
 
