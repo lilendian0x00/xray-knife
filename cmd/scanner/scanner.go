@@ -8,7 +8,6 @@ import (
 var ScanCmd = &cobra.Command{
 	Use:   "scanner",
 	Short: "Scan Cloudflare IP ranges to find optimal edge nodes with low latency and high speeds.",
-	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Help()
 	},

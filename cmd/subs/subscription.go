@@ -19,6 +19,7 @@ type Subscription struct {
 	UserAgent   string
 	Method      string
 	ConfigLinks []string
+	Proxy string
 }
 
 func (s *Subscription) FetchAll() ([]string, error) {
@@ -32,6 +33,10 @@ func (s *Subscription) FetchAll() ([]string, error) {
 	r := client.R()
 	if s.UserAgent != "" {
 		r.SetHeader("User-Agent", s.UserAgent)
+	}
+
+	if s.Proxy != "" {
+		client.SetProxyURL(s.Proxy)
 	}
 
 	response, err := r.Send(s.Method, u.String())

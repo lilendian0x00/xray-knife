@@ -18,6 +18,7 @@ type FetchConfig struct {
 	HTTPMethod      string
 	UserAgent       string
 	OutputFile      string
+	Proxy           string
 }
 
 // FetchCommand encapsulates the fetch command functionality
@@ -38,12 +39,7 @@ func (fc *FetchCommand) createCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "fetch",
 		Short: "Fetches all config links from a subscription to a file",
-		Long: `Fetch command options:
-  --url, -u: subscription url
-  --method, -m: http method to be used
-  --out, -o: output file
-  --useragent, -x: useragent to be used`,
-		RunE: fc.runCommand,
+		RunE:  fc.runCommand,
 	}
 
 	fc.addFlags(cmd)
@@ -57,7 +53,8 @@ func (fc *FetchCommand) addFlags(cmd *cobra.Command) {
 	flags.StringVarP(&fc.config.SubscriptionURL, "url", "u", "", "The subscription url")
 	flags.StringVarP(&fc.config.HTTPMethod, "method", "m", "GET", "Http method to be used")
 	flags.StringVarP(&fc.config.UserAgent, "useragent", "x", "", "Useragent to be used")
-	flags.StringVarP(&fc.config.OutputFile, "out", "o", "configs.txt", "The output file where the configs will be placed")
+	flags.StringVarP(&fc.config.OutputFile, "out", "o", "-", "The output file where the configs will be placed. - means stdout")
+	flags.StringVarP(&fc.config.Proxy, "proxy", "p", "", "proxy to connect to for fetching the subscription, in form of")
 }
 
 // runCommand executes the fetch command logic
@@ -67,6 +64,7 @@ func (fc *FetchCommand) runCommand(cmd *cobra.Command, args []string) error {
 		UserAgent:   fc.config.UserAgent,
 		Method:      fc.config.HTTPMethod,
 		ConfigLinks: []string{},
+		Proxy: fc.config.Proxy,
 	}
 
 	if sub.Url == "" {
@@ -85,13 +83,13 @@ func (fc *FetchCommand) runCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to save configurations: %w", err)
 	}
 
-	customlog.Printf(customlog.Success, "%d Configs have been saved into %s file\n",
+	customlog.Printf(customlog.Success, "%d Configs have been written into %q\n",
 		len(configs), fc.config.OutputFile)
 	return nil
 }
 
 // saveConfigs saves the fetched configurations to a file
 func (fc *FetchCommand) saveConfigs(configs []string) error {
-	content := strings.Join(configs, "\n\n")
+	content := strings.Join(configs, "\n")+"\n"
 	return utils.WriteIntoFile(fc.config.OutputFile, []byte(content))
 }

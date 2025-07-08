@@ -2,6 +2,7 @@ package customlog
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/fatih/color"
@@ -42,6 +43,9 @@ var logTypeMap = map[Type]TypesDetails{
 // Printf prints a formatted, timestamped, and colored log message to the console.
 // It prepends the corresponding symbol and current time to the message.
 func Printf(logType Type, format string, v ...interface{}) {
+	stat, _ := os.Stderr.Stat()
+	color.NoColor = stat.Mode() & os.ModeCharDevice != os.ModeCharDevice
+
 	t, ok := logTypeMap[logType]
 	if !ok {
 		// Fallback for an undefined type to prevent a panic.
@@ -56,14 +60,14 @@ func Printf(logType Type, format string, v ...interface{}) {
 	currentTime := time.Now()
 	fullFormat := prefix + currentTime.Format("15:04:05") + " " + format
 
-	t.color.Printf(fullFormat, v...)
+	t.color.Fprintf(os.Stderr, fullFormat, v...)
 }
 
 // Println prints the given arguments to the console, followed by a newline.
 // It acts as a simple wrapper around fmt.Println and is useful for printing
 // raw text or strings that have already been colored by GetColor.
 func Println(v ...interface{}) {
-	fmt.Println(v...)
+	fmt.Fprintln(os.Stderr, v...)
 }
 
 // GetColor returns a string colored according to the specified log type.

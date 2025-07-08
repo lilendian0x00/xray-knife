@@ -8,12 +8,6 @@ import (
 var SubsCmd = &cobra.Command{
 	Use:   "subs",
 	Short: "Fetch and manage proxy configurations from subscription links.",
-	Long: `
-show: shows all subscriptions available in DB
-fetch: fetches all configs from the subscription url to a file 
-add: add a new subscription
-rm: remove a subscription
-`,
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Help()
 	},

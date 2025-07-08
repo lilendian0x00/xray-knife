@@ -27,7 +27,6 @@ func newTcpCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "tcp",
 		Short: "Examine TCP Connection delay to config's host",
-		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			x := xray.NewXrayService(false, false)
 
