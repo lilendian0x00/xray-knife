@@ -53,7 +53,7 @@ func (fc *FetchCommand) addFlags(cmd *cobra.Command) {
 	flags.StringVarP(&fc.config.SubscriptionURL, "url", "u", "", "The subscription url")
 	flags.StringVarP(&fc.config.HTTPMethod, "method", "m", "GET", "Http method to be used")
 	flags.StringVarP(&fc.config.UserAgent, "useragent", "x", "", "Useragent to be used")
-	flags.StringVarP(&fc.config.OutputFile, "out", "o", "configs.txt", "The output file where the configs will be placed")
+	flags.StringVarP(&fc.config.OutputFile, "out", "o", "-", "The output file where the configs will be placed. - means stdout")
 	flags.StringVarP(&fc.config.Proxy, "proxy", "p", "", "proxy to connect to for fetching the subscription, in form of")
 }
 
@@ -83,13 +83,13 @@ func (fc *FetchCommand) runCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to save configurations: %w", err)
 	}
 
-	customlog.Printf(customlog.Success, "%d Configs have been saved into %s file\n",
+	customlog.Printf(customlog.Success, "%d Configs have been written into %q\n",
 		len(configs), fc.config.OutputFile)
 	return nil
 }
 
 // saveConfigs saves the fetched configurations to a file
 func (fc *FetchCommand) saveConfigs(configs []string) error {
-	content := strings.Join(configs, "\n\n")
+	content := strings.Join(configs, "\n")+"\n"
 	return utils.WriteIntoFile(fc.config.OutputFile, []byte(content))
 }

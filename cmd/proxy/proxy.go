@@ -5,6 +5,7 @@ import (
 	"context" // Added for managing goroutine lifecycles
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -402,11 +403,15 @@ func newProxyCommand() *cobra.Command {
 			if cfg.readConfigFromSTDIN {
 				reader := bufio.NewReader(os.Stdin)
 				fmt.Println("Reading config from STDIN:")
-				text, err := reader.ReadString('\n')
-				if err != nil {
-					return fmt.Errorf("error reading config from stdin: %w", err)
+				var err error
+				var line []byte
+				for err == nil {
+					line, _, err = reader.ReadLine()
+					links = append(links, string(line))
 				}
-				links = append(links, text)
+				if !errors.Is(err, io.EOF) {
+					return err
+				}
 			} else if cfg.configLink != "" {
 				links = append(links, cfg.configLink)
 			} else if cfg.configLinksFile != "" {

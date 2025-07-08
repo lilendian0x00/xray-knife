@@ -54,7 +54,13 @@ func ParseFileByNewline(fileName string) []string {
 }
 
 func WriteIntoFile(fileName string, data []byte) error {
-	err := os.WriteFile(fileName, data, 0644)
+	var err error
+	switch fileName {
+	case "-":
+		_, err = os.Stdout.Write(data)
+	default:
+		err = os.WriteFile(fileName, data, 0644)
+	}
 	if err != nil {
 		return err
 	}
