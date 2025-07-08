@@ -576,14 +576,14 @@ func newProxyCommand() *cobra.Command {
 		"                       • system   – create TUN device and route all host traffic through it")
 
 	cmd.RegisterFlagCompletionFunc("mode", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string {"system", "inbound"}, cobra.ShellCompDirectiveNoFileComp
+		return []string{"system", "inbound"}, cobra.ShellCompDirectiveNoFileComp
 	})
 
 	cmd.Flags().Uint16VarP(&cfg.maximumAllowedDelay, "mdelay", "d", 3000, "Maximum allowed delay (ms) for testing configs during rotation")
 
 	cmd.Flags().StringVarP(&cfg.CoreType, "core", "z", "xray", "Core types: (xray, sing-box)")
 	cmd.RegisterFlagCompletionFunc("core", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string {"xray", "sing-box"}, cobra.ShellCompDirectiveNoFileComp
+		return []string{"xray", "sing-box"}, cobra.ShellCompDirectiveNoFileComp
 	})
 	cmd.Flags().StringVarP(&cfg.configLink, "config", "c", "", "The single xray/sing-box config link to use")
 	cmd.Flags().StringVarP(&cfg.inboundConfigLink, "inbound-config", "I", "", "Custom config link for the inbound proxy")

@@ -18,6 +18,7 @@ type FetchConfig struct {
 	HTTPMethod      string
 	UserAgent       string
 	OutputFile      string
+	Proxy           string
 }
 
 // FetchCommand encapsulates the fetch command functionality
@@ -38,7 +39,7 @@ func (fc *FetchCommand) createCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "fetch",
 		Short: "Fetches all config links from a subscription to a file",
-		RunE: fc.runCommand,
+		RunE:  fc.runCommand,
 	}
 
 	fc.addFlags(cmd)
@@ -53,6 +54,7 @@ func (fc *FetchCommand) addFlags(cmd *cobra.Command) {
 	flags.StringVarP(&fc.config.HTTPMethod, "method", "m", "GET", "Http method to be used")
 	flags.StringVarP(&fc.config.UserAgent, "useragent", "x", "", "Useragent to be used")
 	flags.StringVarP(&fc.config.OutputFile, "out", "o", "configs.txt", "The output file where the configs will be placed")
+	flags.StringVarP(&fc.config.Proxy, "proxy", "p", "", "proxy to connect to for fetching the subscription, in form of")
 }
 
 // runCommand executes the fetch command logic
@@ -62,6 +64,7 @@ func (fc *FetchCommand) runCommand(cmd *cobra.Command, args []string) error {
 		UserAgent:   fc.config.UserAgent,
 		Method:      fc.config.HTTPMethod,
 		ConfigLinks: []string{},
+		Proxy: fc.config.Proxy,
 	}
 
 	if sub.Url == "" {
