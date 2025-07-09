@@ -57,6 +57,33 @@ var InboundProtocols = []string{"vless", "vmess", "socks"}
 // ProxyCmd represents the proxy command
 var ProxyCmd = newProxyCommand()
 
+// Create just ONE goroutine to handle enter key
+func isEnterPressed(parentCtx context.Context) chan struct{} {
+	inputChan := make(chan struct{})
+
+	go func() {
+		defer close(inputChan)
+
+		ctx, cancel := context.WithCancel(parentCtx)
+		defer cancel()
+
+		consoleReader := bufio.NewReaderSize(os.Stdin, 1)
+		for {
+			input, err := consoleReader.ReadByte()
+			if err == nil && (input == '\n' || input == '\r') {
+				inputChan <- struct{}{}
+			}
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+		}
+	}()
+
+	return inputChan
+}
+
 // findAndStartWorkingConfig attempts to find a working configuration from the list,
 // starts it, and returns the instance and its link.
 func findAndStartWorkingConfig(
@@ -149,7 +176,7 @@ func findAndStartWorkingConfig(
 // manageActiveProxyPeriod handles the timer and user input for the currently active proxy.
 // It returns an error (e.g., "timer expired", "user input") to signal why rotation should occur.
 // It also takes a parent context to allow cancellation from the main signal handler.
-func manageActiveProxyPeriod(parentCtx context.Context, cfg *proxyCmdConfig) error {
+func manageActiveProxyPeriod(parentCtx context.Context, cfg *proxyCmdConfig, enterPressed chan struct{}) error {
 	customlog.Printf(customlog.Success, "Instance active. Interval: %ds. Press Enter to switch.\n", cfg.rotationInterval)
 
 	// Derive a new context from parent for this specific active period.
@@ -157,55 +184,8 @@ func manageActiveProxyPeriod(parentCtx context.Context, cfg *proxyCmdConfig) err
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel() // Signal local goroutines to stop when this function returns
 
-	inputChan := make(chan bool, 1) // Signals that Enter was pressed
 	timer := time.NewTimer(time.Duration(cfg.rotationInterval) * time.Second)
 	defer timer.Stop() // Clean up the timer
-
-	// Goroutine for Enter key press
-	go func() {
-		defer customlog.Printf(customlog.Processing, "Input listener goroutine stopped.\n")
-		consoleReader := bufio.NewReaderSize(os.Stdin, 1)
-
-		// Goroutine to perform the blocking read and send result/error on channels
-		readResultChan := make(chan byte)
-		readErrChan := make(chan error)
-		go func() {
-			defer close(readResultChan) // Important for select below to not hang if this goroutine exits
-			defer close(readErrChan)
-			input, err := consoleReader.ReadByte() // This blocks
-			if err != nil {
-				select {
-				case readErrChan <- err:
-				case <-ctx.Done(): // If context is cancelled while trying to send error
-				}
-				return
-			}
-			select {
-			case readResultChan <- input:
-			case <-ctx.Done(): // If context is cancelled while trying to send result
-			}
-		}()
-
-		// Select loop to wait for read result or context cancellation
-		select {
-		case <-ctx.Done(): // If the main function cancels this active period
-			return
-		case input, ok := <-readResultChan:
-			if ok && (input == 13 || input == 10) { // Enter or LF
-				select {
-				case inputChan <- true:
-				case <-ctx.Done(): // Don't block if context is already done
-				}
-			} else if !ok {
-				// readResultChan was closed, possibly due to error in ReadByte
-			}
-		case err := <-readErrChan:
-			if err != nil {
-				customlog.Printf(customlog.Failure, "Error reading input: %v. Input listener stopping.\n", err)
-			}
-			return
-		}
-	}()
 
 	// Goroutine for countdown display
 	displayTicker := time.NewTicker(time.Second)
@@ -227,7 +207,7 @@ func manageActiveProxyPeriod(parentCtx context.Context, cfg *proxyCmdConfig) err
 		case <-ctx.Done(): // If the main function cancels this active period (e.g. SIGINT)
 			fmt.Println() // New line after prompt
 			return fmt.Errorf("active proxy period cancelled by signal or parent context")
-		case <-inputChan:
+		case <-enterPressed:
 			fmt.Println() // New line after prompt
 			// cancel() // No need to call cancel() here, returning will trigger the defer cancel()
 			return fmt.Errorf("user requested config switch")
@@ -477,6 +457,7 @@ func newProxyCommand() *cobra.Command {
 				processor := http.NewResultProcessor(netTestConfig)
 				var currentInstance protocol.Instance
 				var currentLink string
+				enterPressed := isEnterPressed(mainLoopCtx)
 
 				for { // Main rotation loop
 					select {
@@ -521,7 +502,7 @@ func newProxyCommand() *cobra.Command {
 
 					// Manage the active period for currentInstance
 					// Pass mainLoopCtx so manageActiveProxyPeriod can also be cancelled by SIGINT
-					errActive := manageActiveProxyPeriod(mainLoopCtx, cfg)
+					errActive := manageActiveProxyPeriod(mainLoopCtx, cfg, enterPressed)
 					if errActive != nil {
 						customlog.Printf(customlog.Processing, "Switching config. Reason: %v\n", errActive)
 						// The loop will now close currentInstance and find a new one
