@@ -76,22 +76,25 @@ export function ProxyTab({ status, setStatus }: ProxyTabProps) {
                 <CardTitle>Proxy Service</CardTitle>
                 <CardDescription>Manage the local proxy service. Enter one or more configuration links below.</CardDescription>
             </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-                <div className="flex items-center gap-2">
+            <CardContent className="flex flex-col gap-6">
+                <div className="flex items-center gap-2 justify-between">
                     <Label>SOCKS5 Listener</Label>
-                    <Input value="127.0.0.1:9999" disabled className="w-40" />
+                    <Input value="127.0.0.1:9999" disabled className="w-40 h-fit" />
                 </div>
-                <Label htmlFor="proxy-configs">Configuration Links</Label>
-                <Textarea
-                    id="proxy-configs"
-                    placeholder="vless://...
+                <div className="flex flex-col gap-3">
+                    <Label htmlFor="proxy-configs">Configuration Links</Label>
+                    <Textarea
+                        id="proxy-configs"
+                        placeholder="vless://...
 trojan://...
 ss://..."
-                    className="h-40 font-mono text-sm"
-                    value={proxyConfigs}
-                    onChange={(e) => setProxyConfigs(e.target.value)}
-                    disabled={status === 'running'}
-                />
+                        className="h-40 font-mono text-sm"
+                        value={proxyConfigs}
+                        onChange={(e) => setProxyConfigs(e.target.value)}
+                        disabled={status === 'running'}
+                    />
+                </div>
+
                 <div className="flex gap-4 flex-col sm:flex-row">
                     <Button onClick={handleStartProxy} disabled={status !== 'stopped'}>
                         {status === 'starting' ? 'Starting...' : 'Start Proxy'}

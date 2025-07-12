@@ -77,7 +77,7 @@ export function HttpTesterTab() {
                             <SelectTrigger id="core-type">
                                 <SelectValue placeholder="Select core type" />
                             </SelectTrigger>
-                            <SelectContent>
+                            <SelectContent className="h-full">
                                 <SelectItem value="auto">Auto</SelectItem>
                                 <SelectItem value="http">xray</SelectItem>
                                 <SelectItem value="socks">singbox</SelectItem>
@@ -85,14 +85,17 @@ export function HttpTesterTab() {
                         </Select>
                     </div>
                 </div>
-                <Label htmlFor="http-test-configs">Configuration Links</Label>
-                <Textarea
-                    id="http-test-configs"
-                    placeholder="Enter config links, one per line...\ne.g.\nhttps://example.com/config1\nhttps://example.com/config2"
-                    className="h-40 font-mono text-sm resize-y min-h-[100px]"
-                    value={httpTestConfigs}
-                    onChange={(e) => setHttpTestConfigs(e.target.value)}
-                />
+                <div className="flex flex-col gap-3">
+                    <Label htmlFor="http-test-configs">Configuration Links</Label>
+                    <Textarea
+                        id="http-test-configs"
+                        placeholder="Enter config links, one per line..."
+                        className="h-40 font-mono text-sm resize-y min-h-[100px]"
+                        value={httpTestConfigs}
+                        onChange={(e) => setHttpTestConfigs(e.target.value)}
+                    />
+                </div>
+
                 <Button onClick={handleRunHttpTest} disabled={isTesting}>
                     {isTesting ? (
                         <>
