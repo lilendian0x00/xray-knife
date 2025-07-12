@@ -524,17 +524,31 @@ func printResultsToConsole(results []*ScanResult) {
 		return
 	}
 
+	// Create a new slice containing only successful results for display purposes.
+	var successfulResults []*ScanResult
+	for _, r := range results {
+		if r.Error == nil {
+			successfulResults = append(successfulResults, r)
+		}
+	}
+
+	if len(successfulResults) == 0 {
+		customlog.Printf(customlog.Warning, "No successful IPs found to display.\n")
+		return
+	}
+
 	var finalResults []*ScanResult
+	// Now, filter the successful results further if only-speedtest is enabled
 	if doSpeedtest && onlySpeedtestResults {
 		customlog.Printf(customlog.Info, "Filtering results to include only those with successful speed tests...\n")
-		for _, r := range results {
+		for _, r := range successfulResults { // Use the pre-filtered successful results
 			if r.DownSpeed > 0 || r.UpSpeed > 0 {
 				finalResults = append(finalResults, r)
 			}
 		}
-		customlog.Printf(customlog.Info, "Filtered from %d to %d results.\n", len(results), len(finalResults))
+		customlog.Printf(customlog.Info, "Filtered from %d to %d results.\n", len(successfulResults), len(finalResults))
 	} else {
-		finalResults = results
+		finalResults = successfulResults // Use all successful results
 	}
 
 	if len(finalResults) == 0 {
@@ -544,6 +558,7 @@ func printResultsToConsole(results []*ScanResult) {
 
 	sort.Slice(finalResults, func(i, j int) bool {
 		if doSpeedtest {
+			// Sort by latency first, then by speed
 			if finalResults[i].Latency != finalResults[j].Latency {
 				return finalResults[i].Latency < finalResults[j].Latency
 			}
@@ -552,6 +567,7 @@ func printResultsToConsole(results []*ScanResult) {
 			}
 			return finalResults[i].UpSpeed > finalResults[j].UpSpeed
 		}
+		// Default sort by latency only
 		return finalResults[i].Latency < finalResults[j].Latency
 	})
 
