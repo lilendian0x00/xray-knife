@@ -55,6 +55,7 @@ var (
 	configLink           string
 	insecureTLS          bool
 	resume               bool
+	resumeFile           string
 
 	xrayCore        pkg.Core
 	singboxCore     pkg.Core
@@ -153,15 +154,24 @@ Performs a full speed test on the fastest IPs. This phase can also be resumed se
 		scannedIPs := make(map[string]bool)
 
 		if resume {
-			resumedResults, err := loadResultsForResume(outputFile)
+			resumedResults, err := loadResultsForResume(resumeFile)
 			if err != nil {
-				customlog.Printf(customlog.Warning, "Could not resume from %s: %v. Starting fresh.\n", outputFile, err)
+				customlog.Printf(customlog.Warning, "Could not resume from %s: %v. Starting fresh.\n", resumeFile, err)
 			} else if len(resumedResults) > 0 {
 				initialResults = resumedResults
 				for _, r := range resumedResults {
 					scannedIPs[r.IP] = true
 				}
-				customlog.Printf(customlog.Info, "Resumed %d results from %s\n", len(initialResults), outputFile)
+				customlog.Printf(customlog.Info, "Resumed %d results from %s\n", len(initialResults), resumeFile)
+			}
+		} else {
+			// For a fresh scan, remove the old results file.
+			// Ignore a "not found" error, as that's an expected state.
+			err := os.Remove(outputFile)
+			if err != nil && !os.IsNotExist(err) {
+				// If another error occurred (e.g., permissions), we should stop.
+				customlog.Printf(customlog.Failure, "Failed to clear previous results file %s: %v\n", outputFile, err)
+				return
 			}
 		}
 
@@ -662,7 +672,8 @@ func init() {
 	CFscannerCmd.Flags().IntVarP(&uploadMB, "upload-mb", "m", 10, "Custom amount of data to upload for speedtest (in MB)")
 	CFscannerCmd.Flags().StringVarP(&configLink, "config", "C", "", "Use a config link as a proxy to test IPs")
 	CFscannerCmd.Flags().BoolVarP(&insecureTLS, "insecure", "E", false, "Allow insecure TLS connections for the proxy config")
-	CFscannerCmd.Flags().BoolVar(&resume, "resume", false, "Resume scan from the output file")
+	CFscannerCmd.Flags().StringVar(&resumeFile, "resume-file", "results.csv", "Resume scan file")
+	CFscannerCmd.Flags().BoolVar(&resume, "resume", false, "Resume scan")
 
 	_ = CFscannerCmd.MarkFlagRequired("subnets")
 }
