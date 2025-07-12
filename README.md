@@ -62,6 +62,30 @@ go install github.com/lilendian0x00/xray-knife/v5@latest
 `xray-knife` is a command-line tool with a clear and consistent command structure:
 `xray-knife [command] [flags]`
 
+Here are some flags :
+```
+  -b, --body                        Show trace body output
+  -C, --config string               Use a config link as a proxy to test IPs
+  -d, --download-mb int             Custom amount of data to download for speedtest (in MB) (default 20)
+  -h, --help                        help for cfscanner
+  -E, --insecure                    Allow insecure TLS connections for the proxy config (when using --config)
+  -l, --live-output string          Live output file to save results as they are found (unsorted)
+  -k, --only-speedtest              Only save results that have successful speedtest data (download or upload)
+  -o, --output string               Output file to save sorted results (default "results.txt")
+  -r, --retry int                   Number of times to retry TCP connection on failure (default 1)
+  -i, --shuffle-ip                  Shuffle list of IPs
+  -e, --shuffle-subnet              Shuffle list of Subnets
+  -p, --speedtest                   Measure download/upload speed on the fastest IPs
+      --speedtest-concurrency int   Number of concurrent speed tests to run (to avoid saturating bandwidth) (default 4)
+      --speedtest-timeout int       Total timeout in seconds for one IP's speed test (download + upload) (default 30)
+  -c, --speedtest-top int           Number of fastest IPs to select for speed testing (default 1000000)
+  -s, --subnets string              Subnet or file containing subnets (e.g., "1.1.1.1/24,2.2.2.2/16")
+  -t, --threads int                 Count of threads for latency scan (default 100)
+  -u, --timeout int                 Individual request timeout (in ms) (default 5000)
+  -m, --upload-mb int               Custom amount of data to upload for speedtest (in MB) (default 10)
+  -v, --verbose                     Show verbose output with detailed errors
+```
+
 Here are some practical examples for the main commands.
 
 ---
