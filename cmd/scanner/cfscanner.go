@@ -31,10 +31,8 @@ import (
 
 // Configuration for the real-time saver
 const (
-	// How many new results to buffer in memory before forcing a save.
 	saveBatchSize = 500
-	// How often to save the results to disk, regardless of batch size (FLUSH TIME)
-	saveInterval = 5 * time.Second
+	saveInterval  = 5 * time.Second
 )
 
 var (
@@ -71,6 +69,7 @@ type ScanResult struct {
 	UpSpeed   float64       `csv:"upload_mbps"`
 	Error     error         `csv:"-"`
 	ErrorStr  string        `csv:"error,omitempty"`
+	mu        sync.Mutex
 }
 
 // resultWriter is a dedicated goroutine that listens for new results on a channel
@@ -92,7 +91,11 @@ func resultWriter(wg *sync.WaitGroup, resultsChan <-chan *ScanResult, initialRes
 			return
 		}
 		for _, res := range batch {
+			// Lock the result while reading its data to prevent a data race with a speed test worker.
+			res.mu.Lock()
+			// Update the master list with the latest data for this IP.
 			allResults[res.IP] = res
+			res.mu.Unlock()
 		}
 
 		resultsToSave := make([]*ScanResult, 0, len(allResults))
@@ -167,9 +170,6 @@ Performs a full speed test on the fastest IPs. This phase can also be resumed se
 		writerWg.Add(1)
 		go resultWriter(&writerWg, resultsChan, initialResults, outputFile)
 
-		var currentRunSuccesses []*ScanResult
-		finalResultsMutex := sync.Mutex{}
-
 		if configLink != "" {
 			customlog.Printf(customlog.Info, "Using config link to test IPs: %s\n", configLink)
 			xrayCore = pkg.CoreFactory(pkg.XrayCoreType, insecureTLS, Verbose)
@@ -197,20 +197,6 @@ Performs a full speed test on the fastest IPs. This phase can also be resumed se
 		pool := pond.NewPool(threadCount)
 		var hasIPs bool
 
-		handleResult := func(result *ScanResult) {
-			// Always send the result to the writer to record the attempt (success or failure).
-			resultsChan <- result
-
-			// But only add successful results to the in-memory list for the next phase.
-			if result.Error == nil {
-				finalResultsMutex.Lock()
-				currentRunSuccesses = append(currentRunSuccesses, result)
-				finalResultsMutex.Unlock()
-			} else if Verbose {
-				customlog.Printf(customlog.Warning, "Latency scan failed for %s: %v\n", result.IP, result.Error)
-			}
-		}
-
 		for _, cidr := range cidrs {
 			if shuffleIPs {
 				listIP, err := utils.CIDRtoListIP(cidr)
@@ -226,7 +212,7 @@ Performs a full speed test on the fastest IPs. This phase can also be resumed se
 					if _, exists := scannedIPs[ip]; exists {
 						continue
 					}
-					pool.Submit(func(ip string) func() { return func() { handleResult(scanIPForLatency(ip, configLink)) } }(ip))
+					pool.Submit(func(ip string) func() { return func() { resultsChan <- scanIPForLatency(ip, configLink) } }(ip))
 				}
 			} else {
 				ip, ipnet, err := net.ParseCIDR(cidr)
@@ -244,7 +230,7 @@ Performs a full speed test on the fastest IPs. This phase can also be resumed se
 					if _, exists := scannedIPs[ipStr]; exists {
 						continue
 					}
-					pool.Submit(func(ip string) func() { return func() { handleResult(scanIPForLatency(ip, configLink)) } }(ipStr))
+					pool.Submit(func(ip string) func() { return func() { resultsChan <- scanIPForLatency(ip, configLink) } }(ipStr))
 				}
 			}
 		}
@@ -258,38 +244,45 @@ Performs a full speed test on the fastest IPs. This phase can also be resumed se
 		pool.StopAndWait()
 		customlog.Printf(customlog.Success, "Latency scan phase finished.\n")
 
+		// To get the candidates for the speed test, we first ensure all latency results are written to disk,
+		// then we read the file back. This makes the file the single source of truth and simplifies the logic.
+		close(resultsChan)
+		writerWg.Wait() // Wait for the writer to perform its final save of latency results.
+
 		if doSpeedtest {
-			// Combine successful resumed results and successful new results for speed testing
-			allSuccessfulResults := make([]*ScanResult, 0)
-			for _, r := range initialResults {
+			// Now, read the complete state from the file.
+			allResults, err := loadResultsForResume(outputFile)
+			if err != nil {
+				customlog.Printf(customlog.Failure, "Could not load results for speed test phase: %v\n", err)
+				return
+			}
+
+			// Filter for only successful latency tests.
+			var successfulLatencyResults []*ScanResult
+			for _, r := range allResults {
 				if r.Error == nil {
-					allSuccessfulResults = append(allSuccessfulResults, r)
+					successfulLatencyResults = append(successfulLatencyResults, r)
 				}
 			}
-			allSuccessfulResults = append(allSuccessfulResults, currentRunSuccesses...)
 
-			// Deduplicate in case of overlap
-			dedupedMap := make(map[string]*ScanResult)
-			for _, r := range allSuccessfulResults {
-				dedupedMap[r.IP] = r
-			}
-			allSuccessfulResults = make([]*ScanResult, 0, len(dedupedMap))
-			for _, r := range dedupedMap {
-				allSuccessfulResults = append(allSuccessfulResults, r)
-			}
-
-			if len(allSuccessfulResults) > 0 {
-				sort.Slice(allSuccessfulResults, func(i, j int) bool {
-					return allSuccessfulResults[i].Latency < allSuccessfulResults[j].Latency
+			if len(successfulLatencyResults) > 0 {
+				sort.Slice(successfulLatencyResults, func(i, j int) bool {
+					return successfulLatencyResults[i].Latency < successfulLatencyResults[j].Latency
 				})
 
 				numToTest := speedtestTop
-				if len(allSuccessfulResults) < speedtestTop {
-					numToTest = len(allSuccessfulResults)
+				if len(successfulLatencyResults) < speedtestTop {
+					numToTest = len(successfulLatencyResults)
 				}
-				topResults := allSuccessfulResults[:numToTest]
+				topResults := successfulLatencyResults[:numToTest]
 
 				customlog.Printf(customlog.Info, "Phase 2: Performing speed tests on the top %d IPs (with %d concurrent tests, %ds timeout each)...\n", len(topResults), speedtestConcurrency, speedtestTimeout)
+
+				// We need a new writer for the speed test results.
+				speedTestResultsChan := make(chan *ScanResult, speedtestConcurrency)
+				writerWg.Add(1)
+				go resultWriter(&writerWg, speedTestResultsChan, allResults, outputFile)
+
 				speedTestPool := pond.NewPool(speedtestConcurrency)
 				for _, result := range topResults {
 					if result.DownSpeed > 0 || result.UpSpeed > 0 {
@@ -301,24 +294,36 @@ Performs a full speed test on the fastest IPs. This phase can also be resumed se
 							defer cancel()
 
 							downSpeed, upSpeed, err := measureSpeed(ctx, res.IP, configLink)
+
+							// Lock the result struct before updating it to prevent the resultWriter
+							// from reading it while it's in an inconsistent state.
+							res.mu.Lock()
 							res.DownSpeed = downSpeed
 							res.UpSpeed = upSpeed
 							res.Error = err
+							res.mu.Unlock()
+
 							if err == nil {
 								customlog.Printf(customlog.Success, "SPEEDTEST: %-20s | %-10v | %-15.2f | %-15.2f\n", res.IP, res.Latency.Round(time.Millisecond), downSpeed, upSpeed)
+							} else if os.IsTimeout(err) || errors.Is(err, context.DeadlineExceeded) {
+								customlog.Printf(customlog.Warning, "IP %s failed speed test: Timeout exceeded\n", res.IP)
+							} else if Verbose {
+								customlog.Printf(customlog.Warning, "IP %s failed speed test: %v\n", res.IP, err)
 							}
-							resultsChan <- res
+
+							speedTestResultsChan <- res
 						}
 					}(result))
 				}
 				speedTestPool.StopAndWait()
 				customlog.Printf(customlog.Success, "Speed test phase finished.\n")
+
+				close(speedTestResultsChan)
+				writerWg.Wait() // Wait for the final speed test save.
 			}
 		}
 
-		close(resultsChan)
-		writerWg.Wait()
-
+		// Load final, complete data for printing to console.
 		finalSortedResults, err := loadResultsForResume(outputFile)
 		if err != nil {
 			customlog.Printf(customlog.Failure, "Could not load final results for display: %v\n", err)
@@ -403,6 +408,11 @@ func scanIPForLatency(ip, baseConfigLink string) *ScanResult {
 		return result
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		result.Error = fmt.Errorf("bad status code: %d", resp.StatusCode)
+		return result
+	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -554,6 +564,7 @@ func printResultsToConsole(results []*ScanResult) {
 	}
 	outputLines = append(outputLines, header)
 	for _, result := range finalResults {
+		// Pass a copy of the struct to the formatting function to be safe.
 		outputLines = append(outputLines, formatResultLine(*result, doSpeedtest))
 	}
 	finalOutput := strings.Join(outputLines, "\n")
@@ -587,17 +598,17 @@ func loadResultsForResume(filePath string) ([]*ScanResult, error) {
 }
 
 func saveResultsToCSV(filePath string, results []*ScanResult) error {
-	resultsMutex := sync.Mutex{}
-	resultsMutex.Lock()
-	defer resultsMutex.Unlock()
-
+	// This function is now only called from the single resultWriter goroutine,
+	// so the mutex is no longer needed here.
 	for _, r := range results {
+		r.mu.Lock()
 		r.LatencyMS = r.Latency.Milliseconds()
 		if r.Error != nil {
 			r.ErrorStr = r.Error.Error()
 		} else {
 			r.ErrorStr = "" // Ensure error string is empty on success
 		}
+		r.mu.Unlock()
 	}
 
 	tempFilePath := filePath + ".tmp"
