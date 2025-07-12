@@ -2,10 +2,10 @@ package net
 
 import (
 	"fmt"
+	"github.com/lilendian0x00/xray-knife/v5/pkg/core/xray"
 	"net"
 	"time"
 
-	"github.com/lilendian0x00/xray-knife/v5/pkg/xray"
 	"github.com/lilendian0x00/xray-knife/v5/utils/customlog"
 
 	"github.com/spf13/cobra"

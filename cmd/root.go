@@ -3,6 +3,7 @@ package cmd
 import (
 	"github.com/lilendian0x00/xray-knife/v5/cmd/http"
 	"github.com/lilendian0x00/xray-knife/v5/cmd/scanner"
+	"github.com/lilendian0x00/xray-knife/v5/cmd/webui"
 	"os"
 
 	"github.com/lilendian0x00/xray-knife/v5/cmd/net"
@@ -36,6 +37,7 @@ func addSubcommandPalettes() {
 	rootCmd.AddCommand(net.NetCmd)
 	rootCmd.AddCommand(scanner.ScanCmd)
 	rootCmd.AddCommand(proxy.ProxyCmd)
+	rootCmd.AddCommand(webui.WebUICmd)
 }
 
 func init() {

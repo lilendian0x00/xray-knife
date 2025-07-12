@@ -1,15 +1,15 @@
-package pkg
+package core
 
 import (
 	"errors"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/v5/pkg/core/singbox"
-	"github.com/lilendian0x00/xray-knife/v5/pkg/core/xray"
 	"net/http"
 	"net/url"
 	"time"
 
 	"github.com/lilendian0x00/xray-knife/v5/pkg/core/protocol"
+	"github.com/lilendian0x00/xray-knife/v5/pkg/core/singbox"
+	"github.com/lilendian0x00/xray-knife/v5/pkg/core/xray"
 )
 
 type CoreType uint8
@@ -110,7 +110,3 @@ func (c *AutomaticCore) CreateProtocol(configLink string) (protocol.Protocol, er
 
 	return protocol, err
 }
-
-//func (c *AutomaticCore) MakeHttpClient(outbound protocol.Protocol) (*http.Client, protocol.Instance, error) {
-//	return outbound.
-//}

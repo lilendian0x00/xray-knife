@@ -3,16 +3,13 @@ package http
 import (
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
-	"sync"
 
-	"github.com/lilendian0x00/xray-knife/v5/pkg"
+	pkghttp "github.com/lilendian0x00/xray-knife/v5/pkg/http"
 	"github.com/lilendian0x00/xray-knife/v5/utils"
 	"github.com/lilendian0x00/xray-knife/v5/utils/customlog"
 
 	"github.com/fatih/color"
-	"github.com/gocarina/gocsv"
 	"github.com/spf13/cobra"
 )
 
@@ -37,158 +34,6 @@ type Config struct {
 	GetIPInfo           bool
 	SpeedtestAmount     uint32
 	MaximumAllowedDelay uint16
-}
-
-// ConfigResults represents a slice of test results
-type ConfigResults []*pkg.Result
-
-// ResultProcessor handles the processing and storage of test results
-type ResultProcessor struct {
-	validConfigs   []string
-	validConfigsMu sync.Mutex
-	config         *Config
-}
-
-// NewResultProcessor creates a new ResultProcessor instance
-func NewResultProcessor(config *Config) *ResultProcessor {
-	return &ResultProcessor{
-		validConfigs: make([]string, 0),
-		config:       config,
-	}
-}
-
-// Sort interface implementation for ConfigResults
-func (cr ConfigResults) Len() int { return len(cr) }
-func (cr ConfigResults) Less(i, j int) bool {
-	return cr[i].Delay < cr[j].Delay &&
-		cr[i].DownloadSpeed >= cr[j].DownloadSpeed &&
-		cr[i].UploadSpeed >= cr[j].UploadSpeed
-}
-func (cr ConfigResults) Swap(i, j int) { cr[i], cr[j] = cr[j], cr[i] }
-
-// TestManager handles the concurrent testing of configurations
-type TestManager struct {
-	examiner    *pkg.Examiner
-	processor   *ResultProcessor
-	threadCount uint16
-	verbose     bool
-}
-
-// NewTestManager creates a new TestManager instance
-func NewTestManager(examiner *pkg.Examiner, processor *ResultProcessor, threadCount uint16, verbose bool) *TestManager {
-	return &TestManager{
-		examiner:    examiner,
-		processor:   processor,
-		threadCount: threadCount,
-		verbose:     verbose,
-	}
-}
-
-// TestConfigs tests multiple configurations concurrently
-func (tm *TestManager) TestConfigs(links []string, printSuccess bool) ConfigResults {
-	semaphore := make(chan int, tm.threadCount)
-	var wg sync.WaitGroup
-	var results ConfigResults
-
-	for i := range links {
-		semaphore <- 1
-		wg.Add(1)
-		go tm.testSingleConfig(links[i], i, &results, semaphore, &wg, printSuccess)
-	}
-
-	wg.Wait()
-	close(semaphore)
-	return results
-}
-
-// testSingleConfig tests a single configuration
-func (tm *TestManager) testSingleConfig(link string, index int, results *ConfigResults, semaphore chan int, wg *sync.WaitGroup, printSuccess bool) {
-	defer func() {
-		<-semaphore
-		wg.Done()
-	}()
-
-	res, err := tm.examiner.ExamineConfig(link)
-	if err != nil {
-		if tm.verbose {
-			customlog.Printf(customlog.Failure, "Error: %s - broken config: %s\n", err.Error(), link)
-		}
-		return
-	}
-
-	if res.Status == "passed" && printSuccess {
-		tm.printSuccessDetails(index, res)
-	}
-
-	if tm.processor.config.OutputType == "csv" || res.Status == "passed" {
-		tm.processor.validConfigsMu.Lock()
-		*results = append(*results, &res)
-		tm.processor.validConfigsMu.Unlock()
-	}
-}
-
-// printSuccessDetails prints the details of a successful test
-func (tm *TestManager) printSuccessDetails(index int, res pkg.Result) {
-	d := color.New(color.FgCyan, color.Bold)
-	d.Printf("Config Number: %d\n", index+1)
-	fmt.Printf("%v%s: %s\n", res.Protocol.DetailsStr(), color.RedString("Link"), res.Protocol.GetLink())
-	customlog.Printf(customlog.Success, "Real Delay: %dms\n\n", res.Delay)
-}
-
-// SaveResults saves the test results to a file
-func (rp *ResultProcessor) SaveResults(results ConfigResults) error {
-	if rp.config.SortedByRealDelay {
-		sort.Sort(results)
-	}
-
-	switch rp.config.OutputType {
-	case "txt":
-		return rp.saveTxtResults(results)
-	case "csv":
-		return rp.saveCSVResults(results)
-	default:
-		return fmt.Errorf("unsupported output type: %s", rp.config.OutputType)
-	}
-}
-
-// saveTxtResults saves results in text format
-func (rp *ResultProcessor) saveTxtResults(results ConfigResults) error {
-	for _, v := range results {
-		if v.Status == "passed" {
-			rp.validConfigs = append(rp.validConfigs, v.ConfigLink)
-		}
-	}
-
-	content := strings.Join(rp.validConfigs, "\n\n")
-	if err := utils.WriteIntoFile(rp.config.OutputFile, []byte(content)); err != nil {
-		return fmt.Errorf("failed to save configs: %v", err)
-	}
-
-	customlog.Printf(customlog.Finished, "A total of %d working configurations have been saved to %s\n",
-		len(rp.validConfigs), rp.config.OutputFile)
-	return nil
-}
-
-// saveCSVResults saves results in CSV format
-func (rp *ResultProcessor) saveCSVResults(results ConfigResults) error {
-	out, err := gocsv.MarshalString(&results)
-	if err != nil {
-		return fmt.Errorf("failed to marshal CSV: %v", err)
-	}
-
-	if err := utils.WriteIntoFile(rp.config.OutputFile, []byte(out)); err != nil {
-		return fmt.Errorf("failed to save configs: %v", err)
-	}
-
-	for _, v := range results {
-		if v.Status == "passed" {
-			rp.validConfigs = append(rp.validConfigs, v.ConfigLink)
-		}
-	}
-
-	customlog.Printf(customlog.Finished, "A total of %d configurations have been saved to %s\n",
-		len(rp.validConfigs), rp.config.OutputFile)
-	return nil
 }
 
 // validateConfig validates the configuration options
@@ -219,13 +64,11 @@ func newHttpCommand() *cobra.Command {
 		Use:   "http",
 		Short: "Test proxy configurations for latency, speed, and IP info using HTTP requests.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Validate the values of the flags
 			if err := validateConfig(config); err != nil {
 				return err
 			}
 
-			// Instantiate a Examiner
-			examiner, err := pkg.NewExaminer(pkg.Options{
+			examiner, err := pkghttp.NewExaminer(pkghttp.Options{
 				Core:                   config.CoreType,
 				MaxDelay:               config.MaximumAllowedDelay,
 				Verbose:                config.Verbose,
@@ -238,34 +81,23 @@ func newHttpCommand() *cobra.Command {
 				SpeedtestKbAmount:      config.SpeedtestAmount,
 			})
 			if err != nil {
-				customlog.Printf(customlog.Failure, "failed to create examiner: %v", err)
-				return nil
-				//fmt.Errorf("failed to create examiner: %v", err)
+				return fmt.Errorf("failed to create examiner: %w", err)
 			}
 
-			// Instantiate a Result Processor
-			processor := NewResultProcessor(config)
-
-			// Multiple or Single config
 			if config.ConfigLinksFile != "" {
-				err = handleMultipleConfigs(examiner, config, processor)
-				if err != nil {
-					customlog.Printf(customlog.Failure, "%v", err)
-				}
-				return nil
+				return handleMultipleConfigs(examiner, config)
 			}
 			handleSingleConfig(examiner, config)
 			return nil
 		},
 	}
 
-	// Add command flags
 	addFlags(cmd, config)
 	return cmd
 }
 
 // handleMultipleConfigs handles testing multiple configurations
-func handleMultipleConfigs(examiner *pkg.Examiner, config *Config, processor *ResultProcessor) error {
+func handleMultipleConfigs(examiner *pkghttp.Examiner, config *Config) error {
 	links := utils.ParseFileByNewline(config.ConfigLinksFile)
 	printConfiguration(config, len(links))
 
@@ -274,14 +106,20 @@ func handleMultipleConfigs(examiner *pkg.Examiner, config *Config, processor *Re
 		config.OutputType = "csv"
 	}
 
-	testManager := NewTestManager(examiner, processor, config.ThreadCount, config.Verbose)
+	processor := pkghttp.NewResultProcessor(pkghttp.ResultProcessorOptions{
+		OutputFile: config.OutputFile,
+		OutputType: config.OutputType,
+		Sorted:     config.SortedByRealDelay,
+	})
+
+	testManager := pkghttp.NewTestManager(examiner, processor, config.ThreadCount, config.Verbose)
 	results := testManager.TestConfigs(links, true)
 
 	return processor.SaveResults(results)
 }
 
 // handleSingleConfig handles testing a single configuration
-func handleSingleConfig(examiner *pkg.Examiner, config *Config) {
+func handleSingleConfig(examiner *pkghttp.Examiner, config *Config) {
 	examiner.Verbose = true
 	res, err := examiner.ExamineConfig(config.ConfigLink)
 	if err != nil {

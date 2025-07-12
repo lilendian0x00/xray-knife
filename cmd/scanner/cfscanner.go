@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/lilendian0x00/xray-knife/v5/pkg"
-	"github.com/lilendian0x00/xray-knife/v5/pkg/protocol"
+	"github.com/lilendian0x00/xray-knife/v5/pkg/core/protocol"
 	"io"
 	"math/rand"
 	"net"

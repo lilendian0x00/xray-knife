@@ -2,7 +2,9 @@ package customlog
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/fatih/color"
@@ -40,11 +42,38 @@ var logTypeMap = map[Type]TypesDetails{
 	None:       {symbol: "", color: color.New()}, // No symbol, default color
 }
 
-// Printf prints a formatted, timestamped, and colored log message to the console.
+var (
+	// Default output is os.Stderr
+	output io.Writer = os.Stderr
+	mu     sync.Mutex
+)
+
+// SetOutput sets the output destination for the custom logger.
+// This is useful for redirecting logs to a file or a web socket.
+func SetOutput(w io.Writer) {
+	mu.Lock()
+	defer mu.Unlock()
+	output = w
+}
+
+// Printf prints a formatted, timestamped, and colored log message.
 // It prepends the corresponding symbol and current time to the message.
 func Printf(logType Type, format string, v ...interface{}) {
-	stat, _ := os.Stderr.Stat()
-	color.NoColor = stat.Mode() & os.ModeCharDevice != os.ModeCharDevice
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Check if the current output is a terminal device.
+	// This check is a bit tricky as the `output` can be anything.
+	// We'll assume color is enabled unless we're sure it's not a tty.
+	if f, ok := output.(*os.File); ok {
+		stat, _ := f.Stat()
+		color.NoColor = (stat.Mode() & os.ModeCharDevice) != os.ModeCharDevice
+	} else {
+		// For non-file writers (like web sockets), we typically want to send the raw string without ANSI color codes.
+		// However, fatih/color handles this by checking the NO_COLOR env var. We can also force it.
+		// For now, let's assume the receiver can handle it or we strip it elsewhere if needed.
+		color.NoColor = false
+	}
 
 	t, ok := logTypeMap[logType]
 	if !ok {
@@ -60,19 +89,18 @@ func Printf(logType Type, format string, v ...interface{}) {
 	currentTime := time.Now()
 	fullFormat := prefix + currentTime.Format("15:04:05") + " " + format
 
-	t.color.Fprintf(os.Stderr, fullFormat, v...)
+	// Use Fprintf to write to the designated output.
+	t.color.Fprintf(output, fullFormat, v...)
 }
 
-// Println prints the given arguments to the console, followed by a newline.
-// It acts as a simple wrapper around fmt.Println and is useful for printing
-// raw text or strings that have already been colored by GetColor.
+// Println prints the given arguments to the designated output, followed by a newline.
 func Println(v ...interface{}) {
-	fmt.Fprintln(os.Stderr, v...)
+	mu.Lock()
+	defer mu.Unlock()
+	fmt.Fprintln(output, v...)
 }
 
 // GetColor returns a string colored according to the specified log type.
-// It does not add any symbols or timestamps. This is useful for coloring
-// parts of a string before printing.
 func GetColor(logType Type, text string) string {
 	t, ok := logTypeMap[logType]
 	if !ok {

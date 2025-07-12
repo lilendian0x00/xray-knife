@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/v5/pkg/xray"
+	"github.com/lilendian0x00/xray-knife/v5/pkg/core/xray"
 	"github.com/lilendian0x00/xray-knife/v5/utils/customlog"
 	"github.com/xtls/xray-core/infra/conf"
 	"os"
