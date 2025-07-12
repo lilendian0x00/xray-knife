@@ -637,6 +637,41 @@ func saveResultsToCSV(filePath string, results []*ScanResult) error {
 		r.mu.Unlock()
 	}
 
+	// Sort the results before saving to ensure the CSV is always ordered.
+	sort.Slice(results, func(i, j int) bool {
+		resI := results[i]
+		resJ := results[j]
+
+		// Results with errors go to the bottom.
+		iHasError := resI.Error != nil || resI.ErrorStr != ""
+		jHasError := resJ.Error != nil || resJ.ErrorStr != ""
+
+		if iHasError && !jHasError {
+			return false
+		}
+		if !iHasError && jHasError {
+			return false
+		}
+		// If both have errors, sort by IP to have a stable order
+		if iHasError && jHasError {
+			return resI.IP < resJ.IP
+		}
+
+		// If both are successful, sort by performance.
+		if doSpeedtest {
+			// Sort by latency first, then by speed
+			if resI.Latency != resJ.Latency {
+				return resI.Latency < resJ.Latency
+			}
+			if resI.DownSpeed != resJ.DownSpeed {
+				return resI.DownSpeed > resJ.DownSpeed
+			}
+			return resI.UpSpeed > resJ.UpSpeed
+		}
+		// Default sort by latency only
+		return resI.Latency < resJ.Latency
+	})
+
 	tempFilePath := filePath + ".tmp"
 	file, err := os.Create(tempFilePath)
 	if err != nil {
