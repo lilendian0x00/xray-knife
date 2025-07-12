@@ -647,10 +647,10 @@ func saveResultsToCSV(filePath string, results []*ScanResult) error {
 		jHasError := resJ.Error != nil || resJ.ErrorStr != ""
 
 		if iHasError && !jHasError {
-			return false
+			return false // i (error) comes after j (success)
 		}
 		if !iHasError && jHasError {
-			return false
+			return true // i (success) comes before j (error)
 		}
 		// If both have errors, sort by IP to have a stable order
 		if iHasError && jHasError {
