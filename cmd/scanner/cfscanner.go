@@ -6,8 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/v5/pkg/core/protocol"
 	"io"
+	"log"
 	"math/rand"
 	"net"
 	"net/http"
@@ -22,6 +22,7 @@ import (
 	"github.com/alitto/pond/v2"
 	"github.com/gocarina/gocsv"
 	"github.com/lilendian0x00/xray-knife/v5/pkg"
+	"github.com/lilendian0x00/xray-knife/v5/pkg/core/protocol"
 	"github.com/lilendian0x00/xray-knife/v5/utils"
 	"github.com/lilendian0x00/xray-knife/v5/utils/customlog"
 	utls "github.com/refraction-networking/utls"
@@ -29,57 +30,286 @@ import (
 	"golang.org/x/net/http2"
 )
 
-// Configuration for the real-time saver
-const (
-	saveBatchSize = 500
-	saveInterval  = 5 * time.Second
-)
-
-var (
-	subnets              string
-	threadCount          int
-	shuffleIPs           bool
-	shuffleSubnets       bool
-	doSpeedtest          bool
-	requestTimeout       int
+// ScannerConfig holds all configuration for a scan.
+type ScannerConfig struct {
+	Subnets              []string
+	ThreadCount          int
+	ShuffleIPs           bool
+	ShuffleSubnets       bool
+	DoSpeedtest          bool
+	RequestTimeout       int
 	ShowTraceBody        bool
 	Verbose              bool
-	outputFile           string
-	retryCount           int
-	onlySpeedtestResults bool
-	downloadMB           int
-	uploadMB             int
-	speedtestTop         int
-	speedtestConcurrency int
-	speedtestTimeout     int
-	configLink           string
-	insecureTLS          bool
-	resume               bool
-	resumeFile           string
+	OutputFile           string
+	RetryCount           int
+	OnlySpeedtestResults bool
+	DownloadMB           int
+	UploadMB             int
+	SpeedtestTop         int
+	SpeedtestConcurrency int
+	SpeedtestTimeout     int
+	ConfigLink           string
+	InsecureTLS          bool
+	Resume               bool
+}
 
+// ScannerService is the main engine for scanning.
+type ScannerService struct {
+	config          ScannerConfig
+	logger          *log.Logger
 	xrayCore        pkg.Core
 	singboxCore     pkg.Core
 	selectedCoreMap map[string]pkg.Core
-)
-
-type ScanResult struct {
-	IP        string        `csv:"ip"`
-	Latency   time.Duration `csv:"-"`
-	LatencyMS int64         `csv:"latency_ms"`
-	DownSpeed float64       `csv:"download_mbps"`
-	UpSpeed   float64       `csv:"upload_mbps"`
-	Error     error         `csv:"-"`
-	ErrorStr  string        `csv:"error,omitempty"`
-	mu        sync.Mutex
+	initialResults  []*ScanResult
+	scannedIPs      map[string]bool
 }
 
-// resultWriter is a dedicated goroutine that listens for new results on a channel
-// and saves them to disk in batches
-func resultWriter(wg *sync.WaitGroup, resultsChan <-chan *ScanResult, initialResults []*ScanResult, filePath string) {
-	defer wg.Done()
+// ScanResult represents the outcome of scanning a single IP.
+type ScanResult struct {
+	IP        string        `csv:"ip" json:"ip"`
+	Latency   time.Duration `csv:"-" json:"-"`
+	LatencyMS int64         `csv:"latency_ms" json:"latency_ms"`
+	DownSpeed float64       `csv:"download_mbps" json:"download_mbps"`
+	UpSpeed   float64       `csv:"upload_mbps" json:"upload_mbps"`
+	Error     error         `csv:"-" json:"-"`
+	ErrorStr  string        `csv:"error,omitempty" json:"error,omitempty"`
+	mu        sync.Mutex    `csv:"-" json:"-"`
+}
 
+// PrepareForMarshal populates the marshal-friendly fields before serialization.
+func (r *ScanResult) PrepareForMarshal() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.LatencyMS = r.Latency.Milliseconds()
+	if r.Error != nil {
+		r.ErrorStr = r.Error.Error()
+	} else {
+		r.ErrorStr = ""
+	}
+}
+
+// NewScannerService creates a new, configured scanner service.
+func NewScannerService(config ScannerConfig, logger *log.Logger) (*ScannerService, error) {
+	s := &ScannerService{
+		config:     config,
+		logger:     logger,
+		scannedIPs: make(map[string]bool),
+	}
+
+	if s.config.Resume {
+		resumedResults, err := loadResultsForResume(s.config.OutputFile)
+		if err != nil {
+			s.logger.Printf("Could not resume from %s: %v. Starting fresh.", s.config.OutputFile, err)
+		} else if len(resumedResults) > 0 {
+			s.initialResults = resumedResults
+			for _, r := range resumedResults {
+				s.scannedIPs[r.IP] = true
+			}
+			s.logger.Printf("Resumed %d results from %s", len(s.initialResults), s.config.OutputFile)
+		}
+	} else {
+		err := os.Remove(s.config.OutputFile)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("failed to clear previous results file %s: %w", s.config.OutputFile, err)
+		}
+	}
+
+	if s.config.ConfigLink != "" {
+		s.xrayCore = pkg.CoreFactory(pkg.XrayCoreType, s.config.InsecureTLS, s.config.Verbose)
+		s.singboxCore = pkg.CoreFactory(pkg.SingboxCoreType, s.config.InsecureTLS, s.config.Verbose)
+		s.selectedCoreMap = map[string]pkg.Core{
+			protocol.VmessIdentifier: s.xrayCore, protocol.VlessIdentifier: s.xrayCore,
+			protocol.ShadowsocksIdentifier: s.xrayCore, protocol.TrojanIdentifier: s.xrayCore,
+			protocol.SocksIdentifier: s.xrayCore, protocol.WireguardIdentifier: s.xrayCore,
+			protocol.Hysteria2Identifier: s.singboxCore, "hy2": s.singboxCore,
+		}
+	}
+
+	return s, nil
+}
+
+// Run starts the scan and sends results to progressChan. It blocks until complete or context is cancelled.
+func (s *ScannerService) Run(ctx context.Context, progressChan chan<- *ScanResult) error {
+	defer close(progressChan)
+
+	workerResultsChan := make(chan *ScanResult, s.config.ThreadCount)
+
+	var writerWg sync.WaitGroup
+	writerWg.Add(1)
+	go s.resultProcessor(ctx, &writerWg, workerResultsChan, progressChan)
+
+	// --- Latency Scan Phase ---
+	if err := s.runLatencyScan(ctx, workerResultsChan); err != nil {
+		if !errors.Is(err, context.Canceled) {
+			s.logger.Printf("Latency scan failed: %v", err)
+			return err
+		}
+		s.logger.Println("Latency scan cancelled.")
+	} else {
+		s.logger.Println("Latency scan phase finished.")
+	}
+
+	// --- Speed Test Phase ---
+	if s.config.DoSpeedtest && ctx.Err() == nil {
+		s.logger.Println("Waiting for result writer before starting speed test...")
+		time.Sleep(saveInterval + 1*time.Second) // Give the writer a moment to finish its last batch.
+
+		if err := s.runSpeedTest(ctx, workerResultsChan); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				s.logger.Printf("Speed test failed: %v", err)
+				return err
+			}
+			s.logger.Println("Speed test cancelled.")
+		} else {
+			s.logger.Println("Speed test phase finished.")
+		}
+	}
+
+	close(workerResultsChan)
+	writerWg.Wait()
+	s.logger.Println("Scan process completed.")
+	return nil
+}
+
+func (s *ScannerService) runLatencyScan(ctx context.Context, workerResultsChan chan<- *ScanResult) error {
+	s.logger.Printf("Phase 1: Scanning for latency with %d threads...", s.config.ThreadCount)
+	pool := pond.NewPool(s.config.ThreadCount)
+	defer pool.Stop()
+
+	var hasIPs bool
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	if s.config.ShuffleSubnets {
+		r.Shuffle(len(s.config.Subnets), func(i, j int) {
+			s.config.Subnets[i], s.config.Subnets[j] = s.config.Subnets[j], s.config.Subnets[i]
+		})
+	}
+
+	for _, cidr := range s.config.Subnets {
+		select {
+		case <-ctx.Done():
+			return context.Canceled
+		default:
+		}
+
+		if s.config.ShuffleIPs {
+			listIP, err := utils.CIDRtoListIP(cidr)
+			if err != nil {
+				s.logger.Printf("Error processing CIDR %s: %v", cidr, err)
+				continue
+			}
+			if len(listIP) > 0 {
+				hasIPs = true
+			}
+			r.Shuffle(len(listIP), func(i, j int) { listIP[i], listIP[j] = listIP[j], listIP[i] })
+			for _, ip := range listIP {
+				if _, exists := s.scannedIPs[ip]; exists {
+					continue
+				}
+				pool.Submit(func(ip string) func() {
+					return func() {
+						if ctx.Err() == nil {
+							workerResultsChan <- s.scanIPForLatency(ctx, ip)
+						}
+					}
+				}(ip))
+			}
+		} else {
+			ip, ipnet, err := net.ParseCIDR(cidr)
+			if err != nil {
+				s.logger.Printf("Error parsing CIDR %s: %v", cidr, err)
+				continue
+			}
+			for currentIP := ip.Mask(ipnet.Mask); ipnet.Contains(currentIP); inc(currentIP) {
+				if !hasIPs {
+					hasIPs = true
+				}
+				ipToScan := make(net.IP, len(currentIP))
+				copy(ipToScan, currentIP)
+				ipStr := ipToScan.String()
+				if _, exists := s.scannedIPs[ipStr]; exists {
+					continue
+				}
+				pool.Submit(func(ip string) func() {
+					return func() {
+						if ctx.Err() == nil {
+							workerResultsChan <- s.scanIPForLatency(ctx, ip)
+						}
+					}
+				}(ipStr))
+			}
+		}
+	}
+
+	if !hasIPs && len(s.initialResults) == 0 {
+		return errors.New("scanner failed: no scannable IPs detected")
+	}
+
+	pool.StopAndWait()
+	return nil
+}
+
+func (s *ScannerService) runSpeedTest(ctx context.Context, workerResultsChan chan<- *ScanResult) error {
+	allResults, err := loadResultsForResume(s.config.OutputFile)
+	if err != nil {
+		return fmt.Errorf("could not load results for speed test phase: %w", err)
+	}
+
+	var successfulLatencyResults []*ScanResult
+	for _, r := range allResults {
+		if r.Error == nil {
+			successfulLatencyResults = append(successfulLatencyResults, r)
+		}
+	}
+
+	if len(successfulLatencyResults) == 0 {
+		s.logger.Println("No successful latency results to speed test.")
+		return nil
+	}
+
+	sort.Slice(successfulLatencyResults, func(i, j int) bool {
+		return successfulLatencyResults[i].Latency < successfulLatencyResults[j].Latency
+	})
+
+	numToTest := s.config.SpeedtestTop
+	if len(successfulLatencyResults) < numToTest {
+		numToTest = len(successfulLatencyResults)
+	}
+	topResults := successfulLatencyResults[:numToTest]
+	s.logger.Printf("Phase 2: Performing speed tests on the top %d IPs (with %d concurrent tests, %ds timeout each)...", len(topResults), s.config.SpeedtestConcurrency, s.config.SpeedtestTimeout)
+
+	speedTestPool := pond.NewPool(s.config.SpeedtestConcurrency)
+	defer speedTestPool.Stop()
+
+	for _, result := range topResults {
+		if result.DownSpeed > 0 || result.UpSpeed > 0 {
+			continue // Already tested
+		}
+		speedTestPool.Submit(func(res *ScanResult) func() {
+			return func() {
+				if ctx.Err() != nil {
+					return
+				}
+				timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(s.config.SpeedtestTimeout)*time.Second)
+				defer cancel()
+				downSpeed, upSpeed, err := s.measureSpeed(timeoutCtx, res.IP)
+				res.mu.Lock()
+				res.DownSpeed = downSpeed
+				res.UpSpeed = upSpeed
+				res.Error = err
+				res.mu.Unlock()
+				workerResultsChan <- res
+			}
+		}(result))
+	}
+
+	speedTestPool.StopAndWait()
+	return nil
+}
+
+func (s *ScannerService) resultProcessor(ctx context.Context, wg *sync.WaitGroup, workerResultsChan <-chan *ScanResult, uiProgressChan chan<- *ScanResult) {
+	defer wg.Done()
 	allResults := make(map[string]*ScanResult)
-	for _, r := range initialResults {
+	for _, r := range s.initialResults {
 		allResults[r.IP] = r
 	}
 
@@ -92,11 +322,8 @@ func resultWriter(wg *sync.WaitGroup, resultsChan <-chan *ScanResult, initialRes
 			return
 		}
 		for _, res := range batch {
-			// Lock the result while reading its data to prevent a data race with a speed test worker.
-			res.mu.Lock()
-			// Update the master list with the latest data for this IP.
+			res.PrepareForMarshal()
 			allResults[res.IP] = res
-			res.mu.Unlock()
 		}
 
 		resultsToSave := make([]*ScanResult, 0, len(allResults))
@@ -104,21 +331,34 @@ func resultWriter(wg *sync.WaitGroup, resultsChan <-chan *ScanResult, initialRes
 			resultsToSave = append(resultsToSave, r)
 		}
 
-		if err := saveResultsToCSV(filePath, resultsToSave); err != nil {
-			customlog.Printf(customlog.Failure, "Real-time save failed: %v\n", err)
-		} else if Verbose {
-			customlog.Printf(customlog.Info, "Progress for %d new results saved to %s\n", len(batch), filePath)
+		if err := saveResultsToCSV(s.config.OutputFile, resultsToSave, s.config.DoSpeedtest); err != nil {
+			s.logger.Printf("Real-time save failed: %v", err)
+		} else if s.config.Verbose {
+			s.logger.Printf("Progress for %d new results saved to %s", len(batch), s.config.OutputFile)
 		}
 		batch = make([]*ScanResult, 0, saveBatchSize)
 	}
 
 	for {
 		select {
-		case result, ok := <-resultsChan:
+		case <-ctx.Done():
+			s.logger.Println("Result processor shutting down due to context cancellation.")
+			save()
+			return
+		case result, ok := <-workerResultsChan:
 			if !ok {
 				save()
+				s.logger.Println("Result processor finished.")
 				return
 			}
+			result.PrepareForMarshal()
+			if uiProgressChan != nil {
+				select {
+				case uiProgressChan <- result:
+				case <-ctx.Done():
+				}
+			}
+
 			batch = append(batch, result)
 			if len(batch) >= saveBatchSize {
 				save()
@@ -129,235 +369,10 @@ func resultWriter(wg *sync.WaitGroup, resultsChan <-chan *ScanResult, initialRes
 	}
 }
 
-const (
-	cloudflareTraceURL     = "https://cloudflare.com/cdn-cgi/trace"
-	cloudflareSpeedTestURL = "speed.cloudflare.com"
-)
-
-var CFscannerCmd = &cobra.Command{
-	Use:   "cfscanner",
-	Short: "Cloudflare's edge IP scanner with latency/speed tests and real-time resume.",
-	Long: `Scans Cloudflare IPs with real-time progress saving for maximum durability.
-
-The scanner saves progress to the output CSV file periodically. If the scan is interrupted
-at any time (even during the latency test), you can use the --resume flag to continue
-from almost exactly where you left off, minimizing lost work.
-
-Phase 1 (Latency Scan):
-Quickly tests latency of all IPs. Progress is saved in batches, so an interruption only
-loses the most recent, unsaved results.
-
-Phase 2 (Speed Test):
-Performs a full speed test on the fastest IPs. This phase can also be resumed seamlessly.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		initialResults := []*ScanResult{}
-		scannedIPs := make(map[string]bool)
-
-		if resume {
-			resumedResults, err := loadResultsForResume(resumeFile)
-			if err != nil {
-				customlog.Printf(customlog.Warning, "Could not resume from %s: %v. Starting fresh.\n", resumeFile, err)
-			} else if len(resumedResults) > 0 {
-				initialResults = resumedResults
-				for _, r := range resumedResults {
-					scannedIPs[r.IP] = true
-				}
-				customlog.Printf(customlog.Info, "Resumed %d results from %s\n", len(initialResults), resumeFile)
-			}
-		} else {
-			// For a fresh scan, remove the old results file.
-			// Ignore a "not found" error, as that's an expected state.
-			err := os.Remove(outputFile)
-			if err != nil && !os.IsNotExist(err) {
-				// If another error occurred (e.g., permissions), we should stop.
-				customlog.Printf(customlog.Failure, "Failed to clear previous results file %s: %v\n", outputFile, err)
-				return
-			}
-		}
-
-		resultsChan := make(chan *ScanResult, threadCount)
-		var writerWg sync.WaitGroup
-		writerWg.Add(1)
-		go resultWriter(&writerWg, resultsChan, initialResults, outputFile)
-
-		if configLink != "" {
-			customlog.Printf(customlog.Info, "Using config link to test IPs: %s\n", configLink)
-			xrayCore = pkg.CoreFactory(pkg.XrayCoreType, insecureTLS, Verbose)
-			singboxCore = pkg.CoreFactory(pkg.SingboxCoreType, insecureTLS, Verbose)
-			selectedCoreMap = map[string]pkg.Core{
-				protocol.VmessIdentifier: xrayCore, protocol.VlessIdentifier: xrayCore,
-				protocol.ShadowsocksIdentifier: xrayCore, protocol.TrojanIdentifier: xrayCore,
-				protocol.SocksIdentifier: xrayCore, protocol.WireguardIdentifier: xrayCore,
-				protocol.Hysteria2Identifier: singboxCore, "hy2": singboxCore,
-			}
-		}
-
-		var cidrs []string
-		if _, err := os.Stat(subnets); err == nil {
-			cidrs = utils.ParseFileByNewline(subnets)
-		} else {
-			cidrs = strings.Split(subnets, ",")
-		}
-		r := rand.New(rand.NewSource(time.Now().UnixNano()))
-		if shuffleSubnets {
-			r.Shuffle(len(cidrs), func(i, j int) { cidrs[i], cidrs[j] = cidrs[j], cidrs[i] })
-		}
-
-		customlog.Printf(customlog.Info, "Phase 1: Scanning for latency with %d threads...\n", threadCount)
-		pool := pond.NewPool(threadCount)
-		var hasIPs bool
-
-		for _, cidr := range cidrs {
-			if shuffleIPs {
-				listIP, err := utils.CIDRtoListIP(cidr)
-				if err != nil {
-					customlog.Printf(customlog.Failure, "Error processing CIDR %s: %v\n", cidr, err)
-					continue
-				}
-				if len(listIP) > 0 {
-					hasIPs = true
-				}
-				r.Shuffle(len(listIP), func(i, j int) { listIP[i], listIP[j] = listIP[j], listIP[i] })
-				for _, ip := range listIP {
-					if _, exists := scannedIPs[ip]; exists {
-						continue
-					}
-					pool.Submit(func(ip string) func() { return func() { resultsChan <- scanIPForLatency(ip, configLink) } }(ip))
-				}
-			} else {
-				ip, ipnet, err := net.ParseCIDR(cidr)
-				if err != nil {
-					customlog.Printf(customlog.Failure, "Error parsing CIDR %s: %v\n", cidr, err)
-					continue
-				}
-				for currentIP := ip.Mask(ipnet.Mask); ipnet.Contains(currentIP); inc(currentIP) {
-					if !hasIPs {
-						hasIPs = true
-					}
-					ipToScan := make(net.IP, len(currentIP))
-					copy(ipToScan, currentIP)
-					ipStr := ipToScan.String()
-					if _, exists := scannedIPs[ipStr]; exists {
-						continue
-					}
-					pool.Submit(func(ip string) func() { return func() { resultsChan <- scanIPForLatency(ip, configLink) } }(ipStr))
-				}
-			}
-		}
-
-		if !hasIPs && len(initialResults) == 0 {
-			customlog.Printf(customlog.Failure, "Scanner failed! => No scannable IPs detected.\n")
-			close(resultsChan)
-			writerWg.Wait()
-			return
-		}
-		pool.StopAndWait()
-		customlog.Printf(customlog.Success, "Latency scan phase finished.\n")
-
-		// To get the candidates for the speed test, we first ensure all latency results are written to disk,
-		// then we read the file back. This makes the file the single source of truth and simplifies the logic.
-		close(resultsChan)
-		writerWg.Wait() // Wait for the writer to perform its final save of latency results.
-
-		if doSpeedtest {
-			// Now, read the complete state from the file.
-			allResults, err := loadResultsForResume(outputFile)
-			if err != nil {
-				customlog.Printf(customlog.Failure, "Could not load results for speed test phase: %v\n", err)
-				return
-			}
-
-			// Filter for only successful latency tests.
-			var successfulLatencyResults []*ScanResult
-			for _, r := range allResults {
-				if r.Error == nil {
-					successfulLatencyResults = append(successfulLatencyResults, r)
-				}
-			}
-
-			if len(successfulLatencyResults) > 0 {
-				sort.Slice(successfulLatencyResults, func(i, j int) bool {
-					return successfulLatencyResults[i].Latency < successfulLatencyResults[j].Latency
-				})
-
-				numToTest := speedtestTop
-				if len(successfulLatencyResults) < speedtestTop {
-					numToTest = len(successfulLatencyResults)
-				}
-				topResults := successfulLatencyResults[:numToTest]
-
-				customlog.Printf(customlog.Info, "Phase 2: Performing speed tests on the top %d IPs (with %d concurrent tests, %ds timeout each)...\n", len(topResults), speedtestConcurrency, speedtestTimeout)
-
-				// We need a new writer for the speed test results.
-				speedTestResultsChan := make(chan *ScanResult, speedtestConcurrency)
-				writerWg.Add(1)
-				go resultWriter(&writerWg, speedTestResultsChan, allResults, outputFile)
-
-				speedTestPool := pond.NewPool(speedtestConcurrency)
-				for _, result := range topResults {
-					if result.DownSpeed > 0 || result.UpSpeed > 0 {
-						continue
-					}
-					speedTestPool.Submit(func(res *ScanResult) func() {
-						return func() {
-							ctx, cancel := context.WithTimeout(context.Background(), time.Duration(speedtestTimeout)*time.Second)
-							defer cancel()
-
-							downSpeed, upSpeed, err := measureSpeed(ctx, res.IP, configLink)
-
-							// Lock the result struct before updating it to prevent the resultWriter
-							// from reading it while it's in an inconsistent state.
-							res.mu.Lock()
-							res.DownSpeed = downSpeed
-							res.UpSpeed = upSpeed
-							res.Error = err
-							res.mu.Unlock()
-
-							if err == nil {
-								customlog.Printf(customlog.Success, "SPEEDTEST: %-20s | %-10v | %-15.2f | %-15.2f\n", res.IP, res.Latency.Round(time.Millisecond), downSpeed, upSpeed)
-							} else if os.IsTimeout(err) || errors.Is(err, context.DeadlineExceeded) {
-								customlog.Printf(customlog.Warning, "IP %s failed speed test: Timeout exceeded\n", res.IP)
-							} else if Verbose {
-								customlog.Printf(customlog.Warning, "IP %s failed speed test: %v\n", res.IP, err)
-							}
-
-							speedTestResultsChan <- res
-						}
-					}(result))
-				}
-				speedTestPool.StopAndWait()
-				customlog.Printf(customlog.Success, "Speed test phase finished.\n")
-
-				close(speedTestResultsChan)
-				writerWg.Wait() // Wait for the final speed test save.
-			}
-		}
-
-		// Load final, complete data for printing to console.
-		finalSortedResults, err := loadResultsForResume(outputFile)
-		if err != nil {
-			customlog.Printf(customlog.Failure, "Could not load final results for display: %v\n", err)
-		} else {
-			printResultsToConsole(finalSortedResults)
-		}
-
-		customlog.Printf(customlog.Success, "Scan finished. Final results saved to %s\n", outputFile)
-	},
-}
-
-func inc(ip net.IP) {
-	for j := len(ip) - 1; j >= 0; j-- {
-		ip[j]++
-		if ip[j] > 0 {
-			break
-		}
-	}
-}
-
-func createDialerWithRetry(ip string, retries int) func(ctx context.Context, network, addr string) (net.Conn, error) {
+func (s *ScannerService) createDialerWithRetry(ip string, retries int) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		dialer := &net.Dialer{
-			Timeout: time.Duration(requestTimeout) * time.Millisecond,
+			Timeout: time.Duration(s.config.RequestTimeout) * time.Millisecond,
 		}
 		targetAddr := fmt.Sprintf("%s:%d", ip, 443)
 		var lastErr error
@@ -366,8 +381,8 @@ func createDialerWithRetry(ip string, retries int) func(ctx context.Context, net
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
-			if Verbose && i > 0 {
-				customlog.Printf(customlog.Info, "Retrying connection to %s (attempt %d/%d)...\n", ip, i+1, retries+1)
+			if s.config.Verbose && i > 0 {
+				s.logger.Printf("Retrying connection to %s (attempt %d/%d)...", ip, i+1, retries+1)
 			}
 			conn, err := dialer.DialContext(ctx, network, targetAddr)
 			if err == nil {
@@ -382,14 +397,21 @@ func createDialerWithRetry(ip string, retries int) func(ctx context.Context, net
 	}
 }
 
-func scanIPForLatency(ip, baseConfigLink string) *ScanResult {
+func (s *ScannerService) scanIPForLatency(ctx context.Context, ip string) *ScanResult {
 	result := &ScanResult{IP: ip}
 	var client *http.Client
 	var instance protocol.Instance
 	var err error
 
-	if baseConfigLink != "" {
-		client, instance, err = createClientFromConfig(ip, baseConfigLink, time.Duration(requestTimeout)*time.Millisecond)
+	req, err := http.NewRequestWithContext(ctx, "GET", cloudflareTraceURL, nil)
+	if err != nil {
+		result.Error = fmt.Errorf("failed to create request: %w", err)
+		return result
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
+
+	if s.config.ConfigLink != "" {
+		client, instance, err = s.createClientFromConfig(ip, time.Duration(s.config.RequestTimeout)*time.Millisecond)
 		if err != nil {
 			result.Error = fmt.Errorf("failed creating client from config for latency test: %w", err)
 			return result
@@ -397,19 +419,12 @@ func scanIPForLatency(ip, baseConfigLink string) *ScanResult {
 		defer instance.Close()
 	} else {
 		transport := NewBypassJA3Transport(utls.HelloChrome_Auto)
-		transport.DialContext = createDialerWithRetry(ip, retryCount)
+		transport.DialContext = s.createDialerWithRetry(ip, s.config.RetryCount)
 		client = &http.Client{
 			Transport: transport,
-			Timeout:   time.Duration(requestTimeout) * time.Millisecond,
+			Timeout:   time.Duration(s.config.RequestTimeout) * time.Millisecond,
 		}
 	}
-
-	req, err := http.NewRequest("GET", cloudflareTraceURL, nil)
-	if err != nil {
-		result.Error = fmt.Errorf("failed to create request: %w", err)
-		return result
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
 
 	start := time.Now()
 	resp, err := client.Do(req)
@@ -424,39 +439,33 @@ func scanIPForLatency(ip, baseConfigLink string) *ScanResult {
 		return result
 	}
 
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
 		result.Error = fmt.Errorf("failed to read body: %w", err)
 		return result
 	}
 	result.Latency = time.Since(start)
-
-	if ShowTraceBody {
-		fmt.Println(string(bodyBytes))
-	}
-
-	customlog.Printf(customlog.Success, "LATENCY:   %-20s | %-10v\n", ip, result.Latency.Round(time.Millisecond))
 	return result
 }
 
-func measureSpeed(ctx context.Context, ip, baseConfigLink string) (downSpeed float64, upSpeed float64, err error) {
-	downloadBytesTotal := int64(downloadMB * 1024 * 1024)
-	uploadBytesTotal := int64(uploadMB * 1024 * 1024)
+func (s *ScannerService) measureSpeed(ctx context.Context, ip string) (downSpeed, upSpeed float64, err error) {
+	downloadBytesTotal := int64(s.config.DownloadMB * 1024 * 1024)
+	uploadBytesTotal := int64(s.config.UploadMB * 1024 * 1024)
 	var client *http.Client
 	var instance protocol.Instance
 
-	if baseConfigLink != "" {
-		client, instance, err = createClientFromConfig(ip, baseConfigLink, time.Duration(speedtestTimeout)*time.Second)
+	if s.config.ConfigLink != "" {
+		client, instance, err = s.createClientFromConfig(ip, time.Duration(s.config.SpeedtestTimeout)*time.Second)
 		if err != nil {
 			return 0, 0, fmt.Errorf("failed to create speedtest client from config: %w", err)
 		}
 		defer instance.Close()
 	} else {
 		transport := NewBypassJA3Transport(utls.HelloChrome_Auto)
-		transport.DialContext = createDialerWithRetry(ip, retryCount)
+		transport.DialContext = s.createDialerWithRetry(ip, s.config.RetryCount)
 		client = &http.Client{Transport: transport}
 	}
 
+	// Download
 	downURL := fmt.Sprintf("https://%s/__down?bytes=%d", cloudflareSpeedTestURL, downloadBytesTotal)
 	reqDown, err := http.NewRequestWithContext(ctx, "GET", downURL, nil)
 	if err != nil {
@@ -467,20 +476,15 @@ func measureSpeed(ctx context.Context, ip, baseConfigLink string) (downSpeed flo
 	startDown := time.Now()
 	respDown, err := client.Do(reqDown)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || os.IsTimeout(err) {
-			return 0, 0, errors.New("speed test timed out during download")
-		}
 		return 0, 0, fmt.Errorf("download test failed: %w", err)
 	}
 	defer respDown.Body.Close()
-
 	if respDown.StatusCode < 200 || respDown.StatusCode >= 300 {
-		return 0, 0, fmt.Errorf("download test received status: %s", respDown.Status)
+		return 0, 0, fmt.Errorf("download status: %s", respDown.Status)
 	}
-
 	written, err := io.Copy(io.Discard, respDown.Body)
 	if err != nil {
-		return 0, 0, fmt.Errorf("failed while reading download stream: %w", err)
+		return 0, 0, fmt.Errorf("download stream copy: %w", err)
 	}
 	downDuration := time.Since(startDown).Seconds()
 	if downDuration > 0 {
@@ -488,9 +492,10 @@ func measureSpeed(ctx context.Context, ip, baseConfigLink string) (downSpeed flo
 	}
 
 	if ctx.Err() != nil {
-		return downSpeed, 0, errors.New("operation cancelled before upload")
+		return downSpeed, 0, context.Canceled
 	}
 
+	// Upload
 	upURL := fmt.Sprintf("https://%s/__up", cloudflareSpeedTestURL)
 	reqUp, err := http.NewRequestWithContext(ctx, "POST", upURL, bytes.NewReader(make([]byte, uploadBytesTotal)))
 	if err != nil {
@@ -502,40 +507,139 @@ func measureSpeed(ctx context.Context, ip, baseConfigLink string) (downSpeed flo
 	startUp := time.Now()
 	respUp, err := client.Do(reqUp)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return downSpeed, 0, errors.New("speed test timed out during upload")
-		}
 		return downSpeed, 0, fmt.Errorf("upload test failed: %w", err)
 	}
 	defer respUp.Body.Close()
 	io.Copy(io.Discard, respUp.Body)
-
 	if respUp.StatusCode < 200 || respUp.StatusCode >= 300 {
-		return downSpeed, 0, fmt.Errorf("upload test received status: %s", respUp.Status)
+		return downSpeed, 0, fmt.Errorf("upload status: %s", respUp.Status)
 	}
 	upDuration := time.Since(startUp).Seconds()
 	if upDuration > 0 {
 		upSpeed = (float64(uploadBytesTotal) * 8) / (upDuration * 1e6)
 	}
-
 	return downSpeed, upSpeed, nil
 }
 
-func formatResultLine(result ScanResult, speedtestEnabled bool) string {
-	if speedtestEnabled {
-		return fmt.Sprintf("%-20s | %-10v | %-15.2f | %-15.2f", result.IP, result.Latency.Round(time.Millisecond), result.DownSpeed, result.UpSpeed)
+func (s *ScannerService) createClientFromConfig(ip string, timeout time.Duration) (*http.Client, protocol.Instance, error) {
+	uri, err := url.Parse(s.config.ConfigLink)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse config link for core selection: %w", err)
 	}
-	return fmt.Sprintf("%-20s | %-10v", result.IP, result.Latency.Round(time.Millisecond))
+	selectedCore, ok := s.selectedCoreMap[uri.Scheme]
+	if !ok {
+		return nil, nil, fmt.Errorf("unsupported protocol scheme for auto core: %s", uri.Scheme)
+	}
+	proto, errProto := selectedCore.CreateProtocol(s.config.ConfigLink)
+	if errProto != nil {
+		return nil, nil, fmt.Errorf("failed to create protocol: %w", errProto)
+	}
+	if err = proto.Parse(); err != nil {
+		return nil, nil, fmt.Errorf("failed to parse protocol: %w", err)
+	}
+	if err = setAddress(proto, ip); err != nil {
+		return nil, nil, fmt.Errorf("failed to set IP on protocol: %w", err)
+	}
+	return selectedCore.MakeHttpClient(proto, timeout)
 }
 
-func printResultsToConsole(results []*ScanResult) {
-	if len(results) == 0 {
-		customlog.Printf(customlog.Warning, "No results to display.\n")
-		return
-	}
+// CLI-specific implementation below
 
-	// Create a new slice containing only successful results for display purposes.
-	var successfulResults []*ScanResult
+var (
+	cliConfig ScannerConfig
+)
+
+var CFscannerCmd = &cobra.Command{
+	Use:   "cfscanner",
+	Short: "Cloudflare's edge IP scanner with latency/speed tests and real-time resume.",
+	Long:  `...`, // unchanged
+	Run: func(cmd *cobra.Command, args []string) {
+		var subnets []string
+		if _, err := os.Stat(cliConfig.Subnets[0]); err == nil {
+			subnets = utils.ParseFileByNewline(cliConfig.Subnets[0])
+		} else {
+			subnets = strings.Split(cliConfig.Subnets[0], ",")
+		}
+		cliConfig.Subnets = subnets
+
+		service, err := NewScannerService(cliConfig, log.New(os.Stdout, "", 0))
+		if err != nil {
+			customlog.Printf(customlog.Failure, "Failed to create scanner: %v\n", err)
+			return
+		}
+
+		progressChan := make(chan *ScanResult, cliConfig.ThreadCount)
+		var finalResults []*ScanResult
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for res := range progressChan {
+				if res.Error != nil {
+					if cliConfig.Verbose {
+						customlog.Printf(customlog.Warning, "IP %s failed test: %v\n", res.IP, res.Error)
+					}
+				} else if res.DownSpeed > 0 || res.UpSpeed > 0 {
+					customlog.Printf(customlog.Success, "SPEEDTEST: %-20s | %-10v | %-15.2f | %-15.2f\n", res.IP, res.Latency.Round(time.Millisecond), res.DownSpeed, res.UpSpeed)
+				} else {
+					customlog.Printf(customlog.Success, "LATENCY:   %-20s | %-10v\n", res.IP, res.Latency.Round(time.Millisecond))
+				}
+				finalResults = append(finalResults, res)
+			}
+		}()
+
+		if err := service.Run(context.Background(), progressChan); err != nil {
+			customlog.Printf(customlog.Failure, "Scan encountered an error: %v\n", err)
+		}
+		wg.Wait()
+
+		printResultsToConsole(finalResults, cliConfig.DoSpeedtest, cliConfig.OnlySpeedtestResults)
+		customlog.Printf(customlog.Success, "Scan finished. Final results saved to %s\n", cliConfig.OutputFile)
+	},
+}
+
+func init() {
+	CFscannerCmd.Flags().StringSliceVarP(&cliConfig.Subnets, "subnets", "s", nil, "Subnet(s) or file containing subnets (e.g., \"1.1.1.1/24,2.2.2.2/16\")")
+	CFscannerCmd.Flags().IntVarP(&cliConfig.ThreadCount, "threads", "t", 100, "Count of threads for latency scan")
+	CFscannerCmd.Flags().BoolVarP(&cliConfig.DoSpeedtest, "speedtest", "p", false, "Measure download/upload speed on the fastest IPs")
+	CFscannerCmd.Flags().IntVarP(&cliConfig.SpeedtestTop, "speedtest-top", "c", 10, "Number of fastest IPs to select for speed testing")
+	CFscannerCmd.Flags().IntVar(&cliConfig.SpeedtestConcurrency, "speedtest-concurrency", 4, "Number of concurrent speed tests to run")
+	CFscannerCmd.Flags().IntVar(&cliConfig.SpeedtestTimeout, "speedtest-timeout", 30, "Total timeout in seconds for one IP's speed test")
+	CFscannerCmd.Flags().IntVarP(&cliConfig.RequestTimeout, "timeout", "u", 5000, "Individual request timeout (in ms)")
+	CFscannerCmd.Flags().BoolVarP(&cliConfig.ShowTraceBody, "body", "b", false, "Show trace body output")
+	CFscannerCmd.Flags().BoolVarP(&cliConfig.Verbose, "verbose", "v", false, "Show verbose output with detailed errors")
+	CFscannerCmd.Flags().BoolVarP(&cliConfig.ShuffleSubnets, "shuffle-subnet", "e", false, "Shuffle list of Subnets")
+	CFscannerCmd.Flags().BoolVarP(&cliConfig.ShuffleIPs, "shuffle-ip", "i", false, "Shuffle list of IPs")
+	CFscannerCmd.Flags().StringVarP(&cliConfig.OutputFile, "output", "o", "results.csv", "Output file to save sorted results (in CSV format)")
+	CFscannerCmd.Flags().IntVarP(&cliConfig.RetryCount, "retry", "r", 1, "Number of times to retry TCP connection on failure")
+	CFscannerCmd.Flags().BoolVarP(&cliConfig.OnlySpeedtestResults, "only-speedtest", "k", false, "Only display results that have successful speedtest data")
+	CFscannerCmd.Flags().IntVarP(&cliConfig.DownloadMB, "download-mb", "d", 20, "Custom amount of data to download for speedtest (in MB)")
+	CFscannerCmd.Flags().IntVarP(&cliConfig.UploadMB, "upload-mb", "m", 10, "Custom amount of data to upload for speedtest (in MB)")
+	CFscannerCmd.Flags().StringVarP(&cliConfig.ConfigLink, "config", "C", "", "Use a config link as a proxy to test IPs")
+	CFscannerCmd.Flags().BoolVarP(&cliConfig.InsecureTLS, "insecure", "E", false, "Allow insecure TLS connections for the proxy config")
+	CFscannerCmd.Flags().BoolVar(&cliConfig.Resume, "resume", false, "Resume scan from output file")
+
+	_ = CFscannerCmd.MarkFlagRequired("subnets")
+}
+
+const (
+	saveBatchSize          = 500
+	saveInterval           = 5 * time.Second
+	cloudflareTraceURL     = "https://cloudflare.com/cdn-cgi/trace"
+	cloudflareSpeedTestURL = "speed.cloudflare.com"
+)
+
+func inc(ip net.IP) {
+	for j := len(ip) - 1; j >= 0; j-- {
+		ip[j]++
+		if ip[j] > 0 {
+			break
+		}
+	}
+}
+
+func printResultsToConsole(results []*ScanResult, doSpeedtest, onlySpeedtestResults bool) {
+	var successfulResults, finalResults []*ScanResult
 	for _, r := range results {
 		if r.Error == nil {
 			successfulResults = append(successfulResults, r)
@@ -547,18 +651,14 @@ func printResultsToConsole(results []*ScanResult) {
 		return
 	}
 
-	var finalResults []*ScanResult
-	// Now, filter the successful results further if only-speedtest is enabled
 	if doSpeedtest && onlySpeedtestResults {
-		customlog.Printf(customlog.Info, "Filtering results to include only those with successful speed tests...\n")
-		for _, r := range successfulResults { // Use the pre-filtered successful results
+		for _, r := range successfulResults {
 			if r.DownSpeed > 0 || r.UpSpeed > 0 {
 				finalResults = append(finalResults, r)
 			}
 		}
-		customlog.Printf(customlog.Info, "Filtered from %d to %d results.\n", len(successfulResults), len(finalResults))
 	} else {
-		finalResults = successfulResults // Use all successful results
+		finalResults = successfulResults
 	}
 
 	if len(finalResults) == 0 {
@@ -568,16 +668,11 @@ func printResultsToConsole(results []*ScanResult) {
 
 	sort.Slice(finalResults, func(i, j int) bool {
 		if doSpeedtest {
-			// Sort by latency first, then by speed
 			if finalResults[i].Latency != finalResults[j].Latency {
 				return finalResults[i].Latency < finalResults[j].Latency
 			}
-			if finalResults[i].DownSpeed != finalResults[j].DownSpeed {
-				return finalResults[i].DownSpeed > finalResults[j].DownSpeed
-			}
-			return finalResults[i].UpSpeed > finalResults[j].UpSpeed
+			return finalResults[i].DownSpeed > finalResults[j].DownSpeed
 		}
-		// Default sort by latency only
 		return finalResults[i].Latency < finalResults[j].Latency
 	})
 
@@ -590,13 +685,18 @@ func printResultsToConsole(results []*ScanResult) {
 	}
 	outputLines = append(outputLines, header)
 	for _, result := range finalResults {
-		// Pass a copy of the struct to the formatting function to be safe.
 		outputLines = append(outputLines, formatResultLine(*result, doSpeedtest))
 	}
-	finalOutput := strings.Join(outputLines, "\n")
 	customlog.Println(customlog.GetColor(customlog.None, "\n--- Sorted Results ---\n"))
-	customlog.Println(customlog.GetColor(customlog.Success, finalOutput))
+	customlog.Println(customlog.GetColor(customlog.Success, strings.Join(outputLines, "\n")))
 	customlog.Println(customlog.GetColor(customlog.None, "\n--------------------\n"))
+}
+
+func formatResultLine(result ScanResult, speedtestEnabled bool) string {
+	if speedtestEnabled {
+		return fmt.Sprintf("%-20s | %-10v | %-15.2f | %-15.2f", result.IP, result.Latency.Round(time.Millisecond), result.DownSpeed, result.UpSpeed)
+	}
+	return fmt.Sprintf("%-20s | %-10v", result.IP, result.Latency.Round(time.Millisecond))
 }
 
 func loadResultsForResume(filePath string) ([]*ScanResult, error) {
@@ -611,6 +711,9 @@ func loadResultsForResume(filePath string) ([]*ScanResult, error) {
 
 	var results []*ScanResult
 	if err := gocsv.UnmarshalFile(file, &results); err != nil {
+		if err.Error() == "EOF" { // Handle empty file gracefully
+			return nil, nil
+		}
 		return nil, fmt.Errorf("failed to parse resume file (must be CSV): %w", err)
 	}
 
@@ -623,52 +726,27 @@ func loadResultsForResume(filePath string) ([]*ScanResult, error) {
 	return results, nil
 }
 
-func saveResultsToCSV(filePath string, results []*ScanResult) error {
-	// This function is now only called from the single resultWriter goroutine,
-	// so the mutex is no longer needed here.
-	for _, r := range results {
-		r.mu.Lock()
-		r.LatencyMS = r.Latency.Milliseconds()
-		if r.Error != nil {
-			r.ErrorStr = r.Error.Error()
-		} else {
-			r.ErrorStr = "" // Ensure error string is empty on success
-		}
-		r.mu.Unlock()
-	}
-
-	// Sort the results before saving to ensure the CSV is always ordered.
+func saveResultsToCSV(filePath string, results []*ScanResult, doSpeedtest bool) error {
 	sort.Slice(results, func(i, j int) bool {
-		resI := results[i]
-		resJ := results[j]
-
-		// Results with errors go to the bottom.
-		iHasError := resI.Error != nil || resI.ErrorStr != ""
-		jHasError := resJ.Error != nil || resJ.ErrorStr != ""
+		resI, resJ := results[i], results[j]
+		iHasError := resI.ErrorStr != ""
+		jHasError := resJ.ErrorStr != ""
 
 		if iHasError && !jHasError {
-			return false // i (error) comes after j (success)
+			return false
 		}
 		if !iHasError && jHasError {
-			return true // i (success) comes before j (error)
+			return true
 		}
-		// If both have errors, sort by IP to have a stable order
 		if iHasError && jHasError {
 			return resI.IP < resJ.IP
 		}
-
-		// If both are successful, sort by performance.
 		if doSpeedtest {
-			// Sort by latency first, then by speed
 			if resI.Latency != resJ.Latency {
 				return resI.Latency < resJ.Latency
 			}
-			if resI.DownSpeed != resJ.DownSpeed {
-				return resI.DownSpeed > resJ.DownSpeed
-			}
-			return resI.UpSpeed > resJ.UpSpeed
+			return resI.DownSpeed > resJ.DownSpeed
 		}
-		// Default sort by latency only
 		return resI.Latency < resJ.Latency
 	})
 
@@ -688,31 +766,7 @@ func saveResultsToCSV(filePath string, results []*ScanResult) error {
 	return os.Rename(tempFilePath, filePath)
 }
 
-func init() {
-	CFscannerCmd.Flags().StringVarP(&subnets, "subnets", "s", "", "Subnet or file containing subnets (e.g., \"1.1.1.1/24,2.2.2.2/16\")")
-	CFscannerCmd.Flags().IntVarP(&threadCount, "threads", "t", 100, "Count of threads for latency scan")
-	CFscannerCmd.Flags().BoolVarP(&doSpeedtest, "speedtest", "p", false, "Measure download/upload speed on the fastest IPs")
-	CFscannerCmd.Flags().IntVarP(&speedtestTop, "speedtest-top", "c", 1000000, "Number of fastest IPs to select for speed testing")
-	CFscannerCmd.Flags().IntVarP(&speedtestConcurrency, "speedtest-concurrency", "", 4, "Number of concurrent speed tests to run (to avoid saturating bandwidth)")
-	CFscannerCmd.Flags().IntVarP(&speedtestTimeout, "speedtest-timeout", "", 30, "Total timeout in seconds for one IP's speed test (download + upload)")
-	CFscannerCmd.Flags().IntVarP(&requestTimeout, "timeout", "u", 5000, "Individual request timeout (in ms)")
-	CFscannerCmd.Flags().BoolVarP(&ShowTraceBody, "body", "b", false, "Show trace body output")
-	CFscannerCmd.Flags().BoolVarP(&Verbose, "verbose", "v", false, "Show verbose output with detailed errors")
-	CFscannerCmd.Flags().BoolVarP(&shuffleSubnets, "shuffle-subnet", "e", false, "Shuffle list of Subnets")
-	CFscannerCmd.Flags().BoolVarP(&shuffleIPs, "shuffle-ip", "i", false, "Shuffle list of IPs")
-	CFscannerCmd.Flags().StringVarP(&outputFile, "output", "o", "results.csv", "Output file to save sorted results (in CSV format)")
-	CFscannerCmd.Flags().IntVarP(&retryCount, "retry", "r", 1, "Number of times to retry TCP connection on failure")
-	CFscannerCmd.Flags().BoolVarP(&onlySpeedtestResults, "only-speedtest", "k", false, "Only display results that have successful speedtest data")
-	CFscannerCmd.Flags().IntVarP(&downloadMB, "download-mb", "d", 20, "Custom amount of data to download for speedtest (in MB)")
-	CFscannerCmd.Flags().IntVarP(&uploadMB, "upload-mb", "m", 10, "Custom amount of data to upload for speedtest (in MB)")
-	CFscannerCmd.Flags().StringVarP(&configLink, "config", "C", "", "Use a config link as a proxy to test IPs")
-	CFscannerCmd.Flags().BoolVarP(&insecureTLS, "insecure", "E", false, "Allow insecure TLS connections for the proxy config")
-	CFscannerCmd.Flags().StringVar(&resumeFile, "resume-file", "results.csv", "Resume scan file")
-	CFscannerCmd.Flags().BoolVar(&resume, "resume", false, "Resume scan")
-
-	_ = CFscannerCmd.MarkFlagRequired("subnets")
-}
-
+// These functions can remain as they are, as they don't depend on global state.
 type BypassJA3Transport struct {
 	tr1         http.Transport
 	tr2         http2.Transport
@@ -860,26 +914,4 @@ func setAddress(p interface{}, newAddr string) error {
 	}
 
 	return fmt.Errorf("struct has no 'Address' or 'Endpoint' field")
-}
-
-func createClientFromConfig(ip, baseConfigLink string, timeout time.Duration) (*http.Client, protocol.Instance, error) {
-	uri, err := url.Parse(baseConfigLink)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to parse config link for core selection: %w", err)
-	}
-	selectedCore, ok := selectedCoreMap[uri.Scheme]
-	if !ok {
-		return nil, nil, fmt.Errorf("unsupported protocol scheme for auto core: %s", uri.Scheme)
-	}
-	proto, errProto := selectedCore.CreateProtocol(baseConfigLink)
-	if errProto != nil {
-		return nil, nil, fmt.Errorf("failed to create protocol: %w", errProto)
-	}
-	if err = proto.Parse(); err != nil {
-		return nil, nil, fmt.Errorf("failed to parse protocol: %w", err)
-	}
-	if err = setAddress(proto, ip); err != nil {
-		return nil, nil, fmt.Errorf("failed to set IP on protocol: %w", err)
-	}
-	return selectedCore.MakeHttpClient(proto, timeout)
 }

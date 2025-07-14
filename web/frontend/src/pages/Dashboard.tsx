@@ -3,6 +3,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
+import { toast } from "sonner";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -16,16 +17,20 @@ import {
 } from "@/components/ui/breadcrumb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Server, Globe, TerminalSquare } from 'lucide-react';
+import { Server, Globe, Search, TerminalSquare } from 'lucide-react';
 
 import { ProxyTab } from "./dashboard/ProxyTab";
 import { HttpTesterTab, type HttpResult } from "./dashboard/HttpTesterTab";
+import { CfScannerTab, type ScanResult, type ScanStatus } from "./dashboard/CFScannerTab";
 
 export type ProxyStatus = 'stopped' | 'running' | 'starting' | 'stopping';
 
+
 export default function Dashboard() {
     const [proxyStatus, setProxyStatus] = useState<ProxyStatus>('stopped');
+    const [scanStatus, setScanStatus] = useState<ScanStatus>('idle');
     const [httpResults, setHttpResults] = useState<HttpResult[]>([]);
+    const [scanResults, setScanResults] = useState<ScanResult[]>([]);
 
     const terminalRef = useRef<HTMLDivElement>(null);
     const term = useRef<Terminal | null>(null);
@@ -37,18 +42,35 @@ export default function Dashboard() {
         const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
         ws.current = new WebSocket(wsUrl);
 
-        ws.current.onopen = () => {
-            console.log("WebSocket connected");
-            term.current?.writeln("\x1b[32m[WebSocket] Connection established.\x1b[0m");
-        };
+        ws.current.onopen = () => term.current?.writeln("\x1b[32m[WebSocket] Connection established.\x1b[0m");
 
         ws.current.onmessage = (event) => {
             try {
                 const message = JSON.parse(event.data);
-                if (message.type === 'http_result' && message.data) {
-                    setHttpResults(prevResults => [...prevResults, message.data]);
-                } else {
-                    term.current?.write(event.data);
+                switch (message.type) {
+                    case 'http_result':
+                        setHttpResults(prev => [...prev, message.data]);
+                        break;
+                    case 'cfscan_result':
+                        setScanResults(prev => {
+                            const newResults = prev.filter(r => r.ip !== message.data.ip);
+                            newResults.push(message.data);
+                            return newResults;
+                        });
+                        break;
+                    case 'cfscan_status':
+                        // FIX: Ensure UI state is reset on both 'finished' and 'error'
+                        if (message.data === 'finished') {
+                            setScanStatus('idle');
+                            toast.success("Cloudflare scan finished.");
+                        } else if (message.data === 'error') {
+                            setScanStatus('idle');
+                            toast.error(`Scan failed: ${message.message}`);
+                        }
+                        break;
+                    default:
+                        // For generic log messages
+                        term.current?.write(event.data);
                 }
             } catch (e) {
                 // If it's not valid JSON, treat it as a raw log line.
@@ -57,7 +79,6 @@ export default function Dashboard() {
         };
 
         ws.current.onclose = () => {
-            console.log("WebSocket disconnected. Attempting to reconnect...");
             term.current?.writeln("\x1b[31m[WebSocket] Connection closed. Retrying in 3 seconds...\x1b[0m");
             setTimeout(connectWebSocket, 3000);
         };
@@ -95,17 +116,15 @@ export default function Dashboard() {
         }
     }, [connectWebSocket]);
 
-    const getStatusColor = (status: ProxyStatus) => {
+    const getProxyStatusColor = (status: ProxyStatus) => {
         switch (status) {
             case 'running': return 'bg-green-500 text-white';
             case 'stopped': return 'bg-red-500 text-white';
             default: return 'bg-yellow-500 text-white';
         }
     };
-
-    const clearLogs = () => {
-        term.current?.clear();
-    };
+    
+    const clearLogs = () => term.current?.clear();
 
     return (
         <div className="bg-background text-foreground">
@@ -120,44 +139,37 @@ export default function Dashboard() {
                         </svg>
                         <h1 className="text-2xl font-bold">xray-knife UI</h1>
                     </div>
-                    <Badge className={`capitalize ${getStatusColor(proxyStatus)}`}>
+                    <Badge className={`capitalize ${getProxyStatusColor(proxyStatus)}`}>
                         {proxyStatus}
                     </Badge>
                 </header>
 
                 <Breadcrumb>
                     <BreadcrumbList>
-                        <BreadcrumbItem>
-                            <BreadcrumbLink href="/">Home</BreadcrumbLink>
-                        </BreadcrumbItem>
+                        <BreadcrumbItem><BreadcrumbLink href="/">Home</BreadcrumbLink></BreadcrumbItem>
                         <BreadcrumbSeparator />
-                        <BreadcrumbItem>
-                            <BreadcrumbPage>Dashboard</BreadcrumbPage>
-                        </BreadcrumbItem>
+                        <BreadcrumbItem><BreadcrumbPage>Dashboard</BreadcrumbPage></BreadcrumbItem>
                     </BreadcrumbList>
                 </Breadcrumb>
 
                 <Tabs defaultValue="proxy" className="w-full">
-                    <TabsList className="grid w-full grid-cols-2">
-                        <TabsTrigger value="proxy">
-                            <Server className="mr-2 h-4 w-4" />
-                            Proxy Service
-                        </TabsTrigger>
-                        <TabsTrigger value="http-tester">
-                            <Globe className="mr-2 h-4 w-4" />
-                            HTTP Tester
-                        </TabsTrigger>
+                    <TabsList className="grid w-full grid-cols-3">
+                        <TabsTrigger value="proxy"><Server className="mr-2 h-4 w-4" />Proxy Service</TabsTrigger>
+                        <TabsTrigger value="http-tester"><Globe className="mr-2 h-4 w-4" />HTTP Tester</TabsTrigger>
+                        <TabsTrigger value="cf-scanner"><Search className="mr-2 h-4 w-4" />CF Scanner</TabsTrigger>
                     </TabsList>
                     <TabsContent value="proxy" className="mt-4">
-                        <ProxyTab
-                            status={proxyStatus}
-                            setStatus={setProxyStatus}
-                        />
+                        <ProxyTab status={proxyStatus} setStatus={setProxyStatus} />
                     </TabsContent>
                     <TabsContent value="http-tester" className="mt-4">
-                        <HttpTesterTab
-                            results={httpResults}
-                            setResults={setHttpResults}
+                        <HttpTesterTab results={httpResults} setResults={setHttpResults} />
+                    </TabsContent>
+                    <TabsContent value="cf-scanner" className="mt-4">
+                        <CfScannerTab 
+                            results={scanResults} 
+                            setResults={setScanResults} 
+                            status={scanStatus}
+                            setStatus={setScanStatus}
                         />
                     </TabsContent>
                 </Tabs>
@@ -169,8 +181,7 @@ export default function Dashboard() {
                             <CardDescription>Real-time output from the xray-knife backend.</CardDescription>
                         </div>
                         <Button className="w-full sm:w-fit" variant="outline" size="sm" onClick={clearLogs}>
-                            <TerminalSquare className="mr-2 h-4 w-4" />
-                            Clear Logs
+                            <TerminalSquare className="mr-2 h-4 w-4" />Clear Logs
                         </Button>
                     </CardHeader>
                     <CardContent>
