@@ -115,7 +115,7 @@ func (s *Shadowsocks) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.ID = s.Password
 	g.Port = s.Port
 	g.Remark = s.Remark
-	g.OrigLink = s.OrigLink
+	g.OrigLink = s.GetLink()
 
 	return g
 }

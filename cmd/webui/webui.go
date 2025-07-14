@@ -2,6 +2,7 @@ package webui
 
 import (
 	"fmt"
+	"github.com/lilendian0x00/xray-knife/v5/utils/customlog"
 
 	"github.com/lilendian0x00/xray-knife/v5/web"
 	"github.com/spf13/cobra"
@@ -26,6 +27,10 @@ func newWebUICommand() *cobra.Command {
 for all of xray-knife's core functionalities, including proxy management,
 configuration testing, and scanning.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Use fmt to print to console before customlog is redirected by the server
+			fmt.Printf("%s Starting Web UI server on http://%s:%d\n", customlog.GetColor(customlog.Success, "[+]"), cfg.ListenAddress, cfg.Port)
+			fmt.Printf("%s Press CTRL+C to stop the server.\n", customlog.GetColor(customlog.Info, "[i]"))
+
 			addr := fmt.Sprintf("%s:%d", cfg.ListenAddress, cfg.Port)
 
 			server, err := web.NewServer(addr)

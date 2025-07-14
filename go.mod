@@ -5,9 +5,12 @@ go 1.24
 toolchain go1.24.2
 
 require (
+	github.com/alitto/pond/v2 v2.4.0
 	github.com/fatih/color v1.18.0
 	github.com/gocarina/gocsv v0.0.0-20240520201108-78e41c74b4b1
+	github.com/gorilla/websocket v1.5.3
 	github.com/imroc/req/v3 v3.53.0
+	github.com/refraction-networking/utls v1.7.3
 	github.com/sagernet/sing v0.5.1
 	github.com/sagernet/sing-box v1.10.5
 	github.com/spf13/cobra v1.9.1
@@ -17,7 +20,6 @@ require (
 
 require (
 	berty.tech/go-libtor v1.0.385 // indirect
-	github.com/alitto/pond/v2 v2.4.0 // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/caddyserver/certmagic v0.20.0 // indirect
 	github.com/cloudflare/circl v1.6.1 // indirect
@@ -33,7 +35,6 @@ require (
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/pprof v0.0.0-20250607225305-033d6d78b36a // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/yamux v0.1.2 // indirect
@@ -61,7 +62,6 @@ require (
 	github.com/quic-go/qpack v0.5.1 // indirect
 	github.com/quic-go/qtls-go1-20 v0.4.1 // indirect
 	github.com/quic-go/quic-go v0.52.0 // indirect
-	github.com/refraction-networking/utls v1.7.3 // indirect
 	github.com/riobard/go-bloom v0.0.0-20200614022211-cdc8013cb5b3 // indirect
 	github.com/sagernet/bbolt v0.0.0-20231014093535-ea5cb2fe9f0a // indirect
 	github.com/sagernet/cloudflare-tls v0.0.0-20231208171750-a4483c1b7cd1 // indirect

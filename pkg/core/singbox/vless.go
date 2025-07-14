@@ -191,7 +191,7 @@ func (v *Vless) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.ServiceName = v.ServiceName
 	g.Mode = v.Mode
 	g.Type = v.Type
-	g.OrigLink = v.OrigLink
+	g.OrigLink = v.GetLink()
 
 	return g
 }

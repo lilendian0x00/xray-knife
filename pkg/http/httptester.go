@@ -2,12 +2,11 @@ package http
 
 import (
 	"fmt"
-	"path/filepath"
+	"log"
 	"sort"
 	"strings"
 	"sync"
 
-	"github.com/fatih/color"
 	"github.com/gocarina/gocsv"
 	"github.com/lilendian0x00/xray-knife/v5/utils"
 	"github.com/lilendian0x00/xray-knife/v5/utils/customlog"
@@ -58,72 +57,109 @@ func (cr ConfigResults) Swap(i, j int) { cr[i], cr[j] = cr[j], cr[i] }
 // TestManager handles the concurrent testing of configurations
 type TestManager struct {
 	examiner    *Examiner
-	processor   *ResultProcessor
+	logger      *log.Logger // Optional logger for web UI
 	threadCount uint16
 	verbose     bool
 }
 
 // NewTestManager creates a new TestManager instance
-func NewTestManager(examiner *Examiner, processor *ResultProcessor, threadCount uint16, verbose bool) *TestManager {
+func NewTestManager(examiner *Examiner, threadCount uint16, verbose bool, logger *log.Logger) *TestManager {
 	return &TestManager{
 		examiner:    examiner,
-		processor:   processor,
 		threadCount: threadCount,
 		verbose:     verbose,
+		logger:      logger,
 	}
 }
 
-// TestConfigs tests multiple configurations concurrently
-func (tm *TestManager) TestConfigs(links []string, printSuccess bool) ConfigResults {
+// RunTests tests multiple configurations concurrently. This is a BLOCKING call.
+// It sends each result to the provided channel as it becomes available.
+// The caller is responsible for consuming from the channel. This function does NOT close the channel.
+func (tm *TestManager) RunTests(links []string, resultsChan chan<- *Result) {
 	semaphore := make(chan int, tm.threadCount)
 	var wg sync.WaitGroup
-	results := make(ConfigResults, 0)
-	var resultsMu sync.Mutex
 
-	for i := range links {
-		semaphore <- 1
+	for i, link := range links {
 		wg.Add(1)
-		go tm.testSingleConfig(links[i], i, &results, &resultsMu, semaphore, &wg, printSuccess)
+		go func(link string, index int) {
+			semaphore <- 1
+			defer func() {
+				<-semaphore
+				wg.Done()
+			}()
+
+			res, err := tm.examiner.ExamineConfig(link)
+			if err != nil {
+				logMsg := fmt.Sprintf("[-] Error: %s - broken config: %s\n", err.Error(), link)
+				if tm.logger != nil {
+					tm.logger.Print(logMsg)
+				} else if tm.verbose {
+					customlog.Printf(customlog.Failure, "Error: %s - broken config: %s\n", err.Error(), link)
+				}
+				// Still send the result, as it contains the error info
+				resultsChan <- &res
+				return
+			}
+
+			if res.Status == "passed" && tm.logger != nil {
+				logMsg := fmt.Sprintf("[+] SUCCESS | %s | Delay: %dms\n", res.ConfigLink, res.Delay)
+				tm.logger.Print(logMsg)
+			}
+			resultsChan <- &res
+		}(link, i)
 	}
 
 	wg.Wait()
 	close(semaphore)
-	return results
 }
 
-// testSingleConfig tests a single configuration
-func (tm *TestManager) testSingleConfig(link string, index int, results *ConfigResults, resultsMu *sync.Mutex, semaphore chan int, wg *sync.WaitGroup, printSuccess bool) {
-	defer func() {
-		<-semaphore
-		wg.Done()
-	}()
+//// TestConfigs tests multiple configurations concurrently
+//func (tm *TestManager) TestConfigs(links []string) ConfigResults {
+//	semaphore := make(chan int, tm.threadCount)
+//	var wg sync.WaitGroup
+//	results := make(ConfigResults, 0)
+//	var resultsMu sync.Mutex
+//
+//	for i := range links {
+//		semaphore <- 1
+//		wg.Add(1)
+//		go tm.testSingleConfig(links[i], i, &results, &resultsMu, semaphore, &wg)
+//	}
+//
+//	wg.Wait()
+//	close(semaphore)
+//	return results
+//}
 
-	res, err := tm.examiner.ExamineConfig(link)
-	if err != nil {
-		if tm.verbose {
-			customlog.Printf(customlog.Failure, "Error: %s - broken config: %s\n", err.Error(), link)
-		}
-		return
-	}
-
-	if res.Status == "passed" && printSuccess {
-		tm.printSuccessDetails(index, res)
-	}
-
-	if tm.processor.outputType == "csv" || res.Status == "passed" {
-		resultsMu.Lock()
-		*results = append(*results, &res)
-		resultsMu.Unlock()
-	}
-}
-
-// printSuccessDetails prints the details of a successful test
-func (tm *TestManager) printSuccessDetails(index int, res Result) {
-	d := color.New(color.FgCyan, color.Bold)
-	d.Printf("Config Number: %d\n", index+1)
-	fmt.Printf("%v%s: %s\n", res.Protocol.DetailsStr(), color.RedString("Link"), res.Protocol.GetLink())
-	customlog.Printf(customlog.Success, "Real Delay: %dms\n\n", res.Delay)
-}
+//// testSingleConfig tests a single configuration
+//func (tm *TestManager) testSingleConfig(link string, index int, results *ConfigResults, resultsMu *sync.Mutex, semaphore chan int, wg *sync.WaitGroup) {
+//	defer func() {
+//		<-semaphore
+//		wg.Done()
+//	}()
+//
+//	res, err := tm.examiner.ExamineConfig(link)
+//	if err != nil {
+//		logMsg := fmt.Sprintf("[-] Error: %s - broken config: %s\n", err.Error(), link)
+//		if tm.logger != nil {
+//			tm.logger.Print(logMsg)
+//		} else if tm.verbose {
+//			customlog.Printf(customlog.Failure, "Error: %s - broken config: %s\n", err.Error(), link)
+//		}
+//		return
+//	}
+//
+//	if res.Status == "passed" && tm.logger != nil {
+//		logMsg := fmt.Sprintf("[+] SUCCESS | %s | Delay: %dms\n", res.ConfigLink, res.Delay)
+//		tm.logger.Print(logMsg)
+//	}
+//
+//	if tm.processor.outputType == "csv" || res.Status == "passed" {
+//		resultsMu.Lock()
+//		*results = append(*results, &res)
+//		resultsMu.Unlock()
+//	}
+//}
 
 // SaveResults saves the test results to a file
 func (rp *ResultProcessor) SaveResults(results ConfigResults) error {
@@ -161,9 +197,11 @@ func (rp *ResultProcessor) saveTxtResults(results ConfigResults) error {
 
 // saveCSVResults saves results in CSV format
 func (rp *ResultProcessor) saveCSVResults(results ConfigResults) error {
-	// Ensure the file has a .csv extension
-	base := strings.TrimSuffix(rp.outputFile, filepath.Ext(rp.outputFile))
-	csvFile := base + ".csv"
+	// Ensure the file has a .csv extension. gocsv does not add it automatically.
+	csvFile := rp.outputFile
+	if !strings.HasSuffix(csvFile, ".csv") {
+		csvFile += ".csv"
+	}
 
 	out, err := gocsv.MarshalString(&results)
 	if err != nil {

@@ -228,7 +228,7 @@ func (v *Vmess) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.ALPN = v.ALPN
 	g.TlsFingerprint = v.TlsFingerprint
 	g.Type = v.Type
-	g.OrigLink = v.OrigLink
+	g.OrigLink = v.GetLink()
 
 	return g
 }

@@ -202,7 +202,7 @@ func (t *Trojan) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.ServiceName = t.ServiceName
 	g.Mode = t.Mode
 	g.Type = t.Type
-	g.OrigLink = t.OrigLink
+	g.OrigLink = t.GetLink()
 
 	return g
 }

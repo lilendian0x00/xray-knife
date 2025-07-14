@@ -97,7 +97,7 @@ func (h *Hysteria2) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Port = h.Port
 	g.Remark = h.Remark
 
-	g.OrigLink = h.OrigLink
+	g.OrigLink = h.GetLink()
 
 	return g
 }

@@ -104,7 +104,7 @@ func (s *Socks) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Port = fmt.Sprintf("%v", s.Port)
 	g.Remark = s.Remark
 
-	g.OrigLink = s.OrigLink
+	g.OrigLink = s.GetLink()
 
 	return g
 }

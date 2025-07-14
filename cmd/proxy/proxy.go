@@ -70,8 +70,8 @@ func newProxyCommand() *cobra.Command {
 				ConfigLinks:         links,
 			}
 
-			// 3. Create the new proxy service
-			service, err := pkgproxy.New(serviceConfig)
+			// 3. Create the new proxy service, passing nil for the logger in CLI mode.
+			service, err := pkgproxy.New(serviceConfig, nil)
 			if err != nil {
 				return err
 			}

@@ -56,6 +56,13 @@ func SetOutput(w io.Writer) {
 	output = w
 }
 
+// GetOutput returns the current output writer.
+func GetOutput() io.Writer {
+	mu.Lock()
+	defer mu.Unlock()
+	return output
+}
+
 // Printf prints a formatted, timestamped, and colored log message.
 // It prepends the corresponding symbol and current time to the message.
 func Printf(logType Type, format string, v ...interface{}) {

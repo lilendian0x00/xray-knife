@@ -19,12 +19,13 @@ import { Button } from "@/components/ui/button";
 import { Server, Globe, TerminalSquare } from 'lucide-react';
 
 import { ProxyTab } from "./dashboard/ProxyTab";
-import { HttpTesterTab } from "./dashboard/HttpTesterTab";
+import { HttpTesterTab, type HttpResult } from "./dashboard/HttpTesterTab";
 
 export type ProxyStatus = 'stopped' | 'running' | 'starting' | 'stopping';
 
 export default function Dashboard() {
     const [proxyStatus, setProxyStatus] = useState<ProxyStatus>('stopped');
+    const [httpResults, setHttpResults] = useState<HttpResult[]>([]);
 
     const terminalRef = useRef<HTMLDivElement>(null);
     const term = useRef<Terminal | null>(null);
@@ -42,7 +43,17 @@ export default function Dashboard() {
         };
 
         ws.current.onmessage = (event) => {
-            term.current?.write(event.data);
+            try {
+                const message = JSON.parse(event.data);
+                if (message.type === 'http_result' && message.data) {
+                    setHttpResults(prevResults => [...prevResults, message.data]);
+                } else {
+                    term.current?.write(event.data);
+                }
+            } catch (e) {
+                // If it's not valid JSON, treat it as a raw log line.
+                term.current?.write(event.data);
+            }
         };
 
         ws.current.onclose = () => {
@@ -97,7 +108,7 @@ export default function Dashboard() {
     };
 
     return (
-        <div className="min-h-screen bg-background text-foreground">
+        <div className="bg-background text-foreground">
             <Toaster position="top-right" />
             <div className="container mx-auto py-4 sm:py-10 flex flex-col gap-6">
                 <header className="flex items-center justify-between">
@@ -144,15 +155,20 @@ export default function Dashboard() {
                         />
                     </TabsContent>
                     <TabsContent value="http-tester" className="mt-4">
-                        <HttpTesterTab />
+                        <HttpTesterTab
+                            results={httpResults}
+                            setResults={setHttpResults}
+                        />
                     </TabsContent>
                 </Tabs>
 
                 <Card>
-                    <CardHeader className="flex flex-col">
+                    <CardHeader className="flex flex-col sm:flex-row justify-between gap-2">
+                        <div className="flex flex-col gap-1.5">
                             <CardTitle>Live Logs</CardTitle>
                             <CardDescription>Real-time output from the xray-knife backend.</CardDescription>
-                        <Button variant="outline" size="sm" onClick={clearLogs}>
+                        </div>
+                        <Button className="w-full sm:w-fit" variant="outline" size="sm" onClick={clearLogs}>
                             <TerminalSquare className="mr-2 h-4 w-4" />
                             Clear Logs
                         </Button>

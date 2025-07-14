@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	pkghttp "github.com/lilendian0x00/xray-knife/v5/pkg/http"
 	"github.com/lilendian0x00/xray-knife/v5/utils"
@@ -106,14 +107,38 @@ func handleMultipleConfigs(examiner *pkghttp.Examiner, config *Config) error {
 		config.OutputType = "csv"
 	}
 
-	processor := pkghttp.NewResultProcessor(pkghttp.ResultProcessorOptions{
-		OutputFile: config.OutputFile,
-		OutputType: config.OutputType,
-		Sorted:     config.SortedByRealDelay,
-	})
+	processor := pkghttp.NewResultProcessor(
+		pkghttp.ResultProcessorOptions{
+			OutputFile: config.OutputFile,
+			OutputType: config.OutputType,
+			Sorted:     config.SortedByRealDelay,
+		},
+	)
 
-	testManager := pkghttp.NewTestManager(examiner, processor, config.ThreadCount, config.Verbose)
-	results := testManager.TestConfigs(links, true)
+	testManager := pkghttp.NewTestManager(examiner, config.ThreadCount, config.Verbose, nil)
+
+	resultsChan := make(chan *pkghttp.Result, len(links))
+	var results pkghttp.ConfigResults
+	var collectorWg sync.WaitGroup
+	collectorWg.Add(1)
+	go func() {
+		defer collectorWg.Done()
+		for res := range resultsChan {
+			results = append(results, res)
+		}
+	}()
+
+	testManager.RunTests(links, resultsChan)
+	close(resultsChan)
+	collectorWg.Wait()
+
+	// Manually print successes to the console
+	for i, res := range results {
+		if res.Status == "passed" {
+			// Moved from pkg/http
+			printSuccessDetails(i, *res)
+		}
+	}
 
 	return processor.SaveResults(results)
 }
@@ -138,6 +163,14 @@ func handleSingleConfig(examiner *pkghttp.Examiner, config *Config) {
 		customlog.Printf(customlog.Success, "Uploaded %dKB - Speed: %f mbps\n",
 			config.SpeedtestAmount, res.UploadSpeed)
 	}
+}
+
+// printSuccessDetails prints the details of a successful test for the CLI
+func printSuccessDetails(index int, res pkghttp.Result) {
+	d := color.New(color.FgCyan, color.Bold)
+	d.Printf("Config Number: %d\n", index+1)
+	fmt.Printf("%v%s: %s\n", res.Protocol.DetailsStr(), color.RedString("Link"), res.Protocol.GetLink())
+	customlog.Printf(customlog.Success, "Real Delay: %dms\n\n", res.Delay)
 }
 
 // printConfiguration prints the current configuration

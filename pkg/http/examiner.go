@@ -14,20 +14,19 @@ import (
 	"github.com/fatih/color"
 	"github.com/lilendian0x00/xray-knife/v5/pkg/core"
 	"github.com/lilendian0x00/xray-knife/v5/pkg/core/protocol"
-	"github.com/lilendian0x00/xray-knife/v5/speedtester/cloudflare"
 )
 
 type Result struct {
-	ConfigLink    string            `csv:"link"` // vmess://... vless//..., etc
-	Protocol      protocol.Protocol `csv:"-"`
-	Status        string            `csv:"status"`   // passed, semi-passed, failed, broken
-	Reason        string            `csv:"reason"`   // reason of the error
-	TLS           string            `csv:"tls"`      // none, tls, reality
-	RealIPAddr    string            `csv:"ip"`       // Real ip address (req to cloudflare.com/cdn-cgi/trace)
-	Delay         int64             `csv:"delay"`    // millisecond
-	DownloadSpeed float32           `csv:"download"` // mbps
-	UploadSpeed   float32           `csv:"upload"`   // mbps
-	IpAddrLoc     string            `csv:"location"` // IP address location
+	ConfigLink    string            `csv:"link" json:"link"` // vmess://... vless//..., etc
+	Protocol      protocol.Protocol `csv:"-" json:"-"`
+	Status        string            `csv:"status" json:"status"`     // passed, semi-passed, failed, broken
+	Reason        string            `csv:"reason" json:"reason"`     // reason of the error
+	TLS           string            `csv:"tls" json:"tls"`           // none, tls, reality
+	RealIPAddr    string            `csv:"ip" json:"ip"`             // Real ip address (req to cloudflare.com/cdn-cgi/trace)
+	Delay         int64             `csv:"delay" json:"delay"`       // millisecond
+	DownloadSpeed float32           `csv:"download" json:"download"` // mbps
+	UploadSpeed   float32           `csv:"upload" json:"upload"`     // mbps
+	IpAddrLoc     string            `csv:"location" json:"location"` // IP address location
 }
 
 type Examiner struct {
@@ -222,7 +221,7 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 	}
 
 	if e.DoIPInfo {
-		_, body, err := CoreHTTPRequestCustom(client, time.Duration(10000)*time.Millisecond, cloudflare.Speedtest.MakeDebugRequest())
+		_, body, err := CoreHTTPRequestCustom(client, time.Duration(10000)*time.Millisecond, speedtest.MakeDebugRequest())
 		if err != nil {
 			// Do nothing
 		} else {
@@ -242,14 +241,14 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 
 	if e.DoSpeedtest {
 		downloadStartTime := time.Now()
-		_, _, err := CoreHTTPRequestCustom(client, time.Duration(20000)*time.Millisecond, cloudflare.Speedtest.MakeDownloadHTTPRequest(false, e.SpeedtestKbAmount*1000))
+		_, _, err := CoreHTTPRequestCustom(client, time.Duration(20000)*time.Millisecond, speedtest.MakeDownloadHTTPRequest(false, e.SpeedtestKbAmount*1000))
 		if err == nil {
 			downloadTime := time.Since(downloadStartTime).Milliseconds()
 			r.DownloadSpeed = (float32((e.SpeedtestKbAmount*1000)*8) / (float32(downloadTime) / float32(1000.0))) / float32(1000000.0)
 		}
 
 		uploadStartTime := time.Now()
-		_, _, err = CoreHTTPRequestCustom(client, time.Duration(20000)*time.Millisecond, cloudflare.Speedtest.MakeUploadHTTPRequest(false, e.SpeedtestKbAmount*1000))
+		_, _, err = CoreHTTPRequestCustom(client, time.Duration(20000)*time.Millisecond, speedtest.MakeUploadHTTPRequest(false, e.SpeedtestKbAmount*1000))
 		if err == nil {
 			uploadTime := time.Since(uploadStartTime).Milliseconds()
 			r.UploadSpeed = (float32((e.SpeedtestKbAmount*1000)*8) / (float32(uploadTime) / float32(1000.0))) / float32(1000000.0)
@@ -293,4 +292,69 @@ func CoreHTTPRequestCustom(client *http.Client, timeout time.Duration, req *http
 
 	b, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, b, nil
+}
+
+type SpeedTester struct {
+	SNI              string
+	DownloadEndpoint string
+	UploadEndpoint   string
+	DebugEndpoint    string
+}
+
+var speedtest = &SpeedTester{
+	SNI:              "speed.cloudflare.com",
+	DebugEndpoint:    "/cdn-cgi/trace",
+	DownloadEndpoint: "/__down",
+	UploadEndpoint:   "/__up",
+}
+
+func (c *SpeedTester) MakeDownloadHTTPRequest(noTLS bool, amount uint32) *http.Request {
+	scheme := "https"
+	if noTLS {
+		scheme = "http"
+	}
+	return &http.Request{
+		Method: "GET",
+		URL: &url.URL{
+			Path:     c.DownloadEndpoint,
+			RawQuery: fmt.Sprintf("bytes=%d", amount),
+			Scheme:   scheme,
+			Host:     c.SNI,
+		},
+		Header: make(http.Header),
+		Host:   c.SNI,
+	}
+}
+
+func (c *SpeedTester) MakeUploadHTTPRequest(noTLS bool, amount uint32) *http.Request {
+	scheme := "https"
+	if noTLS {
+		scheme = "http"
+	}
+	lk := strings.NewReader(strings.Repeat("0", int(amount)))
+	rc := io.NopCloser(lk)
+	return &http.Request{
+		Method: "POST",
+		URL: &url.URL{
+			Path:   c.UploadEndpoint,
+			Scheme: scheme,
+			Host:   c.SNI,
+		},
+		Header: make(http.Header),
+		Host:   c.SNI,
+		Body:   rc,
+	}
+}
+
+func (c *SpeedTester) MakeDebugRequest() *http.Request {
+	return &http.Request{
+		Method: "GET",
+		URL: &url.URL{
+			Path:   c.DebugEndpoint,
+			Scheme: "https",
+			Host:   c.SNI,
+		},
+		Header: make(http.Header),
+		Host:   c.SNI,
+	}
 }

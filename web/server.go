@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -13,7 +14,6 @@ import (
 	"github.com/gorilla/websocket"
 	pkghttp "github.com/lilendian0x00/xray-knife/v5/pkg/http"
 	"github.com/lilendian0x00/xray-knife/v5/pkg/proxy"
-	"github.com/lilendian0x00/xray-knife/v5/utils/customlog"
 )
 
 //go:embed dist
@@ -41,6 +41,7 @@ type Server struct {
 	listenAddr string
 	router     *http.ServeMux
 	hub        *Hub
+	logger     *log.Logger // Web-specific logger
 	manager    *ServiceManager
 }
 
@@ -53,11 +54,9 @@ func NewServer(listenAddr string) (*Server, error) {
 		listenAddr: listenAddr,
 		router:     http.NewServeMux(),
 		hub:        hub,
+		logger:     log.New(hub, "", 0), // Initialize web logger
 		manager:    &ServiceManager{},
 	}
-
-	// Redirect custom logger output to the WebSocket hub
-	customlog.SetOutput(s.hub)
 
 	s.setupRoutes()
 	return s, nil
@@ -65,11 +64,12 @@ func NewServer(listenAddr string) (*Server, error) {
 
 // Run starts the web server and listens for requests.
 func (s *Server) Run() error {
-	customlog.Printf(customlog.Success, "Starting Web UI server on http://%s\n", s.listenAddr)
-	customlog.Printf(customlog.Info, "Press CTRL+C to stop the server.\n")
+	// Use web logger for server-side messages that should appear in the UI
+	s.logger.Printf("Web server listening on http://%s\n", s.listenAddr)
 
 	err := http.ListenAndServe(s.listenAddr, s.router)
 	if err != nil {
+		s.logger.Printf("Web server failed: %v\n", err)
 		return fmt.Errorf("web server failed: %w", err)
 	}
 	return nil
@@ -77,12 +77,26 @@ func (s *Server) Run() error {
 
 // setupRoutes configures all the HTTP routes for the server.
 func (s *Server) setupRoutes() {
+	// JSON error helper
+	writeJSONError := func(w http.ResponseWriter, message string, statusCode int) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(statusCode)
+		json.NewEncoder(w).Encode(map[string]string{"error": message})
+	}
 	// API routes
 	s.router.HandleFunc("/ws", s.handleWebSocket)
-	s.router.HandleFunc("/api/v1/proxy/start", s.handleProxyStart)
-	s.router.HandleFunc("/api/v1/proxy/stop", s.handleProxyStop)
-	s.router.HandleFunc("/api/v1/proxy/rotate", s.handleProxyRotate)
-	s.router.HandleFunc("/api/v1/http/test", s.handleHttpTest)
+	s.router.HandleFunc("/api/v1/proxy/start", func(w http.ResponseWriter, r *http.Request) {
+		s.handleProxyStart(w, r, writeJSONError)
+	})
+	s.router.HandleFunc("/api/v1/proxy/stop", func(w http.ResponseWriter, r *http.Request) {
+		s.handleProxyStop(w, r, writeJSONError)
+	})
+	s.router.HandleFunc("/api/v1/proxy/rotate", func(w http.ResponseWriter, r *http.Request) {
+		s.handleProxyRotate(w, r, writeJSONError)
+	})
+	s.router.HandleFunc("/api/v1/http/test", func(w http.ResponseWriter, r *http.Request) {
+		s.handleHttpTest(w, r, writeJSONError)
+	})
 
 	// Static file serving for the frontend
 	distFS, err := fs.Sub(embeddedFiles, "dist")
@@ -114,7 +128,7 @@ func (s *Server) setupRoutes() {
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		customlog.Printf(customlog.Failure, "Failed to upgrade websocket: %v\n", err)
+		log.Printf("Failed to upgrade websocket: %v\n", err) // Use standard log here
 		return
 	}
 	client := &Client{hub: s.hub, conn: conn, send: make(chan []byte, 256)}
@@ -124,9 +138,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleProxyStart starts the proxy service based on JSON config from the request.
-func (s *Server) handleProxyStart(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleProxyStart(w http.ResponseWriter, r *http.Request, writeJSONError func(w http.ResponseWriter, message string, statusCode int)) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -140,13 +154,13 @@ func (s *Server) handleProxyStart(w http.ResponseWriter, r *http.Request) {
 
 	var cfg proxy.Config
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		writeJSONError(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	service, err := proxy.New(cfg)
+	service, err := proxy.New(cfg, s.logger)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to create proxy service: %v", err), http.StatusInternalServerError)
+		writeJSONError(w, fmt.Sprintf("Failed to create proxy service: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -164,7 +178,7 @@ func (s *Server) handleProxyStart(w http.ResponseWriter, r *http.Request) {
 			s.manager.mu.Unlock()
 		}()
 		if err := service.Run(ctx, s.manager.forceRotate); err != nil {
-			customlog.Printf(customlog.Failure, "Proxy service exited with error: %v", err)
+			s.logger.Printf("Proxy service exited with error: %v", err)
 		}
 	}()
 
@@ -174,9 +188,9 @@ func (s *Server) handleProxyStart(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleProxyStop stops the currently running proxy service.
-func (s *Server) handleProxyStop(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleProxyStop(w http.ResponseWriter, r *http.Request, writeJSONError func(w http.ResponseWriter, message string, statusCode int)) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -184,7 +198,7 @@ func (s *Server) handleProxyStop(w http.ResponseWriter, r *http.Request) {
 	defer s.manager.mu.Unlock()
 
 	if s.manager.cancelFunc == nil {
-		http.Error(w, "Proxy service not running", http.StatusNotFound)
+		writeJSONError(w, "Proxy service not running", http.StatusNotFound)
 		return
 	}
 
@@ -196,9 +210,9 @@ func (s *Server) handleProxyStop(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleProxyRotate triggers a manual rotation of the proxy.
-func (s *Server) handleProxyRotate(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleProxyRotate(w http.ResponseWriter, r *http.Request, writeJSONError func(w http.ResponseWriter, message string, statusCode int)) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -206,7 +220,7 @@ func (s *Server) handleProxyRotate(w http.ResponseWriter, r *http.Request) {
 	defer s.manager.mu.Unlock()
 
 	if s.manager.forceRotate == nil {
-		http.Error(w, "Proxy service not running or not in rotation mode", http.StatusConflict)
+		writeJSONError(w, "Proxy service not running or not in rotation mode", http.StatusConflict)
 		return
 	}
 
@@ -216,53 +230,75 @@ func (s *Server) handleProxyRotate(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "Rotate signal sent"})
 	default:
-		http.Error(w, "Failed to send rotate signal (channel may be busy)", http.StatusServiceUnavailable)
+		writeJSONError(w, "Failed to send rotate signal (channel may be busy)", http.StatusServiceUnavailable)
 	}
 }
 
 // handleHttpTest runs a configuration test.
-func (s *Server) handleHttpTest(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleHttpTest(w http.ResponseWriter, r *http.Request, writeJSONError func(w http.ResponseWriter, message string, statusCode int)) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	// Define a struct that matches the expected JSON payload for this API.
 	type httpTestRequest struct {
-		Links       []string `json:"links"`
-		ThreadCount uint16   `json:"threadCount"`
-		MaxDelay    uint16   `json:"maxDelay"`
-		InsecureTLS bool     `json:"insecureTLS"`
-		CoreType    string   `json:"coreType"`
+		Links           []string `json:"links"`
+		ThreadCount     uint16   `json:"threadCount"`
+		MaxDelay        uint16   `json:"maxDelay"`
+		InsecureTLS     bool     `json:"insecureTLS"`
+		CoreType        string   `json:"coreType"`
+		DestURL         string   `json:"destURL"`
+		HTTPMethod      string   `json:"httpMethod"`
+		Speedtest       bool     `json:"speedtest"`
+		GetIPInfo       bool     `json:"getIPInfo"`
+		SpeedtestAmount uint32   `json:"speedtestAmount"`
 	}
 
 	var req httpTestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		writeJSONError(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
 		return
 	}
 
 	go func() {
-		customlog.Printf(customlog.Info, "Starting HTTP test for %d links with %d threads.\n", len(req.Links), req.ThreadCount)
+		s.logger.Printf("Starting HTTP test for %d links with %d threads.\n", len(req.Links), req.ThreadCount)
 		examiner, err := pkghttp.NewExaminer(pkghttp.Options{
-			Core:        req.CoreType,
-			MaxDelay:    req.MaxDelay,
-			InsecureTLS: req.InsecureTLS,
-			Verbose:     true, // Log details to the UI
+			Core:                   req.CoreType,
+			MaxDelay:               req.MaxDelay,
+			InsecureTLS:            req.InsecureTLS,
+			Verbose:                false, // Verbosity is handled by the web logger
+			DoSpeedtest:            req.Speedtest,
+			DoIPInfo:               req.GetIPInfo,
+			TestEndpoint:           req.DestURL,
+			TestEndpointHttpMethod: req.HTTPMethod,
+			SpeedtestKbAmount:      req.SpeedtestAmount,
 		})
 		if err != nil {
-			customlog.Printf(customlog.Failure, "Failed to create examiner: %v", err)
+			s.logger.Printf("Failed to create examiner: %v", err)
 			return
 		}
 
-		// Use a dummy processor since we stream results directly over WebSocket
-		processor := pkghttp.NewResultProcessor(pkghttp.ResultProcessorOptions{})
-		testManager := pkghttp.NewTestManager(examiner, processor, req.ThreadCount, true)
+		testManager := pkghttp.NewTestManager(examiner, req.ThreadCount, false, s.logger)
 
-		// The TestConfigs function already prints live results via customlog, which is redirected to the hub.
-		testManager.TestConfigs(req.Links, true)
+		resultsChan := make(chan *pkghttp.Result, len(req.Links))
 
-		customlog.Printf(customlog.Finished, "HTTP test finished.\n")
+		// This goroutine consumes results and sends them to the websocket hub
+		go func() {
+			for result := range resultsChan {
+				jsonResult, err := json.Marshal(map[string]interface{}{"type": "http_result", "data": result})
+				if err == nil {
+					s.hub.broadcast <- jsonResult
+				} else {
+					s.logger.Printf("Failed to marshal result to JSON: %v", err)
+				}
+			}
+		}()
+
+		testManager.RunTests(req.Links, resultsChan)
+		close(resultsChan) // This will terminate the consumer goroutine's range loop.
+
+		s.logger.Printf("HTTP test finished.\n")
 	}()
 
 	w.Header().Set("Content-Type", "application/json")
