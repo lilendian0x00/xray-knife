@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -23,9 +24,9 @@ const (
 // Core interface that both xray-Core and sing-box must implement
 type Core interface {
 	Name() string
-	MakeHttpClient(outbound protocol.Protocol, maxDelay time.Duration) (*http.Client, protocol.Instance, error)
+	MakeHttpClient(ctx context.Context, outbound protocol.Protocol, maxDelay time.Duration) (*http.Client, protocol.Instance, error)
 	CreateProtocol(protocolType string) (protocol.Protocol, error)
-	MakeInstance(outbound protocol.Protocol) (protocol.Instance, error)
+	MakeInstance(ctx context.Context, outbound protocol.Protocol) (protocol.Instance, error)
 	SetInbound(inbound protocol.Protocol) error
 }
 
@@ -87,7 +88,7 @@ func (c *AutomaticCore) CreateProtocol(configLink string) (protocol.Protocol, er
 }
 
 // MakeHttpClient dispatches to the correct underlying core.
-func (c *AutomaticCore) MakeHttpClient(outbound protocol.Protocol, maxDelay time.Duration) (*http.Client, protocol.Instance, error) {
+func (c *AutomaticCore) MakeHttpClient(ctx context.Context, outbound protocol.Protocol, maxDelay time.Duration) (*http.Client, protocol.Instance, error) {
 	generalConfig := outbound.ConvertToGeneralConfig()
 	uri, err := url.Parse(generalConfig.OrigLink)
 	if err != nil {
@@ -98,11 +99,11 @@ func (c *AutomaticCore) MakeHttpClient(outbound protocol.Protocol, maxDelay time
 		return nil, nil, fmt.Errorf("unsupported protocol for automatic core: %s", uri.Scheme)
 	}
 
-	return selectedCore.MakeHttpClient(outbound, maxDelay)
+	return selectedCore.MakeHttpClient(ctx, outbound, maxDelay)
 }
 
 // MakeInstance dispatches to the correct underlying core.
-func (c *AutomaticCore) MakeInstance(outbound protocol.Protocol) (protocol.Instance, error) {
+func (c *AutomaticCore) MakeInstance(ctx context.Context, outbound protocol.Protocol) (protocol.Instance, error) {
 	generalConfig := outbound.ConvertToGeneralConfig()
 	uri, err := url.Parse(generalConfig.OrigLink)
 	if err != nil {
@@ -112,7 +113,7 @@ func (c *AutomaticCore) MakeInstance(outbound protocol.Protocol) (protocol.Insta
 	if !ok {
 		return nil, fmt.Errorf("unsupported protocol for automatic core: %s", uri.Scheme)
 	}
-	return selectedCore.MakeInstance(outbound)
+	return selectedCore.MakeInstance(ctx, outbound)
 }
 
 // SetInbound is not applicable for the AutomaticCore itself.

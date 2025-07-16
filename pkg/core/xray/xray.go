@@ -81,7 +81,7 @@ func (c *Core) SetInbound(inbound protocol.Protocol) error {
 	return nil
 }
 
-func (c *Core) MakeInstance(outbound protocol.Protocol) (protocol.Instance, error) {
+func (c *Core) MakeInstance(ctx context.Context, outbound protocol.Protocol) (protocol.Instance, error) {
 	out := outbound.(Protocol)
 
 	ob, err := out.BuildOutboundDetourConfig(c.AllowInsecure)
@@ -126,9 +126,9 @@ func (c *Core) MakeInstance(outbound protocol.Protocol) (protocol.Instance, erro
 	return server, nil
 }
 
-func (c *Core) MakeHttpClient(outbound protocol.Protocol, maxDelay time.Duration) (*http.Client, protocol.Instance, error) {
+func (c *Core) MakeHttpClient(ctx context.Context, outbound protocol.Protocol, maxDelay time.Duration) (*http.Client, protocol.Instance, error) {
 	out := outbound.(Protocol)
-	instance, err := c.MakeInstance(out)
+	instance, err := c.MakeInstance(ctx, out)
 	if err != nil {
 		return nil, nil, err
 	}

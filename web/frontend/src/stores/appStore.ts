@@ -31,6 +31,7 @@ interface AppState {
     // Transient State
     proxyStatus: ProxyStatus;
     scanStatus: ScanStatus;
+    httpTestStatus: 'idle' | 'testing' | 'stopping';
     httpResults: HttpResult[];
     scanResults: ScanResult[];
     proxyDetails: ProxyDetails | null;
@@ -47,6 +48,7 @@ interface AppActions {
     // Setters for transient state
     setProxyStatus: (status: ProxyStatus) => void;
     setScanStatus: (status: ScanStatus) => void;
+    setHttpTestStatus: (status: 'idle' | 'testing' | 'stopping') => void;
     addHttpResult: (result: HttpResult) => void;
     clearHttpResults: () => void;
     updateScanResults: (result: ScanResult) => void;
@@ -66,6 +68,7 @@ export const useAppStore = create<AppState & AppActions>()(
             // --- Transient State ---
             proxyStatus: 'stopped',
             scanStatus: 'idle',
+            httpTestStatus: 'idle',
             httpResults: [],
             scanResults: [],
             proxyDetails: null,
@@ -78,6 +81,7 @@ export const useAppStore = create<AppState & AppActions>()(
             resetCfScannerSettings: () => set({ cfScannerSettings: defaultCfScannerSettings }),
             setProxyStatus: (status) => set({ proxyStatus: status }),
             setScanStatus: (status) => set({ scanStatus: status }),
+            setHttpTestStatus: (status) => set({ httpTestStatus: status }),
             addHttpResult: (result) => set(state => ({ httpResults: [...state.httpResults, result] })),
             clearHttpResults: () => set({ httpResults: [] }),
             updateScanResults: (result) => set(state => ({ scanResults: [...state.scanResults.filter(r => r.ip !== result.ip), result] })),

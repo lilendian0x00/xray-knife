@@ -33,6 +33,7 @@ func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/proxy/status", h.handleProxyStatus)
 	mux.HandleFunc("/api/v1/proxy/details", h.handleProxyDetails)
 	mux.HandleFunc("/api/v1/http/test", h.handleHttpTest)
+	mux.HandleFunc("/api/v1/http/test/stop", h.handleHttpTestStop)
 	mux.HandleFunc("/api/v1/scanner/cf/start", h.handleCfScannerStart)
 	mux.HandleFunc("/api/v1/scanner/cf/stop", h.handleCfScannerStop)
 	mux.HandleFunc("/api/v1/scanner/cf/status", h.handleCfScannerStatus)
@@ -132,8 +133,20 @@ func (h *APIHandler) handleHttpTest(w http.ResponseWriter, r *http.Request) {
 		Options:     requestBody.Options,
 	}
 
-	h.manager.StartHttpTest(req)
+	if err := h.manager.StartHttpTest(req); err != nil {
+		writeJSONError(w, err.Error(), http.StatusConflict)
+		return
+	}
 	writeJSONResponse(w, http.StatusAccepted, map[string]string{"status": "HTTP test started"})
+}
+
+func (h *APIHandler) handleHttpTestStop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	h.manager.StopHttpTest()
+	writeJSONResponse(w, http.StatusOK, map[string]string{"status": "HTTP test stop signal sent"})
 }
 
 // --- CF Scanner Handlers ---

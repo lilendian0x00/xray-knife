@@ -545,7 +545,7 @@ func (s *ScannerService) createClientFromConfig(ip string, timeout time.Duration
 	if err = setAddress(proto, ip); err != nil {
 		return nil, nil, fmt.Errorf("failed to set IP on protocol: %w", err)
 	}
-	return selectedCore.MakeHttpClient(proto, timeout)
+	return selectedCore.MakeHttpClient(context.Background(), proto, timeout)
 }
 
 // CLI-specific implementation below

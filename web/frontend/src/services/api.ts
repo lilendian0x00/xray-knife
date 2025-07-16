@@ -32,6 +32,9 @@ export const api = {
     async startHttpTest(settings: any, links: string[]) {
         return axios.post('/api/v1/http/test', { ...settings, links });
     },
+    async stopHttpTest() {
+        return axios.post('/api/v1/http/test/stop');
+    },
     async startCfScan(settings: any, subnets: string[], isResuming: boolean) {
         const payload = {
             ...settings,

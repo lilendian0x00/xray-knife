@@ -19,24 +19,27 @@ const cfScannerHistoryFile = "results.csv"
 
 // ServiceManager holds the state of the running proxy and scanner services.
 type ServiceManager struct {
-	mu                sync.Mutex
-	logger            *log.Logger
-	hub               *Hub
-	proxyService      *proxy.Service
-	proxyCancelFunc   context.CancelFunc
-	proxyForceRotate  chan struct{}
-	proxyStatus       string
-	scannerCancelFunc context.CancelFunc
-	scannerWg         sync.WaitGroup
-	isScanning        bool
+	mu                 sync.Mutex
+	logger             *log.Logger
+	hub                *Hub
+	proxyService       *proxy.Service
+	proxyCancelFunc    context.CancelFunc
+	proxyForceRotate   chan struct{}
+	proxyStatus        string
+	scannerCancelFunc  context.CancelFunc
+	scannerWg          sync.WaitGroup
+	isScanning         bool
+	httpTestCancelFunc context.CancelFunc
+	isHttpTesting      bool
 }
 
 // NewServiceManager creates a new service manager.
 func NewServiceManager(logger *log.Logger, hub *Hub) *ServiceManager {
 	return &ServiceManager{
-		logger:      logger,
-		hub:         hub,
-		proxyStatus: "stopped",
+		logger:        logger,
+		hub:           hub,
+		proxyStatus:   "stopped",
+		isHttpTesting: false,
 	}
 }
 
@@ -132,9 +135,26 @@ func (sm *ServiceManager) RotateProxy() error {
 	}
 }
 
-func (sm *ServiceManager) StartHttpTest(req pkghttp.HttpTestRequest) {
+func (sm *ServiceManager) StartHttpTest(req pkghttp.HttpTestRequest) error {
+	sm.mu.Lock()
+	if sm.isHttpTesting {
+		sm.mu.Unlock()
+		return fmt.Errorf("an HTTP test is already in progress")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	sm.isHttpTesting = true
+	sm.httpTestCancelFunc = cancel
+	sm.mu.Unlock()
+
 	go func() {
 		defer sm.recoverAndLogPanic()
+		defer func() {
+			sm.mu.Lock()
+			sm.isHttpTesting = false
+			sm.httpTestCancelFunc = nil
+			sm.mu.Unlock()
+		}()
+
 		sm.logger.Printf("Starting HTTP test for %d links with %d threads.", len(req.Links), req.ThreadCount)
 		examiner, err := pkghttp.NewExaminer(req.Options)
 		if err != nil {
@@ -153,10 +173,28 @@ func (sm *ServiceManager) StartHttpTest(req pkghttp.HttpTestRequest) {
 				}
 			}
 		}()
-		testManager.RunTests(req.Links, resultsChan)
+		testManager.RunTests(ctx, req.Links, resultsChan)
 		close(resultsChan)
-		sm.logger.Println("HTTP test finished.")
+
+		if ctx.Err() != nil {
+			sm.logger.Println("HTTP test was cancelled.")
+			statusMsg, _ := json.Marshal(map[string]interface{}{"type": "http_test_status", "data": "stopped"})
+			sm.hub.broadcast <- statusMsg
+		} else {
+			sm.logger.Println("HTTP test finished.")
+			statusMsg, _ := json.Marshal(map[string]interface{}{"type": "http_test_status", "data": "finished"})
+			sm.hub.broadcast <- statusMsg
+		}
 	}()
+	return nil
+}
+
+func (sm *ServiceManager) StopHttpTest() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.isHttpTesting && sm.httpTestCancelFunc != nil {
+		sm.httpTestCancelFunc()
+	}
 }
 
 func (sm *ServiceManager) GetScannerStatus() bool {

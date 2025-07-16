@@ -35,6 +35,16 @@ class WebSocketService {
                 case 'http_result':
                     setState(state => ({ httpResults: [...state.httpResults, message.data] }));
                     break;
+                case 'http_test_status':
+                    if (message.data === 'finished' || message.data === 'stopped') {
+                        setState({ httpTestStatus: 'idle' });
+                        if (message.data === 'finished') {
+                            toast.success("HTTP test finished.");
+                        } else {
+                            toast.info("HTTP test stopped.");
+                        }
+                    }
+                    break;
                 case 'cfscan_result':
                     setState(state => ({ scanResults: [...state.scanResults.filter(r => r.ip !== message.data.ip), message.data] }));
                     break;

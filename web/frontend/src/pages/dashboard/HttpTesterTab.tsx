@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Globe, ClipboardCopy, Settings, RotateCcw } from 'lucide-react';
+import { Loader2, Globe, ClipboardCopy, Settings, RotateCcw, StopCircle } from 'lucide-react';
 import { useAppStore } from "@/stores/appStore";
 import { api } from "@/services/api";
 
@@ -23,11 +23,10 @@ export interface HttpResult {
 }
 
 export function HttpTesterTab() {
-    const { httpSettings, updateHttpSettings, resetHttpSettings, httpResults, clearHttpResults } = useAppStore();
+    const { httpSettings, updateHttpSettings, resetHttpSettings, httpResults, clearHttpResults, httpTestStatus, setHttpTestStatus } = useAppStore();
     const [animationParent] = useAutoAnimate();
     const [httpTestConfigs, setHttpTestConfigs] = useState('');
-    const [isTesting, setIsTesting] = useState(false);
-
+    
     const sortedResults = useMemo(() => {
         return [...httpResults].sort((a, b) => {
             if (a.status === 'passed' && b.status !== 'passed') return -1;
@@ -36,17 +35,32 @@ export function HttpTesterTab() {
         });
     }, [httpResults]);
 
+    const isBusy = httpTestStatus === 'testing' || httpTestStatus === 'stopping';
+
     const handleRunHttpTest = async () => {
         if (!httpTestConfigs.trim()) { toast.error("HTTP Test configurations cannot be empty."); return; }
         clearHttpResults();
-        setIsTesting(true);
+        setHttpTestStatus('testing');
         toast.info("Starting HTTP configuration test...");
         try {
             const links = httpTestConfigs.trim().split('\n').map(link => link.trim()).filter(link => link);
             await api.startHttpTest(httpSettings, links);
             toast.success("HTTP test initiated. See results below and in the live logs.");
-        } catch (error) { toast.error("Failed to start HTTP test."); } finally {
-            setIsTesting(false);
+        } catch (error: any) {
+            const errorMessage = error.response?.data?.error || "An unknown error occurred.";
+            toast.error(`Failed to start HTTP test: ${errorMessage}`);
+            setHttpTestStatus('idle');
+        }
+    };
+
+    const handleStopHttpTest = async () => {
+        setHttpTestStatus('stopping');
+        try {
+            await api.stopHttpTest();
+            toast.info("Sending stop signal to HTTP tester...");
+        } catch (error) {
+            toast.error("Failed to send stop signal.");
+            setHttpTestStatus('testing'); // Revert status if stop fails
         }
     };
 
@@ -75,29 +89,36 @@ export function HttpTesterTab() {
                         </div>
                     </CardHeader>
                     <CardContent className="flex flex-col gap-6">
-                        <div>
-                            <Label htmlFor="http-test-configs" className="mb-2 block">Configuration Links</Label>
-                            <Textarea id="http-test-configs" placeholder="Enter config links, one per line..." className="h-40 font-mono text-sm resize-y min-h-[100px]" value={httpTestConfigs} onChange={(e) => setHttpTestConfigs(e.target.value)} />
-                        </div>
-                        <div className="space-y-4">
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                <div className="flex flex-col gap-2"><Label htmlFor="thread-count">Threads</Label><InputNumber id="thread-count" min={1} max={200} value={httpSettings.threadCount} onChange={(v) => updateHttpSettings({ threadCount: v })} /></div>
-                                <div className="flex flex-col gap-2"><Label htmlFor="max-delay">Max Delay (ms)</Label><InputNumber id="max-delay" min={1000} max={30000} step={1000} value={httpSettings.maxDelay} onChange={(v) => updateHttpSettings({ maxDelay: v })} /></div>
-                                <div className="flex flex-col gap-2"><Label htmlFor="core-type">Core</Label><Select value={httpSettings.coreType} onValueChange={(v) => updateHttpSettings({ coreType: v as any })}><SelectTrigger id="core-type"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="auto">Auto</SelectItem><SelectItem value="xray">Xray</SelectItem><SelectItem value="singbox">Sing-box</SelectItem></SelectContent></Select></div>
+                        <fieldset disabled={isBusy} className="space-y-6">
+                            <div>
+                                <Label htmlFor="http-test-configs" className="mb-2 block">Configuration Links</Label>
+                                <Textarea id="http-test-configs" placeholder="Enter config links, one per line..." className="h-40 font-mono text-sm resize-y min-h-[100px]" value={httpTestConfigs} onChange={(e) => setHttpTestConfigs(e.target.value)} />
                             </div>
-                            <div className="flex items-center space-x-2 pt-2"><Checkbox id="speedtest" checked={httpSettings.speedtest} onCheckedChange={(c) => updateHttpSettings({ speedtest: Boolean(c) })} /><Label htmlFor="speedtest" className="font-normal cursor-pointer">Enable Speed Test</Label></div>
-                            <AnimatePresence>
-                                {httpSettings.speedtest && (
-                                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden pl-6">
-                                        <div className="flex flex-col gap-2"><Label htmlFor="speedtest-amount">Speed Test (KB)</Label><InputNumber id="speedtest-amount" min={100} step={1000} value={httpSettings.speedtestAmount} onChange={(v) => updateHttpSettings({ speedtestAmount: v })} className="max-w-xs" /></div>
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
-                        </div>
+                            <div className="space-y-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                    <div className="flex flex-col gap-2"><Label htmlFor="thread-count">Threads</Label><InputNumber id="thread-count" min={1} max={200} value={httpSettings.threadCount} onChange={(v) => updateHttpSettings({ threadCount: v })} /></div>
+                                    <div className="flex flex-col gap-2"><Label htmlFor="max-delay">Max Delay (ms)</Label><InputNumber id="max-delay" min={1000} max={30000} step={1000} value={httpSettings.maxDelay} onChange={(v) => updateHttpSettings({ maxDelay: v })} /></div>
+                                    <div className="flex flex-col gap-2"><Label htmlFor="core-type">Core</Label><Select value={httpSettings.coreType} onValueChange={(v) => updateHttpSettings({ coreType: v as any })}><SelectTrigger id="core-type"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="auto">Auto</SelectItem><SelectItem value="xray">Xray</SelectItem><SelectItem value="singbox">Sing-box</SelectItem></SelectContent></Select></div>
+                                </div>
+                                <div className="flex items-center space-x-2 pt-2"><Checkbox id="speedtest" checked={httpSettings.speedtest} onCheckedChange={(c) => updateHttpSettings({ speedtest: Boolean(c) })} /><Label htmlFor="speedtest" className="font-normal cursor-pointer">Enable Speed Test</Label></div>
+                                <AnimatePresence>
+                                    {httpSettings.speedtest && (
+                                        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden pl-6">
+                                            <div className="flex flex-col gap-2"><Label htmlFor="speedtest-amount">Speed Test (KB)</Label><InputNumber id="speedtest-amount" min={100} step={1000} value={httpSettings.speedtestAmount} onChange={(v) => updateHttpSettings({ speedtestAmount: v })} className="max-w-xs" /></div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+                        </fieldset>
                         <div className="flex flex-col sm:flex-row gap-4 pt-2">
-                            <Button onClick={handleRunHttpTest} disabled={isTesting}>{isTesting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Testing...</> : <><Globe className="mr-2 h-4 w-4" />Run Test</>}</Button>
+                            <Button onClick={handleRunHttpTest} disabled={isBusy}>
+                                {isBusy ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />In Progress...</> : <><Globe className="mr-2 h-4 w-4" />Run Test</>}
+                            </Button>
+                            <Button onClick={handleStopHttpTest} variant="destructive" disabled={httpTestStatus !== 'testing'}>
+                                <StopCircle className="mr-2 h-4 w-4" />Stop Test
+                            </Button>
                             <Dialog>
-                                <DialogTrigger asChild><Button variant="outline"><Settings className="mr-2 h-4 w-4" />Advanced</Button></DialogTrigger>
+                                <DialogTrigger asChild><Button variant="outline" disabled={isBusy}><Settings className="mr-2 h-4 w-4" />Advanced</Button></DialogTrigger>
                                 <DialogContent className="sm:max-w-[425px]">
                                     <DialogHeader><DialogTitle>Advanced Settings</DialogTitle><DialogDescription>Modify advanced options for the HTTP tester.</DialogDescription></DialogHeader>
                                     <div className="flex flex-col gap-4 py-4">

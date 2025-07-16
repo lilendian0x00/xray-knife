@@ -187,7 +187,7 @@ func handlePingMode(examiner *pkghttp.Examiner, config *Config) error {
 			return nil
 		case <-ticker.C:
 			sent++
-			client, instance, err := examiner.Core.MakeHttpClient(pinger, time.Duration(config.MaximumAllowedDelay)*time.Millisecond)
+			client, instance, err := examiner.Core.MakeHttpClient(context.Background(), pinger, time.Duration(config.MaximumAllowedDelay)*time.Millisecond)
 			if err != nil {
 				customlog.Printf(customlog.Failure, "Failed to create HTTP client: %v\n", err)
 				if instance != nil {
@@ -196,7 +196,7 @@ func handlePingMode(examiner *pkghttp.Examiner, config *Config) error {
 				continue
 			}
 
-			delay, _, err := pkghttp.MeasureDelay(client, false, config.DestURL, config.HTTPMethod)
+			delay, _, err := pkghttp.MeasureDelay(context.Background(), client, false, config.DestURL, config.HTTPMethod)
 			instance.Close()
 
 			if err != nil {
@@ -218,12 +218,17 @@ func handlePingMode(examiner *pkghttp.Examiner, config *Config) error {
 
 // handleMultipleConfigs handles testing multiple configurations
 func handleMultipleConfigs(examiner *pkghttp.Examiner, config *Config) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	links := utils.ParseFileByNewline(config.ConfigLinksFile)
 	printConfiguration(config, len(links))
 
 	if config.Speedtest && config.OutputType != "csv" {
 		customlog.Printf(customlog.Processing, "Speedtest is enabled, switching to CSV output!\n\n")
 		config.OutputType = "csv"
+		base := strings.TrimSuffix(config.OutputFile, filepath.Ext(config.OutputFile))
+		config.OutputFile = base + ".csv"
 	}
 
 	processor := pkghttp.NewResultProcessor(
@@ -247,7 +252,7 @@ func handleMultipleConfigs(examiner *pkghttp.Examiner, config *Config) error {
 		}
 	}()
 
-	testManager.RunTests(links, resultsChan)
+	testManager.RunTests(ctx, links, resultsChan)
 	close(resultsChan)
 	collectorWg.Wait()
 
@@ -263,7 +268,7 @@ func handleMultipleConfigs(examiner *pkghttp.Examiner, config *Config) error {
 // handleSingleConfig handles testing a single configuration
 func handleSingleConfig(examiner *pkghttp.Examiner, config *Config) {
 	examiner.Verbose = true
-	res, err := examiner.ExamineConfig(config.ConfigLink)
+	res, err := examiner.ExamineConfig(context.Background(), config.ConfigLink)
 	if err != nil {
 		customlog.Printf(customlog.Failure, "%v\n", err)
 		return

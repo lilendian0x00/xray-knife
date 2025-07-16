@@ -95,7 +95,7 @@ func (c *Core) SetInbound(inbound protocol.Protocol) error {
 	return nil
 }
 
-func (c *Core) MakeInstance(outbound protocol.Protocol) (protocol.Instance, error) {
+func (c *Core) MakeInstance(ctx context.Context, outbound protocol.Protocol) (protocol.Instance, error) {
 	out := outbound.(Protocol)
 
 	outOpts, err := out.CraftOutboundOptions(c.AllowInsecure)
@@ -126,7 +126,7 @@ func (c *Core) MakeInstance(outbound protocol.Protocol) (protocol.Instance, erro
 
 	singboxInstance, err := box.New(box.Options{
 		Options: opts,
-		Context: context.Background(),
+		Context: ctx,
 	})
 
 	if err != nil {
@@ -136,10 +136,10 @@ func (c *Core) MakeInstance(outbound protocol.Protocol) (protocol.Instance, erro
 	return singboxInstance, nil
 }
 
-func (c *Core) MakeHttpClient(outbound protocol.Protocol, maxDelay time.Duration) (*http.Client, protocol.Instance, error) {
+func (c *Core) MakeHttpClient(ctx context.Context, outbound protocol.Protocol, maxDelay time.Duration) (*http.Client, protocol.Instance, error) {
 	out := outbound.(Protocol)
 
-	craftOutbound, err := out.CraftOutbound(context.Background(), c.Log, c.AllowInsecure)
+	craftOutbound, err := out.CraftOutbound(ctx, c.Log, c.AllowInsecure)
 	if err != nil {
 		return nil, nil, err
 	}

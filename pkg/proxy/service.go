@@ -182,7 +182,7 @@ func (s *Service) runSingleMode(ctx context.Context, link string) error {
 	}
 	s.logf(customlog.Info, "============================\n")
 
-	instance, err := s.core.MakeInstance(outbound)
+	instance, err := s.core.MakeInstance(context.Background(), outbound)
 	if err != nil {
 		return fmt.Errorf("error making instance: %w", err)
 	}
@@ -302,7 +302,7 @@ func (s *Service) findAndStartWorkingConfig(
 		}
 	}()
 
-	testManager.RunTests(linksToTest, resultsChan)
+	testManager.RunTests(context.Background(), linksToTest, resultsChan)
 	close(resultsChan)
 	wg.Wait()
 
@@ -320,7 +320,7 @@ func (s *Service) findAndStartWorkingConfig(
 			}
 			s.logf(customlog.Info, "============================\n")
 
-			instance, err := s.core.MakeInstance(res.Protocol)
+			instance, err := s.core.MakeInstance(context.Background(), res.Protocol)
 			if err != nil {
 				s.logf(customlog.Failure, "Error making core instance with '%s': %v\n", res.ConfigLink, err)
 				continue

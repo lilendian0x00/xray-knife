@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sort"
@@ -82,11 +83,15 @@ func NewTestManager(examiner *Examiner, threadCount uint16, verbose bool, logger
 // RunTests tests multiple configurations concurrently. This is a BLOCKING call.
 // It sends each result to the provided channel as it becomes available.
 // The caller is responsible for consuming from the channel. This function does NOT close the channel.
-func (tm *TestManager) RunTests(links []string, resultsChan chan<- *Result) {
+func (tm *TestManager) RunTests(ctx context.Context, links []string, resultsChan chan<- *Result) {
 	semaphore := make(chan int, tm.threadCount)
 	var wg sync.WaitGroup
 
 	for i, link := range links {
+		if ctx.Err() != nil {
+			break
+		}
+
 		wg.Add(1)
 		go func(link string, index int) {
 			semaphore <- 1
@@ -95,7 +100,13 @@ func (tm *TestManager) RunTests(links []string, resultsChan chan<- *Result) {
 				wg.Done()
 			}()
 
-			res, err := tm.examiner.ExamineConfig(link)
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			res, err := tm.examiner.ExamineConfig(ctx, link)
 			if err != nil {
 				logMsg := fmt.Sprintf("[-] Error: %s - broken config: %s\n", err.Error(), link)
 				if tm.logger != nil {
@@ -103,21 +114,29 @@ func (tm *TestManager) RunTests(links []string, resultsChan chan<- *Result) {
 				} else if tm.verbose {
 					customlog.Printf(customlog.Failure, "Error: %s - broken config: %s\n", err.Error(), link)
 				}
-				// Still send the result, as it contains the error info
-				resultsChan <- &res
-				return
 			}
 
-			if res.Status == "passed" && tm.logger != nil {
-				logMsg := fmt.Sprintf("[+] SUCCESS | %s | Delay: %dms\n", res.ConfigLink, res.Delay)
-				tm.logger.Print(logMsg)
+			// Check context before sending result, to avoid panic on closed channel
+			select {
+			case resultsChan <- &res:
+				if res.Status == "passed" && tm.logger != nil {
+					logMsg := fmt.Sprintf("[+] SUCCESS | %s | Delay: %dms\n", res.ConfigLink, res.Delay)
+					tm.logger.Print(logMsg)
+				}
+			case <-ctx.Done():
+				// Don't send, just return
+				return
 			}
-			resultsChan <- &res
 		}(link, i)
 	}
 
-	wg.Wait()
-	close(semaphore)
+	// Wait for all workers to finish, or for the context to be cancelled
+	waitChan := make(chan struct{})
+	go func() { wg.Wait(); close(waitChan) }()
+	select {
+	case <-waitChan: // All workers finished
+	case <-ctx.Done(): // Context was cancelled
+	}
 }
 
 //// TestConfigs tests multiple configurations concurrently

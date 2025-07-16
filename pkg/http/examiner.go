@@ -2,6 +2,7 @@ package http
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"github.com/fatih/color"
@@ -127,7 +128,7 @@ func NewExaminer(opts Options) (*Examiner, error) {
 	return e, nil
 }
 
-func (e *Examiner) ExamineConfig(link string) (Result, error) {
+func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, error) {
 	r := Result{
 		ConfigLink: link,
 		Status:     "passed",
@@ -179,7 +180,7 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 	}
 	r.TLS = generalConfig.TLS
 
-	client, instance, err := e.Core.MakeHttpClient(proto, time.Duration(e.MaxDelay)*time.Millisecond)
+	client, instance, err := e.Core.MakeHttpClient(ctx, proto, time.Duration(e.MaxDelay)*time.Millisecond)
 	if err != nil {
 		r.Status = "broken"
 		r.Reason = err.Error()
@@ -187,7 +188,7 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 	}
 	defer instance.Close()
 
-	delay, _, err := MeasureDelay(client, e.ShowBody, e.TestEndpoint, e.TestEndpointHttpMethod)
+	delay, _, err := MeasureDelay(ctx, client, e.ShowBody, e.TestEndpoint, e.TestEndpointHttpMethod)
 	if err != nil {
 		r.Status = "failed"
 		r.Reason = err.Error()
@@ -202,7 +203,7 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 	}
 
 	if e.DoIPInfo {
-		_, body, err := CoreHTTPRequestCustom(client, time.Duration(10000)*time.Millisecond, speedtest.MakeDebugRequest())
+		_, body, err := CoreHTTPRequestCustom(ctx, client, time.Duration(10000)*time.Millisecond, speedtest.MakeDebugRequest())
 		if err != nil {
 			// Do nothing
 		} else {
@@ -222,14 +223,14 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 
 	if e.DoSpeedtest {
 		downloadStartTime := time.Now()
-		_, _, err := CoreHTTPRequestCustom(client, time.Duration(20000)*time.Millisecond, speedtest.MakeDownloadHTTPRequest(false, e.SpeedtestKbAmount*1000))
+		_, _, err := CoreHTTPRequestCustom(ctx, client, time.Duration(20000)*time.Millisecond, speedtest.MakeDownloadHTTPRequest(false, e.SpeedtestKbAmount*1000))
 		if err == nil {
 			downloadTime := time.Since(downloadStartTime).Milliseconds()
 			r.DownloadSpeed = (float32((e.SpeedtestKbAmount*1000)*8) / (float32(downloadTime) / float32(1000.0))) / float32(1000000.0)
 		}
 
 		uploadStartTime := time.Now()
-		_, _, err = CoreHTTPRequestCustom(client, time.Duration(20000)*time.Millisecond, speedtest.MakeUploadHTTPRequest(false, e.SpeedtestKbAmount*1000))
+		_, _, err = CoreHTTPRequestCustom(ctx, client, time.Duration(20000)*time.Millisecond, speedtest.MakeUploadHTTPRequest(false, e.SpeedtestKbAmount*1000))
 		if err == nil {
 			uploadTime := time.Since(uploadStartTime).Milliseconds()
 			r.UploadSpeed = (float32((e.SpeedtestKbAmount*1000)*8) / (float32(uploadTime) / float32(1000.0))) / float32(1000000.0)
@@ -239,9 +240,9 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 	return r, nil
 }
 
-func MeasureDelay(client *http.Client, showBody bool, dest string, httpMethod string) (int64, int, error) {
+func MeasureDelay(ctx context.Context, client *http.Client, showBody bool, dest string, httpMethod string) (int64, int, error) {
 	start := time.Now()
-	code, body, err := CoreHTTPRequest(client, httpMethod, dest)
+	code, body, err := CoreHTTPRequest(ctx, client, httpMethod, dest)
 	if err != nil {
 		return -1, -1, err
 	}
@@ -261,8 +262,8 @@ func (z zeroReader) Read(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-func CoreHTTPRequest(client *http.Client, method, dest string) (int, []byte, error) {
-	req, _ := http.NewRequest(method, dest, nil)
+func CoreHTTPRequest(ctx context.Context, client *http.Client, method, dest string) (int, []byte, error) {
+	req, _ := http.NewRequestWithContext(ctx, method, dest, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		return -1, nil, err
@@ -273,7 +274,8 @@ func CoreHTTPRequest(client *http.Client, method, dest string) (int, []byte, err
 	return resp.StatusCode, b, nil
 }
 
-func CoreHTTPRequestCustom(client *http.Client, timeout time.Duration, req *http.Request) (int, []byte, error) {
+func CoreHTTPRequestCustom(ctx context.Context, client *http.Client, timeout time.Duration, req *http.Request) (int, []byte, error) {
+	req = req.WithContext(ctx)
 	client.Timeout = timeout
 	resp, err := client.Do(req)
 	if err != nil {
