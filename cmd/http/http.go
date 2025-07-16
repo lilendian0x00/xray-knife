@@ -1,10 +1,16 @@
 package http
 
 import (
+	"bufio"
+	"context"
 	"fmt"
+	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	pkghttp "github.com/lilendian0x00/xray-knife/v5/pkg/http"
 	"github.com/lilendian0x00/xray-knife/v5/utils"
@@ -35,6 +41,8 @@ type Config struct {
 	GetIPInfo           bool
 	SpeedtestAmount     uint32
 	MaximumAllowedDelay uint16
+	Ping                bool
+	PingInterval        uint16
 }
 
 // validateConfig validates the configuration options
@@ -54,6 +62,19 @@ func validateConfig(cfg *Config) error {
 		cfg.OutputFile = base + ".csv"
 	}
 
+	if cfg.Ping {
+		if cfg.ConfigLinksFile != "" {
+			return fmt.Errorf("--ping flag cannot be used with --file flag")
+		}
+		if cfg.ConfigLink == "" {
+			// This is now fine, as we will read from stdin if it's empty.
+		}
+		if cfg.Speedtest {
+			customlog.Printf(customlog.Warning, "--speedtest is disabled in ping mode.\n")
+			cfg.Speedtest = false
+		}
+	}
+
 	return nil
 }
 
@@ -64,6 +85,8 @@ func newHttpCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "http",
 		Short: "Test proxy configurations for latency, speed, and IP info using HTTP requests.",
+		Long: `Tests one or more proxy configurations. 
+By default, if no --config or --file flag is provided, it will wait for a single config link from standard input.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validateConfig(config); err != nil {
 				return err
@@ -85,16 +108,112 @@ func newHttpCommand() *cobra.Command {
 				return fmt.Errorf("failed to create examiner: %w", err)
 			}
 
+			// 1. File mode has highest precedence (after validation).
 			if config.ConfigLinksFile != "" {
 				return handleMultipleConfigs(examiner, config)
 			}
-			handleSingleConfig(examiner, config)
-			return nil
+
+			// 2. Handle single config modes (ping or one-shot test).
+			// If config link is not provided via flag, read from stdin.
+			if config.ConfigLink == "" {
+				customlog.Printf(customlog.Info, "Please enter a config link and press Enter:\n")
+				reader := bufio.NewReader(os.Stdin)
+				text, err := reader.ReadString('\n')
+				if err != nil {
+					return fmt.Errorf("failed to read from stdin: %w", err)
+				}
+				config.ConfigLink = strings.TrimSpace(text)
+				if config.ConfigLink == "" {
+					return fmt.Errorf("no config link provided")
+				}
+			}
+
+			// By this point, config.ConfigLink is populated.
+			// Now decide between ping mode or single test mode.
+			if config.Ping {
+				return handlePingMode(examiner, config)
+			} else {
+				handleSingleConfig(examiner, config)
+				return nil
+			}
 		},
 	}
 
 	addFlags(cmd, config)
 	return cmd
+}
+
+// handlePingMode handles the continuous HTTP test.
+func handlePingMode(examiner *pkghttp.Examiner, config *Config) error {
+	pinger, err := examiner.Core.CreateProtocol(config.ConfigLink)
+	if err != nil {
+		return fmt.Errorf("failed to create protocol for ping: %w", err)
+	}
+	if err := pinger.Parse(); err != nil {
+		return fmt.Errorf("failed to parse protocol for ping: %w", err)
+	}
+
+	generalConfig := pinger.ConvertToGeneralConfig()
+	customlog.Printf(customlog.Info, "Pinging %s with a %dms interval. Press Ctrl+C to stop.\n\n", generalConfig.Address, config.PingInterval)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	ticker := time.NewTicker(time.Duration(config.PingInterval) * time.Millisecond)
+	defer ticker.Stop()
+
+	var sent, received int
+	var totalLatency, minLatency, maxLatency int64
+	minLatency = -1
+
+	defer func() {
+		fmt.Println()
+		customlog.Printf(customlog.Info, "--- %s ping statistics ---\n", generalConfig.Address)
+		loss := 0.0
+		if sent > 0 {
+			loss = (float64(sent-received) / float64(sent)) * 100
+		}
+		fmt.Printf("%d packets transmitted, %d received, %.1f%% packet loss\n", sent, received, loss)
+
+		if received > 0 {
+			avgLatency := totalLatency / int64(received)
+			fmt.Printf("rtt min/avg/max = %d/%d/%d ms\n", minLatency, avgLatency, maxLatency)
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			sent++
+			client, instance, err := examiner.Core.MakeHttpClient(pinger, time.Duration(config.MaximumAllowedDelay)*time.Millisecond)
+			if err != nil {
+				customlog.Printf(customlog.Failure, "Failed to create HTTP client: %v\n", err)
+				if instance != nil {
+					instance.Close()
+				}
+				continue
+			}
+
+			delay, _, err := pkghttp.MeasureDelay(client, false, config.DestURL, config.HTTPMethod)
+			instance.Close()
+
+			if err != nil {
+				customlog.Printf(customlog.Failure, "Request failed: %v\n", err)
+			} else {
+				received++
+				totalLatency += delay
+				if minLatency == -1 || delay < minLatency {
+					minLatency = delay
+				}
+				if delay > maxLatency {
+					maxLatency = delay
+				}
+				customlog.Printf(customlog.Success, "Reply from %s: time=%dms\n", generalConfig.Address, delay)
+			}
+		}
+	}
 }
 
 // handleMultipleConfigs handles testing multiple configurations
@@ -132,10 +251,8 @@ func handleMultipleConfigs(examiner *pkghttp.Examiner, config *Config) error {
 	close(resultsChan)
 	collectorWg.Wait()
 
-	// Manually print successes to the console
 	for i, res := range results {
 		if res.Status == "passed" {
-			// Moved from pkg/http
 			printSuccessDetails(i, *res)
 		}
 	}
@@ -206,4 +323,7 @@ func addFlags(cmd *cobra.Command, config *Config) {
 	flags.StringVarP(&config.OutputType, "type", "x", "txt", "Output type (csv, txt)")
 	flags.StringVarP(&config.OutputFile, "out", "o", "valid.txt", "Output file for valid config links")
 	flags.BoolVarP(&config.SortedByRealDelay, "sort", "s", true, "Sort config links by their delay (fast to slow)")
+	flags.BoolVar(&config.Ping, "ping", false, "Enable continuous HTTP ping mode for a single config")
+	flags.Uint16Var(&config.PingInterval, "interval", 1000, "Interval between pings in milliseconds (ms)")
+	cmd.MarkFlagsMutuallyExclusive("file", "config")
 }

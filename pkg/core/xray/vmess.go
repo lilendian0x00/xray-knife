@@ -350,7 +350,7 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 		//		t = v.Type
 		//	}
 		//	s.QUICSettings = &conf.QUICConfig{
-		//		Header:   json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, t))),
+		//		Header:   json.RawMessage(fmt.Sprintf(`{ "type": "%s" }`, t))),
 		//		Security: v.Host,
 		//		Key:      v.Path,
 		//	}
@@ -407,25 +407,6 @@ func (v *Vmess) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
 	}
 
 	switch v.Network {
-	case "raw":
-		streamConfig.RAWSettings = &conf.TCPConfig{}
-		if v.Type == "" || v.Type == "none" {
-			streamConfig.RAWSettings.HeaderConfig = json.RawMessage([]byte(`{ "type": "none" }`))
-		} else {
-			pathb, _ := json.Marshal(strings.Split(v.Path, ","))
-			hostb, _ := json.Marshal(strings.Split(v.Host, ","))
-			streamConfig.RAWSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`
-			{
-				"type": "http",
-				"request": {
-					"path": %s,
-					"headers": {
-						"Host": %s
-					}
-				}
-			}
-			`, string(pathb), string(hostb))))
-		}
 	case "tcp":
 		streamConfig.TCPSettings = &conf.TCPConfig{}
 		if v.Type == "" || v.Type == "none" {
@@ -493,9 +474,22 @@ func (v *Vmess) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
 		}
 	}
 
-	if v.TLS == "tls" {
-		// Cannot configure inbound TLS from a link as it requires certificate files.
-		// Fallback to no security.
+	if v.TLS == "tls" && v.CertFile != "" && v.KeyFile != "" {
+		streamConfig.TLSSettings = &conf.TLSConfig{
+			ServerName: v.SNI,
+			Certs: []*conf.TLSCertConfig{
+				{
+					KeyFile:  v.KeyFile,
+					CertFile: v.CertFile,
+				},
+			},
+		}
+		if v.ALPN != "" {
+			alpns := conf.StringList(strings.Split(v.ALPN, ","))
+			streamConfig.TLSSettings.ALPN = &alpns
+		}
+	} else if v.TLS != "none" && v.TLS != "" {
+		// If security is set but no certs, fallback to none for inbound.
 		streamConfig.Security = "none"
 	}
 

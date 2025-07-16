@@ -25,20 +25,17 @@ type Core interface {
 	Name() string
 	MakeHttpClient(outbound protocol.Protocol, maxDelay time.Duration) (*http.Client, protocol.Instance, error)
 	CreateProtocol(protocolType string) (protocol.Protocol, error)
-
 	MakeInstance(outbound protocol.Protocol) (protocol.Instance, error)
 	SetInbound(inbound protocol.Protocol) error
 }
 
-// CoreFactory is the factory method to create cores
+// CoreFactory is the factory method to create concrete cores.
 func CoreFactory(coreType CoreType, insecureTLS bool, verbose bool) Core {
 	switch coreType {
 	case XrayCoreType:
 		return xray.NewXrayService(verbose, insecureTLS)
 	case SingboxCoreType:
 		return singbox.NewSingboxService(verbose, insecureTLS)
-	//case AutoCoreType:
-	//	return NewAutomaticCore(false, false)
 	default:
 		return nil
 	}
@@ -47,15 +44,15 @@ func CoreFactory(coreType CoreType, insecureTLS bool, verbose bool) Core {
 // AutomaticCore implementation of the Core interface
 // Selects Core based on the config link
 type AutomaticCore struct {
-	xrayCore    *xray.Core
-	singboxCore *singbox.Core
+	xrayCore    Core
+	singboxCore Core
 }
 
 func (c *AutomaticCore) Name() string {
 	return "Automatic"
 }
 
-func NewAutomaticCore(verbose bool, allowInsecure bool) *AutomaticCore {
+func NewAutomaticCore(verbose bool, allowInsecure bool) Core {
 	return &AutomaticCore{
 		xrayCore:    xray.NewXrayService(verbose, allowInsecure),
 		singboxCore: singbox.NewSingboxService(verbose, allowInsecure),
@@ -63,50 +60,62 @@ func NewAutomaticCore(verbose bool, allowInsecure bool) *AutomaticCore {
 }
 
 // Defined Core for each protocol
-var cproto = map[string]string{
-	protocol.VmessIdentifier:       "xray",
-	protocol.VlessIdentifier:       "xray",
-	protocol.ShadowsocksIdentifier: "xray",
-	protocol.TrojanIdentifier:      "xray",
-	protocol.SocksIdentifier:       "xray",
-	protocol.WireguardIdentifier:   "xray",
-	protocol.Hysteria2Identifier:   "singbox",
-	"hy2":                          "singbox",
+var cproto = map[string]Core{
+	protocol.VmessIdentifier:       xray.NewXrayService(false, false),
+	protocol.VlessIdentifier:       xray.NewXrayService(false, false),
+	protocol.ShadowsocksIdentifier: xray.NewXrayService(false, false),
+	protocol.TrojanIdentifier:      xray.NewXrayService(false, false),
+	protocol.SocksIdentifier:       xray.NewXrayService(false, false),
+	protocol.WireguardIdentifier:   xray.NewXrayService(false, false),
+	protocol.Hysteria2Identifier:   singbox.NewSingboxService(false, false),
+	"hy2":                          singbox.NewSingboxService(false, false),
 }
 
+// CreateProtocol for AutomaticCore dispatches to the correct underlying core.
 func (c *AutomaticCore) CreateProtocol(configLink string) (protocol.Protocol, error) {
 	uri, err := url.Parse(configLink)
 	if err != nil {
 		return nil, err
 	}
 
-	coreType, ok := cproto[uri.Scheme]
+	selectedCore, ok := cproto[uri.Scheme]
 	if !ok {
-		return nil, fmt.Errorf("invalid %s protocol", coreType)
+		return nil, fmt.Errorf("unsupported protocol for automatic core: %s", uri.Scheme)
 	}
 
-	if coreType == "" {
-		return nil, errors.New("unsupported protocol")
+	return selectedCore.CreateProtocol(configLink)
+}
+
+// MakeHttpClient dispatches to the correct underlying core.
+func (c *AutomaticCore) MakeHttpClient(outbound protocol.Protocol, maxDelay time.Duration) (*http.Client, protocol.Instance, error) {
+	generalConfig := outbound.ConvertToGeneralConfig()
+	uri, err := url.Parse(generalConfig.OrigLink)
+	if err != nil {
+		return nil, nil, err
+	}
+	selectedCore, ok := cproto[uri.Scheme]
+	if !ok {
+		return nil, nil, fmt.Errorf("unsupported protocol for automatic core: %s", uri.Scheme)
 	}
 
-	var protocol protocol.Protocol
+	return selectedCore.MakeHttpClient(outbound, maxDelay)
+}
 
-	switch coreType {
-	case "xray":
-		protocol, err = c.xrayCore.CreateProtocol(configLink)
-	case "singbox":
-		protocol, err = c.singboxCore.CreateProtocol(configLink)
-		// default: // TODO: What?
-		// return c.singboxCore.CreateProtocol(configLink)
-	}
+// MakeInstance dispatches to the correct underlying core.
+func (c *AutomaticCore) MakeInstance(outbound protocol.Protocol) (protocol.Instance, error) {
+	generalConfig := outbound.ConvertToGeneralConfig()
+	uri, err := url.Parse(generalConfig.OrigLink)
 	if err != nil {
 		return nil, err
 	}
-
-	err = protocol.Parse()
-	if err != nil {
-		return nil, err
+	selectedCore, ok := cproto[uri.Scheme]
+	if !ok {
+		return nil, fmt.Errorf("unsupported protocol for automatic core: %s", uri.Scheme)
 	}
+	return selectedCore.MakeInstance(outbound)
+}
 
-	return protocol, err
+// SetInbound is not applicable for the AutomaticCore itself.
+func (c *AutomaticCore) SetInbound(inbound protocol.Protocol) error {
+	return errors.New("SetInbound is not supported on AutomaticCore")
 }

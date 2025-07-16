@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"github.com/fatih/color"
 	"io"
 	"net/http"
 	"net/url"
@@ -11,14 +12,22 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fatih/color"
 	"github.com/lilendian0x00/xray-knife/v5/pkg/core"
 	"github.com/lilendian0x00/xray-knife/v5/pkg/core/protocol"
 )
 
+// ProtocolInfo holds basic, serializable information about a protocol.
+type ProtocolInfo struct {
+	Remark   string `json:"remark"`
+	Protocol string `json:"protocol"`
+	Address  string `json:"address"`
+	Port     string `json:"port"`
+}
+
 type Result struct {
-	ConfigLink    string            `csv:"link" json:"link"` // vmess://... vless//..., etc
-	Protocol      protocol.Protocol `csv:"-" json:"-"`
+	ConfigLink    string            `csv:"link" json:"link"`         // vmess://... vless//..., etc
+	Protocol      protocol.Protocol `csv:"-" json:"-"`               // The full protocol object for internal use
+	ProtocolInfo  ProtocolInfo      `csv:"-" json:"protocol"`        // Serializable info for the frontend
 	Status        string            `csv:"status" json:"status"`     // passed, semi-passed, failed, broken
 	Reason        string            `csv:"reason" json:"reason"`     // reason of the error
 	TLS           string            `csv:"tls" json:"tls"`           // none, tls, reality
@@ -87,32 +96,19 @@ func NewExaminer(opts Options) (*Examiner, error) {
 		SpeedtestKbAmount:      10000,
 	}
 
-	if opts.CoreInstance != nil {
-		e.Core = opts.CoreInstance
-	} else {
-		switch opts.Core {
-		case "xray":
-			e.Core = core.CoreFactory(core.XrayCoreType, e.InsecureTLS, e.Verbose)
-			break
-		case "singbox":
-			e.Core = core.CoreFactory(core.SingboxCoreType, e.InsecureTLS, e.Verbose)
-			break
-		default:
-			e.Core = nil
-			e.xrayCore = core.CoreFactory(core.XrayCoreType, e.InsecureTLS, e.Verbose)
-			e.singboxCore = core.CoreFactory(core.SingboxCoreType, e.InsecureTLS, e.Verbose)
-			e.SelectedCore = map[string]core.Core{
-				protocol.VmessIdentifier:       e.xrayCore,
-				protocol.VlessIdentifier:       e.xrayCore,
-				protocol.ShadowsocksIdentifier: e.xrayCore,
-				protocol.TrojanIdentifier:      e.xrayCore,
-				protocol.SocksIdentifier:       e.xrayCore,
-				protocol.WireguardIdentifier:   e.xrayCore,
-				protocol.Hysteria2Identifier:   e.singboxCore,
-				"hy2":                          e.singboxCore,
-			}
-			break
-		}
+	switch opts.Core {
+	case "xray":
+		e.Core = core.CoreFactory(core.XrayCoreType, e.InsecureTLS, e.Verbose)
+	case "singbox":
+		e.Core = core.CoreFactory(core.SingboxCoreType, e.InsecureTLS, e.Verbose)
+	case "auto":
+		fallthrough
+	default:
+		e.Core = core.NewAutomaticCore(e.InsecureTLS, e.Verbose)
+	}
+
+	if e.Core == nil {
+		return nil, fmt.Errorf("failed to create core of type: %s", opts.Core)
 	}
 
 	if opts.MaxDelay != 0 {
@@ -121,12 +117,11 @@ func NewExaminer(opts Options) (*Examiner, error) {
 	if opts.SpeedtestKbAmount != 0 {
 		e.SpeedtestKbAmount = opts.SpeedtestKbAmount
 	}
-
 	if opts.TestEndpoint != "" {
 		e.TestEndpoint = opts.TestEndpoint
 	}
 	if opts.TestEndpointHttpMethod != "" {
-		e.TestEndpointHttpMethod = "GET"
+		e.TestEndpointHttpMethod = opts.TestEndpointHttpMethod
 	}
 
 	return e, nil
@@ -151,33 +146,20 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 
 	// Remove any spaces from the link
 	link = strings.TrimSpace(link)
-
-	var c = e.Core
-
-	// Select core based on config (Automatic Core)
-	if c == nil {
-		uri, err := url.Parse(link)
-		if err != nil {
-			return Result{}, errors.New(fmt.Sprintf("Couldn't parse the config: %v", err))
-		}
-
-		coreAuto, ok := e.SelectedCore[uri.Scheme]
-		if !ok {
-			return Result{}, errors.New(fmt.Sprintf("Couldn't parse the config: invalid protocol"))
-		}
-
-		c = coreAuto
+	if link == "" {
+		r.Status = "broken"
+		r.Reason = "config link is empty"
+		return r, errors.New(r.Reason)
 	}
 
-	proto, err := c.CreateProtocol(link)
+	proto, err := e.Core.CreateProtocol(link)
 	if err != nil {
 		r.Status = "broken"
 		r.Reason = fmt.Sprintf("create protocol: %v", err)
 		return r, errors.New(r.Reason)
 	}
 
-	err = proto.Parse()
-	if err != nil {
+	if err = proto.Parse(); err != nil {
 		r.Status = "broken"
 		r.Reason = fmt.Sprintf("parse protocol: %v", err)
 		return r, errors.New(r.Reason)
@@ -188,9 +170,16 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 	}
 
 	r.Protocol = proto
-	r.TLS = proto.ConvertToGeneralConfig().TLS
+	generalConfig := proto.ConvertToGeneralConfig()
+	r.ProtocolInfo = ProtocolInfo{
+		Remark:   generalConfig.Remark,
+		Protocol: generalConfig.Protocol,
+		Address:  generalConfig.Address,
+		Port:     generalConfig.Port,
+	}
+	r.TLS = generalConfig.TLS
 
-	client, instance, err := c.MakeHttpClient(proto, time.Duration(e.MaxDelay)*time.Millisecond)
+	client, instance, err := e.Core.MakeHttpClient(proto, time.Duration(e.MaxDelay)*time.Millisecond)
 	if err != nil {
 		r.Status = "broken"
 		r.Reason = err.Error()
@@ -198,21 +187,13 @@ func (e *Examiner) ExamineConfig(link string) (Result, error) {
 	}
 	defer instance.Close()
 
-	var delay int64
-
-	delay, _, err = MeasureDelay(client, e.ShowBody, e.TestEndpoint, e.TestEndpointHttpMethod)
+	delay, _, err := MeasureDelay(client, e.ShowBody, e.TestEndpoint, e.TestEndpointHttpMethod)
 	if err != nil {
 		r.Status = "failed"
 		r.Reason = err.Error()
 		return r, err
 	}
 	r.Delay = delay
-
-	defer func() {
-		if e.DoSpeedtest && r.Status == "passed" && (r.UploadSpeed == 0 || r.DownloadSpeed == 0) {
-			r.Status = "semi-passed"
-		}
-	}()
 
 	if uint16(delay) > e.MaxDelay {
 		r.Status = "timeout"
@@ -268,6 +249,16 @@ func MeasureDelay(client *http.Client, showBody bool, dest string, httpMethod st
 		fmt.Printf("Response body: \n%s\n", body)
 	}
 	return time.Since(start).Milliseconds(), code, nil
+}
+
+// zeroReader is an io.Reader that endlessly produces zero bytes.
+type zeroReader struct{}
+
+func (z zeroReader) Read(p []byte) (n int, err error) {
+	for i := range p {
+		p[i] = 0
+	}
+	return len(p), nil
 }
 
 func CoreHTTPRequest(client *http.Client, method, dest string) (int, []byte, error) {
@@ -331,19 +322,23 @@ func (c *SpeedTester) MakeUploadHTTPRequest(noTLS bool, amount uint32) *http.Req
 	if noTLS {
 		scheme = "http"
 	}
-	lk := strings.NewReader(strings.Repeat("0", int(amount)))
-	rc := io.NopCloser(lk)
-	return &http.Request{
+	// Use io.LimitReader to avoid allocating a massive string for the body.
+	// This is more memory-efficient and avoids int overflow on 32-bit systems.
+	bodyReader := io.LimitReader(zeroReader{}, int64(amount))
+	req := &http.Request{
 		Method: "POST",
 		URL: &url.URL{
 			Path:   c.UploadEndpoint,
 			Scheme: scheme,
 			Host:   c.SNI,
 		},
-		Header: make(http.Header),
-		Host:   c.SNI,
-		Body:   rc,
+		Header:        make(http.Header),
+		Host:          c.SNI,
+		Body:          io.NopCloser(bodyReader),
+		ContentLength: int64(amount),
 	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	return req
 }
 
 func (c *SpeedTester) MakeDebugRequest() *http.Request {

@@ -2,10 +2,11 @@ package scanner
 
 import (
 	"bufio"
-	"bytes"
 	"context"
+	"encoding/csv"
 	"errors"
 	"fmt"
+	"github.com/lilendian0x00/xray-knife/v5/pkg/core"
 	"io"
 	"log"
 	"math/rand"
@@ -21,7 +22,6 @@ import (
 
 	"github.com/alitto/pond/v2"
 	"github.com/gocarina/gocsv"
-	"github.com/lilendian0x00/xray-knife/v5/pkg"
 	"github.com/lilendian0x00/xray-knife/v5/pkg/core/protocol"
 	"github.com/lilendian0x00/xray-knife/v5/utils"
 	"github.com/lilendian0x00/xray-knife/v5/utils/customlog"
@@ -29,6 +29,16 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/net/http2"
 )
+
+// zeroReader is an io.Reader that endlessly produces zero bytes.
+type zeroReader struct{}
+
+func (z zeroReader) Read(p []byte) (n int, err error) {
+	for i := range p {
+		p[i] = 0
+	}
+	return len(p), nil
+}
 
 // ScannerConfig holds all configuration for a scan.
 type ScannerConfig struct {
@@ -57,9 +67,9 @@ type ScannerConfig struct {
 type ScannerService struct {
 	config          ScannerConfig
 	logger          *log.Logger
-	xrayCore        pkg.Core
-	singboxCore     pkg.Core
-	selectedCoreMap map[string]pkg.Core
+	xrayCore        core.Core
+	singboxCore     core.Core
+	selectedCoreMap map[string]core.Core
 	initialResults  []*ScanResult
 	scannedIPs      map[string]bool
 }
@@ -97,7 +107,7 @@ func NewScannerService(config ScannerConfig, logger *log.Logger) (*ScannerServic
 	}
 
 	if s.config.Resume {
-		resumedResults, err := loadResultsForResume(s.config.OutputFile)
+		resumedResults, err := LoadResultsForResume(s.config.OutputFile)
 		if err != nil {
 			s.logger.Printf("Could not resume from %s: %v. Starting fresh.", s.config.OutputFile, err)
 		} else if len(resumedResults) > 0 {
@@ -108,6 +118,7 @@ func NewScannerService(config ScannerConfig, logger *log.Logger) (*ScannerServic
 			s.logger.Printf("Resumed %d results from %s", len(s.initialResults), s.config.OutputFile)
 		}
 	} else {
+		// If not resuming, we clear the file.
 		err := os.Remove(s.config.OutputFile)
 		if err != nil && !os.IsNotExist(err) {
 			return nil, fmt.Errorf("failed to clear previous results file %s: %w", s.config.OutputFile, err)
@@ -115,9 +126,9 @@ func NewScannerService(config ScannerConfig, logger *log.Logger) (*ScannerServic
 	}
 
 	if s.config.ConfigLink != "" {
-		s.xrayCore = pkg.CoreFactory(pkg.XrayCoreType, s.config.InsecureTLS, s.config.Verbose)
-		s.singboxCore = pkg.CoreFactory(pkg.SingboxCoreType, s.config.InsecureTLS, s.config.Verbose)
-		s.selectedCoreMap = map[string]pkg.Core{
+		s.xrayCore = core.CoreFactory(core.XrayCoreType, s.config.InsecureTLS, s.config.Verbose)
+		s.singboxCore = core.CoreFactory(core.SingboxCoreType, s.config.InsecureTLS, s.config.Verbose)
+		s.selectedCoreMap = map[string]core.Core{
 			protocol.VmessIdentifier: s.xrayCore, protocol.VlessIdentifier: s.xrayCore,
 			protocol.ShadowsocksIdentifier: s.xrayCore, protocol.TrojanIdentifier: s.xrayCore,
 			protocol.SocksIdentifier: s.xrayCore, protocol.WireguardIdentifier: s.xrayCore,
@@ -249,7 +260,7 @@ func (s *ScannerService) runLatencyScan(ctx context.Context, workerResultsChan c
 }
 
 func (s *ScannerService) runSpeedTest(ctx context.Context, workerResultsChan chan<- *ScanResult) error {
-	allResults, err := loadResultsForResume(s.config.OutputFile)
+	allResults, err := LoadResultsForResume(s.config.OutputFile)
 	if err != nil {
 		return fmt.Errorf("could not load results for speed test phase: %w", err)
 	}
@@ -308,11 +319,6 @@ func (s *ScannerService) runSpeedTest(ctx context.Context, workerResultsChan cha
 
 func (s *ScannerService) resultProcessor(ctx context.Context, wg *sync.WaitGroup, workerResultsChan <-chan *ScanResult, uiProgressChan chan<- *ScanResult) {
 	defer wg.Done()
-	allResults := make(map[string]*ScanResult)
-	for _, r := range s.initialResults {
-		allResults[r.IP] = r
-	}
-
 	batch := make([]*ScanResult, 0, saveBatchSize)
 	ticker := time.NewTicker(saveInterval)
 	defer ticker.Stop()
@@ -323,20 +329,13 @@ func (s *ScannerService) resultProcessor(ctx context.Context, wg *sync.WaitGroup
 		}
 		for _, res := range batch {
 			res.PrepareForMarshal()
-			allResults[res.IP] = res
 		}
-
-		resultsToSave := make([]*ScanResult, 0, len(allResults))
-		for _, r := range allResults {
-			resultsToSave = append(resultsToSave, r)
-		}
-
-		if err := saveResultsToCSV(s.config.OutputFile, resultsToSave, s.config.DoSpeedtest); err != nil {
+		if err := appendResultsToCSV(s.config.OutputFile, batch); err != nil {
 			s.logger.Printf("Real-time save failed: %v", err)
 		} else if s.config.Verbose {
 			s.logger.Printf("Progress for %d new results saved to %s", len(batch), s.config.OutputFile)
 		}
-		batch = make([]*ScanResult, 0, saveBatchSize)
+		batch = make([]*ScanResult, 0, saveBatchSize) // Reset batch
 	}
 
 	for {
@@ -448,8 +447,8 @@ func (s *ScannerService) scanIPForLatency(ctx context.Context, ip string) *ScanR
 }
 
 func (s *ScannerService) measureSpeed(ctx context.Context, ip string) (downSpeed, upSpeed float64, err error) {
-	downloadBytesTotal := int64(s.config.DownloadMB * 1024 * 1024)
-	uploadBytesTotal := int64(s.config.UploadMB * 1024 * 1024)
+	downloadBytesTotal := int64(s.config.DownloadMB) * 1024 * 1024
+	uploadBytesTotal := int64(s.config.UploadMB) * 1024 * 1024
 	var client *http.Client
 	var instance protocol.Instance
 
@@ -497,10 +496,16 @@ func (s *ScannerService) measureSpeed(ctx context.Context, ip string) (downSpeed
 
 	// Upload
 	upURL := fmt.Sprintf("https://%s/__up", cloudflareSpeedTestURL)
-	reqUp, err := http.NewRequestWithContext(ctx, "POST", upURL, bytes.NewReader(make([]byte, uploadBytesTotal)))
+
+	// Use a memory-efficient reader instead of a massive byte slice
+	bodyReader := io.LimitReader(zeroReader{}, uploadBytesTotal)
+	reqUp, err := http.NewRequestWithContext(ctx, "POST", upURL, bodyReader)
 	if err != nil {
 		return downSpeed, 0, fmt.Errorf("failed to create upload request: %w", err)
 	}
+
+	// Explicitly set ContentLength as it's not automatically inferred from io.LimitReader
+	reqUp.ContentLength = uploadBytesTotal
 	reqUp.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
 	reqUp.Header.Set("Content-Type", "application/octet-stream")
 
@@ -699,11 +704,11 @@ func formatResultLine(result ScanResult, speedtestEnabled bool) string {
 	return fmt.Sprintf("%-20s | %-10v", result.IP, result.Latency.Round(time.Millisecond))
 }
 
-func loadResultsForResume(filePath string) ([]*ScanResult, error) {
+func LoadResultsForResume(filePath string) ([]*ScanResult, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, nil // No history is not an error
 		}
 		return nil, err
 	}
@@ -717,6 +722,7 @@ func loadResultsForResume(filePath string) ([]*ScanResult, error) {
 		return nil, fmt.Errorf("failed to parse resume file (must be CSV): %w", err)
 	}
 
+	// Re-hydrate the non-serialized fields
 	for _, r := range results {
 		r.Latency = time.Duration(r.LatencyMS) * time.Millisecond
 		if r.ErrorStr != "" {
@@ -726,47 +732,42 @@ func loadResultsForResume(filePath string) ([]*ScanResult, error) {
 	return results, nil
 }
 
-func saveResultsToCSV(filePath string, results []*ScanResult, doSpeedtest bool) error {
-	sort.Slice(results, func(i, j int) bool {
-		resI, resJ := results[i], results[j]
-		iHasError := resI.ErrorStr != ""
-		jHasError := resJ.ErrorStr != ""
-
-		if iHasError && !jHasError {
-			return false
-		}
-		if !iHasError && jHasError {
-			return true
-		}
-		if iHasError && jHasError {
-			return resI.IP < resJ.IP
-		}
-		if doSpeedtest {
-			if resI.Latency != resJ.Latency {
-				return resI.Latency < resJ.Latency
-			}
-			return resI.DownSpeed > resJ.DownSpeed
-		}
-		return resI.Latency < resJ.Latency
-	})
-
-	tempFilePath := filePath + ".tmp"
-	file, err := os.Create(tempFilePath)
+// appendResultsToCSV appends a batch of results to the CSV file.
+func appendResultsToCSV(filePath string, batch []*ScanResult) error {
+	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
 	if err != nil {
-		return fmt.Errorf("could not create temporary file: %w", err)
+		return fmt.Errorf("failed to open file for appending: %w", err)
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat file: %w", err)
 	}
 
-	err = gocsv.MarshalFile(&results, file)
-	file.Close()
-	if err != nil {
-		os.Remove(tempFilePath)
-		return fmt.Errorf("could not marshal results to CSV: %w", err)
+	// Create a buffered writer for efficiency
+	bufWriter := bufio.NewWriter(file)
+
+	// Create the standard csv.Writer
+	csvWriter := csv.NewWriter(bufWriter)
+
+	if info.Size() == 0 {
+		// If the file is new, marshal the batch with headers
+		err = gocsv.MarshalCSV(batch, csvWriter)
+	} else {
+		// If the file exists, marshal without headers to append
+		err = gocsv.MarshalCSVWithoutHeaders(batch, csvWriter)
 	}
 
-	return os.Rename(tempFilePath, filePath)
+	if err != nil {
+		return fmt.Errorf("failed to marshal and append results to CSV: %w", err)
+	}
+
+	// Flush the CSV writer (to the buffer) and then the buffered writer (to the file)
+	csvWriter.Flush()
+	return bufWriter.Flush()
 }
 
-// These functions can remain as they are, as they don't depend on global state.
 type BypassJA3Transport struct {
 	tr1         http.Transport
 	tr2         http2.Transport

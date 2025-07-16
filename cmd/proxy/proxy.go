@@ -132,7 +132,7 @@ func addFlags(cmd *cobra.Command, cfg *proxyCmdConfig) {
 	flags.StringVarP(&cfg.listenPort, "port", "p", "9999", "Listen port number for the proxy server")
 
 	flags.StringVarP(&cfg.inboundProtocol, "inbound", "j", "socks", "Inbound protocol to use (vless, vmess, socks)")
-	flags.StringVarP(&cfg.inboundTransport, "transport", "u", "tcp", "Inbound transport to use (tcp, xhttp)")
+	flags.StringVarP(&cfg.inboundTransport, "transport", "u", "tcp", "Inbound transport to use (tcp, ws, grpc, xhttp)")
 	flags.StringVarP(&cfg.inboundUUID, "uuid", "g", "random", "Inbound custom UUID to use (default: random)")
 
 	flags.StringVarP(&cfg.inboundConfigLink, "inbound-config", "I", "", "Custom config link for the inbound proxy")

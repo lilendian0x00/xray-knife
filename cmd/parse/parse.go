@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"github.com/lilendian0x00/xray-knife/v5/pkg/core"
 	"github.com/lilendian0x00/xray-knife/v5/pkg/core/xray"
 	"github.com/lilendian0x00/xray-knife/v5/utils/customlog"
 	"github.com/xtls/xray-core/infra/conf"
@@ -12,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lilendian0x00/xray-knife/v5/pkg"
 	"github.com/lilendian0x00/xray-knife/v5/utils"
 
 	"github.com/fatih/color"
@@ -228,7 +228,7 @@ func newParseCommand() *cobra.Command {
 				return generateAndPrintXrayJSON(trimmedLink)
 			}
 
-			core := pkg.NewAutomaticCore(true, true)
+			c := core.NewAutomaticCore(true, true)
 
 			d := color.New(color.FgCyan, color.Bold)
 			for i, link := range links {
@@ -241,7 +241,7 @@ func newParseCommand() *cobra.Command {
 				}
 
 				fmt.Printf("\n")
-				p, err := core.CreateProtocol(trimmedLink)
+				p, err := c.CreateProtocol(trimmedLink)
 				if err != nil {
 					return fmt.Errorf("failed to create protocol for link %d ('%s'): %w", i+1, trimmedLink, err)
 				}

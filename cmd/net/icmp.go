@@ -1,116 +1,145 @@
 package net
 
 import (
-	"bufio"
+	"bytes"
+	"encoding/binary"
+	"errors"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/v5/pkg/core/xray"
+	"math"
+	"math/rand"
 	"net"
 	"os"
-	"strings"
+	"time"
 
-	"github.com/lilendian0x00/xray-knife/v5/network"
-	"github.com/lilendian0x00/xray-knife/v5/pkg"
-	"github.com/lilendian0x00/xray-knife/v5/pkg/core/protocol"
+	"github.com/lilendian0x00/xray-knife/v5/utils/customlog"
 
-	"github.com/spf13/cobra"
+	"golang.org/x/net/icmp"
+	"golang.org/x/net/ipv4"
 )
 
-// ICMPConfig holds the configuration for the ICMP command
-type ICMPConfig struct {
-	ConfigLink string
-	TestCount  uint16
-	DestIP     net.IP
+type IcmpPacket struct {
+	DestIP                 net.IP
+	CustomInternetProtoID  int
+	CustomSequenceNum      int
+	Data                   []byte
+	TestCount              uint16
+	DelayBetweenEachPacket uint16
 }
 
-// ICMPCommand encapsulates the ICMP command functionality
-type ICMPCommand struct {
-	config *ICMPConfig
-	xray   pkg.Core
-}
+type IcmpPacketOption = func(c *IcmpPacket)
 
-// NewICMPCommand creates a new instance of the ICMP command
-func NewICMPCommand() *cobra.Command {
-	ic := &ICMPCommand{
-		config: &ICMPConfig{},
-		xray:   xray.NewXrayService(false, false),
+func NewIcmpPacket(dest string, count uint16, opts ...IcmpPacketOption) (*IcmpPacket, error) {
+	i := &IcmpPacket{
+		TestCount: count,
 	}
-	return ic.createCommand()
-}
-
-// createCommand creates and configures the cobra command
-func (ic *ICMPCommand) createCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "icmp",
-		Short: "PING or ICMP test config's host",
-		Long:  `Tests the connectivity and measures latency to a host using ICMP (ping) packets`,
-		RunE:  ic.runCommand,
+	for _, opt := range opts {
+		opt(i)
 	}
 
-	ic.addFlags(cmd)
-	return cmd
+	i.DestIP = net.ParseIP(dest)
+	if i.DestIP == nil {
+		addr, err := net.LookupIP(dest)
+		if err != nil {
+			return nil, err
+		}
+		i.DestIP = addr[0]
+	}
+	return i, nil
 }
 
-// addFlags adds command-line flags to the command
-func (ic *ICMPCommand) addFlags(cmd *cobra.Command) {
-	flags := cmd.Flags()
-	flags.StringVarP(&ic.config.ConfigLink, "config", "c", "", "The xray config link")
-	flags.Uint16VarP(&ic.config.TestCount, "count", "t", 4, "Count of tests")
-}
+func (i *IcmpPacket) MeasureReplyDelay() error {
+	rnd := rand.New(rand.NewSource(time.Now().Unix()))
 
-// runCommand executes the ICMP command logic
-func (ic *ICMPCommand) runCommand(cmd *cobra.Command, args []string) error {
-	protocol, err := ic.parseConfig()
+	if i.DestIP == nil {
+		customlog.Printf(customlog.Failure, "Destination IP address is empty!\n")
+		return errors.New("Destination IP address is empty! ")
+	}
+	if i.CustomInternetProtoID == 0 {
+		i.CustomInternetProtoID = os.Getpid() & 0xffff
+	}
+	if i.CustomSequenceNum == 0 {
+		// The original value 4294967290 overflows int on 32-bit systems.
+		// Using math.MaxInt32 ensures the value fits within a 32-bit signed int,
+		// making it compatible with armv6 and other 32-bit architectures.
+		i.CustomSequenceNum = rnd.Intn(math.MaxInt32)
+	}
+	if len(i.Data) == 0 {
+		// Windows default DATA
+		data := []byte("abcdefghijklmnopqrstuvwabcdefghi")
+		buf := bytes.NewReader(data)
+		i.Data = make([]byte, 32)
+		err := binary.Read(buf, binary.LittleEndian, i.Data)
+		if err != nil {
+			customlog.Printf(customlog.Failure, "binary.Read failed: %v\n", err)
+			return err
+		}
+	}
+	c, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
 	if err != nil {
-		return fmt.Errorf("failed to parse configuration: %w", err)
+		customlog.Printf(customlog.Failure, "listen err: %v\n", err)
+		return err
 	}
+	defer c.Close()
 
-	err = protocol.Parse()
+	wm := icmp.Message{
+		Type: ipv4.ICMPTypeEcho, Code: 0,
+		Body: &icmp.Echo{
+			ID: i.CustomInternetProtoID, Seq: i.CustomSequenceNum,
+			Data: i.Data,
+		},
+	}
+	wb, err := wm.Marshal(nil)
 	if err != nil {
-		return fmt.Errorf("failed to parse configuration: %w", err)
+		return err
 	}
+	// Record the current time
+	start := time.Now()
 
-	generalConfig, err := ic.getGeneralConfig(protocol)
-	if err != nil {
-		return fmt.Errorf("failed to get general configuration: %w", err)
+	msg := make(chan int)
+	errMsg := make(chan string)
+	//done := make(chan bool, 1)
+	go func() {
+		for a := 0; a < 5; a++ {
+			_, err = c.WriteTo(wb, &net.IPAddr{IP: i.DestIP})
+			start = time.Now()
+			if err != nil {
+				msg <- -1
+				errMsg <- fmt.Sprintf("WriteTo err: %s", err.Error())
+			} else {
+				msg <- 0
+			}
+			time.Sleep(time.Duration(1) * time.Second)
+		}
+		msg <- 1
+	}()
+
+	for m := range msg {
+		if m == 0 {
+			rb := make([]byte, 1500)
+			n, peer, err1 := c.ReadFrom(rb)
+			if err1 != nil {
+				customlog.Printf(customlog.Failure, "Error ReadFrom: %v\n", err1)
+				return err
+			}
+			rm, err2 := icmp.ParseMessage(ipv4.ICMPTypeEchoReply.Protocol(), rb[:n])
+			if err2 != nil {
+				customlog.Printf(customlog.Failure, "Error icmp.ParseMessage: %v\n", err2)
+				return err
+			}
+			switch rm.Type {
+			case ipv4.ICMPTypeEchoReply:
+				customlog.Printf(customlog.Success, "Reply from %s: bytes=32 time=%dms\n", peer, time.Since(start).Milliseconds())
+				break
+			default:
+				customlog.Printf(customlog.Failure, "Got %+v\n", rm)
+			}
+		} else if m == -1 {
+			// Error happened
+			sendErr := <-errMsg
+			customlog.Printf(customlog.Failure, "%s\n", sendErr)
+		} else {
+			break
+		}
 	}
-
-	return ic.performICMPTest(generalConfig)
-}
-
-// parseConfig parses the provided configuration
-func (ic *ICMPCommand) parseConfig() (protocol.Protocol, error) {
-	if ic.config.ConfigLink == "" {
-		reader := bufio.NewReader(os.Stdin)
-		fmt.Println("Enter your config link:")
-		text, _ := reader.ReadString('\n')
-		ic.config.ConfigLink = strings.TrimSpace(text)
-	}
-	protocol, err := ic.xray.CreateProtocol(ic.config.ConfigLink)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create protocol: %w", err)
-	}
-	return protocol, nil
-}
-
-// getGeneralConfig converts the protocol to general configuration
-func (ic *ICMPCommand) getGeneralConfig(protocol protocol.Protocol) (protocol.GeneralConfig, error) {
-	generalConfig := protocol.ConvertToGeneralConfig()
-	//if generalConfig == nil {
-	//	return nil, fmt.Errorf("failed to convert to general configuration")
-	//}
-	return generalConfig, nil
-}
-
-// performICMPTest executes the ICMP test
-func (ic *ICMPCommand) performICMPTest(config protocol.GeneralConfig) error {
-	icmp, err := network.NewIcmpPacket(config.Address, ic.config.TestCount)
-	if err != nil {
-		return fmt.Errorf("failed to create ICMP packet: %w", err)
-	}
-
-	if err := icmp.MeasureReplyDelay(); err != nil {
-		return fmt.Errorf("failed to measure reply delay: %w", err)
-	}
-
 	return nil
 }

@@ -37,6 +37,8 @@ type Vmess struct {
 	//PublicKey string `json:"pbk"`
 	//ShortIds  string `json:"sid"` // Mandatory, the shortId list available to the client, which can be used to distinguish different clients
 	//SpiderX   string `json:"spx"` // Reality path
+	CertFile string `json:"-"`
+	KeyFile  string `json:"-"`
 
 	OrigLink string `json:"-"` // Original link
 }
@@ -67,7 +69,9 @@ type Vless struct {
 	ServiceName    string `json:"serviceName"`   // GRPC
 	Mode           string `json:"mode"`          // XHTTP - GRPC
 	Extra          string `json:"extra"`         // XHTTP - EXTRA
-	OrigLink       string `json:"-"`             // Original link
+	CertFile       string `json:"-"`
+	KeyFile        string `json:"-"`
+	OrigLink       string `json:"-"` // Original link
 }
 
 type Shadowsocks struct {

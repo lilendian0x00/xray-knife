@@ -1,194 +1,130 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
 import { toast } from "sonner";
-
+import axios from 'axios';
+import { FaCloudflare } from "react-icons/fa";
+import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-    Breadcrumb,
-    BreadcrumbItem,
-    BreadcrumbLink,
-    BreadcrumbList,
-    BreadcrumbPage,
-    BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb";
+import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
+import { Sheet, SheetClose, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Server, Globe, Search, TerminalSquare } from 'lucide-react';
-
+import { Server, Globe, TerminalSquare, Menu, Package2, PanelLeft } from 'lucide-react';
+import { useAppStore } from "@/stores/appStore";
+import { webSocketService } from "@/services/websocket";
 import { ProxyTab } from "./dashboard/ProxyTab";
-import { HttpTesterTab, type HttpResult } from "./dashboard/HttpTesterTab";
-import { CfScannerTab, type ScanResult, type ScanStatus } from "./dashboard/CFScannerTab";
+import { HttpTesterTab } from "./dashboard/HttpTesterTab";
+import { CfScannerTab } from "./dashboard/CFScannerTab";
+import { ProxyStatusCard } from "./dashboard/ProxyStatusCard";
+import { type ProxyDetails, type ProxyStatus } from "@/types/dashboard";
 
-export type ProxyStatus = 'stopped' | 'running' | 'starting' | 'stopping';
-
+type Page = 'proxy' | 'http-tester' | 'cf-scanner';
+const navItems = [{ id: 'proxy' as Page, label: 'Proxy Service', icon: Server }, { id: 'http-tester' as Page, label: 'HTTP Tester', icon: Globe }, { id: 'cf-scanner' as Page, label: 'CF Scanner', icon: FaCloudflare }];
 
 export default function Dashboard() {
-    const [proxyStatus, setProxyStatus] = useState<ProxyStatus>('stopped');
-    const [scanStatus, setScanStatus] = useState<ScanStatus>('idle');
-    const [httpResults, setHttpResults] = useState<HttpResult[]>([]);
-    const [scanResults, setScanResults] = useState<ScanResult[]>([]);
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+    const [activePage, setActivePage] = useState<Page>('proxy');
+    
+    // Get state from the global store
+    const { proxyStatus, setProxyStatus, setScanStatus, setScanResults, proxyDetails, setProxyDetails } = useAppStore();
 
     const terminalRef = useRef<HTMLDivElement>(null);
     const term = useRef<Terminal | null>(null);
     const fitAddon = useRef<FitAddon | null>(null);
-    const ws = useRef<WebSocket | null>(null);
-
-    const connectWebSocket = useCallback(() => {
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
-        ws.current = new WebSocket(wsUrl);
-
-        ws.current.onopen = () => term.current?.writeln("\x1b[32m[WebSocket] Connection established.\x1b[0m");
-
-        ws.current.onmessage = (event) => {
-            try {
-                const message = JSON.parse(event.data);
-                switch (message.type) {
-                    case 'http_result':
-                        setHttpResults(prev => [...prev, message.data]);
-                        break;
-                    case 'cfscan_result':
-                        setScanResults(prev => {
-                            const newResults = prev.filter(r => r.ip !== message.data.ip);
-                            newResults.push(message.data);
-                            return newResults;
-                        });
-                        break;
-                    case 'cfscan_status':
-                        // FIX: Ensure UI state is reset on both 'finished' and 'error'
-                        if (message.data === 'finished') {
-                            setScanStatus('idle');
-                            toast.success("Cloudflare scan finished.");
-                        } else if (message.data === 'error') {
-                            setScanStatus('idle');
-                            toast.error(`Scan failed: ${message.message}`);
-                        }
-                        break;
-                    default:
-                        // For generic log messages
-                        term.current?.write(event.data);
-                }
-            } catch (e) {
-                // If it's not valid JSON, treat it as a raw log line.
-                term.current?.write(event.data);
-            }
-        };
-
-        ws.current.onclose = () => {
-            term.current?.writeln("\x1b[31m[WebSocket] Connection closed. Retrying in 3 seconds...\x1b[0m");
-            setTimeout(connectWebSocket, 3000);
-        };
-
-        ws.current.onerror = (error) => {
-            console.error("WebSocket error:", error);
-            term.current?.writeln(`\x1b[31m[WebSocket] Error: ${error}\x1b[0m`);
-            ws.current?.close();
-        };
-    }, []);
 
     useEffect(() => {
+        // Initialize Terminal and WebSocket service
         if (terminalRef.current && !term.current) {
-            const terminal = new Terminal({
-                convertEol: true, cursorBlink: true, fontFamily: 'monospace',
-                theme: { background: '#1c1917', foreground: '#f8fafc' }
-            });
+            const terminal = new Terminal({ convertEol: true, cursorBlink: true, fontFamily: 'monospace', theme: { background: '#18181b', foreground: '#e4e4e7' } });
             const addon = new FitAddon();
-            fitAddon.current = addon;
             terminal.loadAddon(addon);
             terminal.open(terminalRef.current);
             addon.fit();
             term.current = terminal;
+            fitAddon.current = addon;
+            
+            webSocketService.connect({ writeln: (text) => term.current?.writeln(text) });
 
             const resizeHandler = () => fitAddon.current?.fit();
             window.addEventListener('resize', resizeHandler);
 
-            connectWebSocket();
-
-            return () => {
-                window.removeEventListener('resize', resizeHandler);
-                term.current?.dispose();
-                ws.current?.close();
-            };
+            return () => { window.removeEventListener('resize', resizeHandler); webSocketService.disconnect(); term.current?.dispose(); };
         }
-    }, [connectWebSocket]);
+    }, []);
 
+    // Fetch initial state on load
+    useEffect(() => {
+        const fetchInitialState = async () => {
+            try {
+                const [scanRes, historyRes, proxyRes] = await Promise.all([ axios.get('/api/v1/scanner/cf/status'), axios.get('/api/v1/scanner/cf/history'), axios.get('/api/v1/proxy/status') ]);
+                if (scanRes.data.is_scanning) { setScanStatus('scanning'); toast.info("A scan is already in progress."); }
+                if (historyRes.data && Array.isArray(historyRes.data)) setScanResults(historyRes.data);
+                if (proxyRes.data.status) {
+                    const status = proxyRes.data.status as ProxyStatus;
+                    setProxyStatus(status);
+                    if (status === 'running') { toast.info("Proxy service is already running."); }
+                }
+            } catch (error) { toast.error("Could not fetch initial server state."); }
+        };
+        fetchInitialState();
+    }, [setProxyStatus, setScanStatus, setScanResults]);
+
+    // Polling for proxy details when running
+    useEffect(() => {
+        if (proxyStatus === 'running') {
+            const fetchDetails = async () => { try { const res = await axios.get<ProxyDetails>('/api/v1/proxy/details'); setProxyDetails(res.data); } catch { setProxyDetails(null); }};
+            fetchDetails(); // Initial fetch
+            const interval = setInterval(fetchDetails, 5000);
+            return () => clearInterval(interval);
+        } else {
+            setProxyDetails(null);
+        }
+    }, [proxyStatus, setProxyDetails]);
+
+    useEffect(() => { const timer = setTimeout(() => fitAddon.current?.fit(), 100); return () => clearTimeout(timer); }, [activePage, isSidebarCollapsed]);
+    
     const getProxyStatusColor = (status: ProxyStatus) => {
-        switch (status) {
-            case 'running': return 'bg-green-500 text-white';
-            case 'stopped': return 'bg-red-500 text-white';
-            default: return 'bg-yellow-500 text-white';
-        }
+        if (status === 'running') return 'bg-green-500 text-primary-foreground';
+        if (status === 'stopped') return 'bg-destructive';
+        return 'bg-yellow-500 text-destructive-foreground';
     };
     
     const clearLogs = () => term.current?.clear();
 
+    const currentPageInfo = navItems.find(item => item.id === activePage);
+
+    const logsCard = (<Card><CardHeader className="flex-row items-center justify-between"><div className="flex-col gap-1.5"><CardTitle>Live Logs</CardTitle><CardDescription>Real-time output from the backend.</CardDescription></div><Button variant="outline" size="sm" onClick={clearLogs}><TerminalSquare className="mr-2 h-4 w-4" />Clear</Button></CardHeader><CardContent><div ref={terminalRef} className="h-64 sm:h-[400px] w-full rounded-md border bg-muted/20 overflow-hidden" /></CardContent></Card>);
+
+    const renderPageLayout = () => {
+        if (activePage === 'proxy') {
+            return (
+                <div className="grid items-start gap-4 lg:grid-cols-5 lg:gap-8">
+                    <div className="grid auto-rows-max items-start gap-4 lg:col-span-2"><ProxyTab /></div>
+                    <div className="grid auto-rows-max items-start gap-4 lg:col-span-3"><ProxyStatusCard details={proxyDetails} /><div className={cn(proxyDetails === null && 'hidden')} >{logsCard}</div></div>
+                </div>
+            );
+        }
+        return <div className="flex flex-col gap-4 lg:gap-6">{activePage === 'http-tester' ? <HttpTesterTab /> : <CfScannerTab />}{logsCard}</div>;
+    };
+
     return (
-        <div className="bg-background text-foreground">
-            <Toaster position="top-right" />
-            <div className="container mx-auto py-4 sm:py-10 flex flex-col gap-6">
-                <header className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-8 w-8 text-primary">
-                            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path>
-                            <polyline points="14 2 14 8 20 8"></polyline>
-                            <path d="m14 14-4 4 4-4-4-4 4 4z"></path>
-                        </svg>
-                        <h1 className="text-2xl font-bold">xray-knife UI</h1>
-                    </div>
-                    <Badge className={`capitalize ${getProxyStatusColor(proxyStatus)}`}>
-                        {proxyStatus}
-                    </Badge>
-                </header>
-
-                <Breadcrumb>
-                    <BreadcrumbList>
-                        <BreadcrumbItem><BreadcrumbLink href="/">Home</BreadcrumbLink></BreadcrumbItem>
-                        <BreadcrumbSeparator />
-                        <BreadcrumbItem><BreadcrumbPage>Dashboard</BreadcrumbPage></BreadcrumbItem>
-                    </BreadcrumbList>
-                </Breadcrumb>
-
-                <Tabs defaultValue="proxy" className="w-full">
-                    <TabsList className="grid w-full grid-cols-3">
-                        <TabsTrigger value="proxy"><Server className="mr-2 h-4 w-4" />Proxy Service</TabsTrigger>
-                        <TabsTrigger value="http-tester"><Globe className="mr-2 h-4 w-4" />HTTP Tester</TabsTrigger>
-                        <TabsTrigger value="cf-scanner"><Search className="mr-2 h-4 w-4" />CF Scanner</TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="proxy" className="mt-4">
-                        <ProxyTab status={proxyStatus} setStatus={setProxyStatus} />
-                    </TabsContent>
-                    <TabsContent value="http-tester" className="mt-4">
-                        <HttpTesterTab results={httpResults} setResults={setHttpResults} />
-                    </TabsContent>
-                    <TabsContent value="cf-scanner" className="mt-4">
-                        <CfScannerTab 
-                            results={scanResults} 
-                            setResults={setScanResults} 
-                            status={scanStatus}
-                            setStatus={setScanStatus}
-                        />
-                    </TabsContent>
-                </Tabs>
-
-                <Card>
-                    <CardHeader className="flex flex-col sm:flex-row justify-between gap-2">
-                        <div className="flex flex-col gap-1.5">
-                            <CardTitle>Live Logs</CardTitle>
-                            <CardDescription>Real-time output from the xray-knife backend.</CardDescription>
-                        </div>
-                        <Button className="w-full sm:w-fit" variant="outline" size="sm" onClick={clearLogs}>
-                            <TerminalSquare className="mr-2 h-4 w-4" />Clear Logs
-                        </Button>
-                    </CardHeader>
-                    <CardContent>
-                        <div ref={terminalRef} className="h-64 sm:h-[400px] w-full rounded-md border bg-muted/20 overflow-hidden" />
-                    </CardContent>
-                </Card>
-            </div>
-        </div>
+        <><Toaster position="top-right" /><div className={cn("grid h-screen w-full transition-[grid-template-columns]", isSidebarCollapsed ? "md:grid-cols-[68px_1fr]" : "md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]")}><div className="hidden border-r bg-muted/40 md:block"><div className="flex h-full max-h-screen flex-col">{isSidebarCollapsed ? (<div className="flex h-14 items-center justify-center border-b px-2 lg:h-[60px]"><Button variant="ghost" size="icon" className="group" onClick={() => setIsSidebarCollapsed(false)}><Package2 className="h-6 w-6 text-primary" /><span className="sr-only">Expand</span></Button></div>) : (<div className="flex h-14 items-center justify-between border-b px-4 lg:h-[60px] lg:px-6"><a href="/" className="flex items-center gap-2 font-semibold"><Package2 className="h-6 w-6 text-primary" /><span>xray-knife</span></a><Button variant="ghost" size="icon" onClick={() => setIsSidebarCollapsed(true)}><PanelLeft className="h-5 w-5" /><span className="sr-only">Collapse</span></Button></div>)}<div className="flex-1 overflow-auto"><nav className={cn("grid items-start gap-1 mt-2", isSidebarCollapsed ? "px-2" : "px-2 lg:px-4")}>{navItems.map(item => (
+            // FIX: Removed SheetClose from the desktop navigation
+            <Button key={item.id} variant={activePage === item.id ? "default" : "ghost"} className={cn("w-full gap-2", isSidebarCollapsed ? "justify-center" : "justify-start")} onClick={() => setActivePage(item.id)}>
+                <item.icon className="h-4 w-4" />
+                <span className={cn(isSidebarCollapsed && "sr-only")}>{item.label}</span>
+            </Button>
+        ))}</nav></div></div></div><div className="flex flex-col"><header className="flex h-14 items-center gap-4 border-b bg-muted/40 px-4 lg:h-[60px] lg:px-6"><Sheet><SheetTrigger asChild><Button variant="outline" size="icon" className="shrink-0 md:hidden"><Menu className="h-5 w-5" /><span className="sr-only">Toggle menu</span></Button></SheetTrigger><SheetContent side="left" className="flex flex-col"><nav className="grid gap-2 text-lg font-medium"><a href="/" className="flex items-center gap-2 text-lg font-semibold mb-4"><Package2 className="h-6 w-6 text-primary" /><span>xray-knife</span></a>{navItems.map(item => (
+            // This one is correct because it's inside SheetContent
+            <SheetClose asChild key={item.id}>
+                <Button variant={activePage === item.id ? "secondary" : "ghost"} className="w-full justify-start gap-2 py-6 text-base" onClick={() => setActivePage(item.id)}>
+                    <item.icon className="h-5 w-5" />
+                    {item.label}
+                </Button>
+            </SheetClose>
+        ))}</nav></SheetContent></Sheet><div className="w-full flex-1"><Breadcrumb><BreadcrumbList><BreadcrumbItem><BreadcrumbLink href="/">Home</BreadcrumbLink></BreadcrumbItem><BreadcrumbSeparator /><BreadcrumbItem><BreadcrumbPage>{currentPageInfo?.label}</BreadcrumbPage></BreadcrumbItem></BreadcrumbList></Breadcrumb></div><Badge className={cn("capitalize", getProxyStatusColor(proxyStatus))}>Proxy: {proxyStatus}</Badge></header><main className="flex-1 overflow-auto p-4 lg:p-6"><div className="mx-auto w-full max-w-screen-2xl">{renderPageLayout()}</div></main></div></div></>
     );
 }

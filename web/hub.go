@@ -142,7 +142,7 @@ func (c *Client) writePump() {
 			// Add queued chat messages to the current websocket message.
 			n := len(c.send)
 			for i := 0; i < n; i++ {
-				w.Write([]byte{'\n'})
+				// No extra newline needed, as the Go logger already provides one.
 				w.Write(<-c.send)
 			}
 

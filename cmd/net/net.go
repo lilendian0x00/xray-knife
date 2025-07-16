@@ -14,7 +14,7 @@ var NetCmd = &cobra.Command{
 }
 
 func addSubcommandPalettes() {
-	NetCmd.AddCommand(NewICMPCommand())
+	//NetCmd.AddCommand(NewICMPCommand())
 	NetCmd.AddCommand(TcpCmd)
 	//NetCmd.AddCommand(NewHTTPCommand())
 }

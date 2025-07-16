@@ -28,33 +28,62 @@ import (
 
 // Config holds all the settings for the proxy service.
 type Config struct {
-	CoreType          string
-	InboundProtocol   string
-	InboundTransport  string
-	InboundUUID       string
-	ListenAddr        string
-	ListenPort        string
-	InboundConfigLink string
-	Mode              string
-	Verbose           bool
-	InsecureTLS       bool
-
-	// Rotation-specific settings
-	RotationInterval    uint32
-	MaximumAllowedDelay uint16
+	CoreType            string `json:"coreType"`
+	InboundProtocol     string `json:"inboundProtocol"`
+	InboundTransport    string `json:"inboundTransport"`
+	InboundUUID         string `json:"inboundUUID"`
+	ListenAddr          string `json:"listenAddr"`
+	ListenPort          string `json:"listenPort"`
+	InboundConfigLink   string `json:"inboundConfigLink"`
+	Mode                string `json:"mode"`
+	Verbose             bool   `json:"verbose"`
+	InsecureTLS         bool   `json:"insecureTLS"`
+	EnableTLS           bool   `json:"enableTls"`
+	TLSSNI              string `json:"tlsSni"`
+	TLSALPN             string `json:"tlsAlpn"`
+	TLSCertFile         string `json:"tlsCertPath"`
+	TLSKeyFile          string `json:"tlsKeyPath"`
+	WSPath              string `json:"wsPath"`
+	WSHost              string `json:"wsHost"`
+	GRPCServiceName     string `json:"grpcServiceName"`
+	GRPCAuthority       string `json:"grpcAuthority"`
+	XHTTPMode           string `json:"xhttpMode"`
+	XHTTPHost           string `json:"xhttpHost"`
+	XHTTPPath           string `json:"xhttpPath"`
+	RotationInterval    uint32 `json:"rotationInterval"`
+	MaximumAllowedDelay uint16 `json:"maximumAllowedDelay"`
 	ConfigLinks         []string
+}
+
+// Details represents the current state of a running proxy service.
+type Details struct {
+	Inbound          protocol.GeneralConfig `json:"inbound"`
+	ActiveOutbound   *pkghttp.Result        `json:"activeOutbound,omitempty"`
+	RotationStatus   string                 `json:"rotationStatus"` // idle, testing, switching, stalled
+	NextRotationTime time.Time              `json:"nextRotationTime"`
+	RotationInterval uint32                 `json:"rotationInterval"`
+	TotalConfigs     int                    `json:"totalConfigs"`
 }
 
 // Service is the main proxy service engine.
 type Service struct {
-	config Config
-	core   core.Core
-	logger *log.Logger
+	config           Config
+	core             core.Core
+	logger           *log.Logger
+	inbound          protocol.Protocol
+	activeOutbound   *pkghttp.Result
+	mu               sync.RWMutex
+	rotationStatus   string
+	nextRotationTime time.Time
 }
 
 // New creates a new proxy Service.
 func New(config Config, logger *log.Logger) (*Service, error) {
-	s := &Service{config: config, logger: logger}
+	s := &Service{
+		config:         config,
+		logger:         logger,
+		rotationStatus: "idle",
+	}
 
 	switch config.CoreType {
 	case "xray":
@@ -69,6 +98,7 @@ func New(config Config, logger *log.Logger) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create inbound: %w", err)
 	}
+	s.inbound = inbound // Store inbound
 
 	if err := s.core.SetInbound(inbound); err != nil {
 		return nil, fmt.Errorf("failed to set inbound: %w", err)
@@ -76,16 +106,36 @@ func New(config Config, logger *log.Logger) (*Service, error) {
 
 	s.logf(customlog.Info, "==========INBOUND==========")
 	if s.logger != nil {
-		// Log simple, uncolored details for the Web UI
 		g := inbound.ConvertToGeneralConfig()
 		s.logger.Printf("Protocol: %s\nListen: %s:%s\nLink: %s\n", g.Protocol, g.Address, g.Port, g.OrigLink)
 	} else {
-		// Log rich, colored details for the CLI
 		fmt.Printf("\n%v%s: %v\n", inbound.DetailsStr(), color.RedString("Link"), inbound.GetLink())
 	}
 	s.logf(customlog.Info, "============================\n\n")
 
 	return s, nil
+}
+
+func (s *Service) setRotationStatus(status string) {
+	s.mu.Lock()
+	s.rotationStatus = status
+	s.mu.Unlock()
+}
+
+// GetCurrentDetails safely returns the details of the running service.
+func (s *Service) GetCurrentDetails() *Details {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	details := &Details{
+		Inbound:          s.inbound.ConvertToGeneralConfig(),
+		ActiveOutbound:   s.activeOutbound,
+		RotationStatus:   s.rotationStatus,
+		NextRotationTime: s.nextRotationTime,
+		RotationInterval: s.config.RotationInterval,
+		TotalConfigs:     len(s.config.ConfigLinks),
+	}
+	return details
 }
 
 // logf is a helper to direct logs to either the web logger or the CLI customlog.
@@ -119,6 +169,10 @@ func (s *Service) runSingleMode(ctx context.Context, link string) error {
 		return fmt.Errorf("failed to parse single outbound config: %w", err)
 	}
 
+	s.mu.Lock()
+	s.activeOutbound = &pkghttp.Result{ConfigLink: link, Protocol: outbound}
+	s.mu.Unlock()
+
 	s.logf(customlog.Info, "==========OUTBOUND==========")
 	if s.logger != nil {
 		g := outbound.ConvertToGeneralConfig()
@@ -150,44 +204,71 @@ func (s *Service) runRotationMode(ctx context.Context, forceRotate <-chan struct
 		return err
 	}
 
-	r := rand.New(rand.NewSource(time.Now().Unix()))
 	var currentInstance protocol.Instance
-	var currentLink string
+	defer func() {
+		if currentInstance != nil {
+			currentInstance.Close()
+		}
+	}()
+
+	r := rand.New(rand.NewSource(time.Now().Unix()))
+	var lastUsedLink string
+
+	// Initial setup
+	s.setRotationStatus("testing")
+	instance, result, err := s.findAndStartWorkingConfig(examiner, r, "")
+	if err != nil {
+		s.logf(customlog.Failure, "Could not find any working config on initial startup. Exiting.")
+		return err
+	}
+	currentInstance = instance
+	lastUsedLink = result.ConfigLink
+	s.setRotationStatus("idle")
 
 	for {
+		rotationDuration := time.Duration(s.config.RotationInterval) * time.Second
+		if s.rotationStatus == "stalled" {
+			rotationDuration = 30 * time.Second // Shorter retry interval if stalled
+		}
+
+		s.mu.Lock()
+		s.nextRotationTime = time.Now().Add(rotationDuration)
+		s.mu.Unlock()
+
+		s.logf(customlog.Info, "Next rotation in %v. Current outbound: %s", rotationDuration, lastUsedLink)
+
+		timer := time.NewTimer(rotationDuration)
+
 		select {
 		case <-ctx.Done():
-			s.logf(customlog.Processing, "Main proxy loop exiting.\n")
-			if currentInstance != nil {
-				s.logf(customlog.Processing, "Closing final active instance...\n")
-				_ = currentInstance.Close()
-			}
+			timer.Stop()
 			return nil
-		default:
+		case <-forceRotate:
+			s.logf(customlog.Processing, "Manual rotation triggered.")
+			if !timer.Stop() {
+				<-timer.C // Drain the timer if it already fired
+			}
+		case <-timer.C:
+			s.logf(customlog.Processing, "Rotation interval elapsed.")
 		}
+
+		s.setRotationStatus("testing")
+		instance, result, err := s.findAndStartWorkingConfig(examiner, r, lastUsedLink)
+		if err != nil {
+			s.logf(customlog.Warning, "Rotation failed to find a new working config. Keeping the current one. Retrying in 30s...")
+			s.setRotationStatus("stalled")
+			continue // Keep the old instance running and retry sooner
+		}
+
+		s.setRotationStatus("switching")
+		s.logf(customlog.Success, "Switching to new outbound: %s", result.ConfigLink)
 
 		if currentInstance != nil {
-			_ = currentInstance.Close()
-			currentInstance = nil
+			currentInstance.Close()
 		}
-
-		newInstance, newLink, err := s.findAndStartWorkingConfig(examiner, r, currentLink)
-		if err != nil {
-			s.logf(customlog.Failure, "Error finding new config: %v. Retrying after delay...\n", err)
-			select {
-			case <-time.After(10 * time.Second):
-			case <-ctx.Done():
-				return nil
-			}
-			continue
-		}
-
-		currentInstance = newInstance
-		currentLink = newLink
-		s.logf(customlog.Success, "Successfully started new instance.\n")
-
-		reason := s.manageActiveProxyPeriod(ctx, forceRotate)
-		s.logf(customlog.Processing, "Switching config. Reason: %s\n", reason)
+		currentInstance = instance
+		lastUsedLink = result.ConfigLink
+		s.setRotationStatus("idle")
 	}
 }
 
@@ -195,7 +276,7 @@ func (s *Service) findAndStartWorkingConfig(
 	examiner *pkghttp.Examiner,
 	r *rand.Rand,
 	lastUsedLink string,
-) (protocol.Instance, string, error) {
+) (protocol.Instance, *pkghttp.Result, error) {
 	const BatchAmount = 50
 	availableLinks := make([]string, len(s.config.ConfigLinks))
 	copy(availableLinks, s.config.ConfigLinks)
@@ -249,61 +330,14 @@ func (s *Service) findAndStartWorkingConfig(
 				s.logf(customlog.Failure, "Error starting core instance with '%s': %v\n", res.ConfigLink, err)
 				continue
 			}
-			return instance, res.ConfigLink, nil
+			s.mu.Lock()
+			res.Protocol = res.Protocol // Ensure protocol field is set.
+			s.activeOutbound = res
+			s.mu.Unlock()
+			return instance, res, nil
 		}
 	}
-	return nil, "", errors.New("failed to find any new working outbound configuration in this batch")
-}
-
-func (s *Service) manageActiveProxyPeriod(ctx context.Context, forceRotate <-chan struct{}) (reason string) {
-	s.logf(customlog.Success, "Instance active. Interval: %ds. Press Enter to switch.\n", s.config.RotationInterval)
-
-	timer := time.NewTimer(time.Duration(s.config.RotationInterval) * time.Second)
-	defer timer.Stop()
-
-	// The interactive countdown is a CLI-only feature.
-	if s.logger == nil {
-		displayTicker := time.NewTicker(time.Second)
-		defer displayTicker.Stop()
-		endTime := time.Now().Add(time.Duration(s.config.RotationInterval) * time.Second)
-
-		updateDisplay := func() {
-			if remaining := time.Until(endTime); remaining > 0 {
-				fmt.Printf("\r%s\033[K", color.YellowString("[>] Enter to load the next config [Reloading in %v] >>> ", remaining.Round(time.Second)))
-			} else {
-				fmt.Printf("\r%s\033[K", color.YellowString("[>] Enter to load the next config [Reloading in 0s] >>> "))
-			}
-		}
-		updateDisplay()
-
-		for {
-			select {
-			case <-ctx.Done():
-				fmt.Println() // Newline to clean up the progress bar line
-				return "context cancelled"
-			case <-forceRotate:
-				fmt.Println() // Newline to clean up the progress bar line
-				return "user requested switch"
-			case <-timer.C:
-				fmt.Println() // Newline to clean up the progress bar line
-				return "interval timer expired"
-			case <-displayTicker.C:
-				if time.Now().Before(endTime) {
-					updateDisplay()
-				}
-			}
-		}
-	}
-
-	// Non-interactive wait for Web UI
-	select {
-	case <-ctx.Done():
-		return "context cancelled"
-	case <-forceRotate:
-		return "user requested switch"
-	case <-timer.C:
-		return "interval timer expired"
-	}
+	return nil, nil, errors.New("failed to find any new working outbound configuration in this batch")
 }
 
 // GetConfigLinks is a helper to centralize the logic of reading links from various sources.
@@ -362,7 +396,7 @@ func (s *Service) createInbound() (protocol.Protocol, error) {
 
 	u := uuid.New()
 	uuidV4 := s.config.InboundUUID
-	if uuidV4 == "random" {
+	if uuidV4 == "random" || uuidV4 == "" {
 		uuidV4 = u.String()
 	}
 
@@ -385,31 +419,78 @@ func createXrayInbound(cfg Config, uuid string) (protocol.Protocol, error) {
 			Username: user, Password: pass,
 		}, nil
 	case "vmess":
-		switch cfg.InboundTransport {
-		case "xhttp":
-			return &pkgxray.Vmess{
-				Remark: "Listener", Address: cfg.ListenAddr, Port: cfg.ListenPort,
-				Network: "xhttp", Host: "snapp.ir", Path: "/", Security: "none", ID: uuid,
-			}, nil
-		case "tcp":
-			return &pkgxray.Vmess{
-				Remark: "Listener", Address: cfg.ListenAddr, Port: cfg.ListenPort,
-				Type: "tcp", ID: uuid,
-			}, nil
+		vmess := &pkgxray.Vmess{
+			Remark:  "Listener",
+			Address: cfg.ListenAddr,
+			Port:    cfg.ListenPort,
+			ID:      uuid,
 		}
+		switch cfg.InboundTransport {
+		case "tcp":
+			vmess.Network = "tcp"
+		case "ws":
+			vmess.Network = "ws"
+			vmess.Path = cfg.WSPath
+			vmess.Host = cfg.WSHost
+		case "grpc":
+			vmess.Network = "grpc"
+			vmess.Path = cfg.GRPCServiceName // For VMESS, Path is used for ServiceName
+			vmess.Host = cfg.GRPCAuthority
+		case "xhttp":
+			vmess.Network = "xhttp"
+			vmess.Type = cfg.XHTTPMode
+			vmess.Host = cfg.XHTTPHost
+			vmess.Path = cfg.XHTTPPath
+			vmess.Security = "none"
+		default:
+			return nil, fmt.Errorf("unsupported vmess transport: %s", cfg.InboundTransport)
+		}
+
+		if cfg.EnableTLS {
+			vmess.TLS = "tls"
+			vmess.CertFile = cfg.TLSCertFile
+			vmess.KeyFile = cfg.TLSKeyFile
+			vmess.SNI = cfg.TLSSNI
+			vmess.ALPN = cfg.TLSALPN
+		}
+
+		return vmess, nil
 	case "vless":
-		switch cfg.InboundTransport {
-		case "xhttp":
-			return &pkgxray.Vless{
-				Remark: "Listener", Address: cfg.ListenAddr, Port: cfg.ListenPort,
-				Type: "xhttp", Host: "snapp.ir", Path: "/", Security: "none", ID: uuid, Mode: "auto",
-			}, nil
-		case "tcp":
-			return &pkgxray.Vless{
-				Remark: "Listener", Address: cfg.ListenAddr, Port: cfg.ListenPort,
-				Type: "tcp", ID: uuid,
-			}, nil
+		vless := &pkgxray.Vless{
+			Remark:  "Listener",
+			Address: cfg.ListenAddr,
+			Port:    cfg.ListenPort,
+			ID:      uuid,
 		}
+		switch cfg.InboundTransport {
+		case "tcp":
+			vless.Type = "tcp"
+		case "ws":
+			vless.Type = "ws"
+			vless.Path = cfg.WSPath
+			vless.Host = cfg.WSHost
+		case "grpc":
+			vless.Type = "grpc"
+			vless.ServiceName = cfg.GRPCServiceName
+			vless.Authority = cfg.GRPCAuthority
+		case "xhttp":
+			vless.Type = "xhttp"
+			vless.Host = cfg.XHTTPHost
+			vless.Path = cfg.XHTTPPath
+			vless.Security = "none"
+			vless.Mode = cfg.XHTTPMode
+		default:
+			return nil, fmt.Errorf("unsupported vless transport: %s", cfg.InboundTransport)
+		}
+
+		if cfg.EnableTLS {
+			vless.Security = "tls"
+			vless.CertFile = cfg.TLSCertFile
+			vless.KeyFile = cfg.TLSKeyFile
+			vless.SNI = cfg.TLSSNI
+			vless.ALPN = cfg.TLSALPN
+		}
+		return vless, nil
 	}
 	return nil, fmt.Errorf("unsupported xray inbound protocol/transport: %s/%s", cfg.InboundProtocol, cfg.InboundTransport)
 }

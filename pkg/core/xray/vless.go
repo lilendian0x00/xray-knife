@@ -513,9 +513,22 @@ func (v *Vless) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
 		}
 	}
 
-	if v.Security == "tls" || v.Security == "reality" {
-		// Cannot configure inbound TLS from a link as it requires certificate files.
-		// Fallback to no security.
+	if v.Security == "tls" && v.CertFile != "" && v.KeyFile != "" {
+		streamConfig.TLSSettings = &conf.TLSConfig{
+			ServerName: v.SNI,
+			Certs: []*conf.TLSCertConfig{
+				{
+					KeyFile:  v.KeyFile,
+					CertFile: v.CertFile,
+				},
+			},
+		}
+		if v.ALPN != "" {
+			alpns := conf.StringList(strings.Split(v.ALPN, ","))
+			streamConfig.TLSSettings.ALPN = &alpns
+		}
+	} else if v.Security != "none" && v.Security != "" {
+		// If security is requested but certs are missing, fallback to no security for inbound.
 		streamConfig.Security = "none"
 	}
 

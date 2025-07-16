@@ -12,6 +12,13 @@ import (
 	"github.com/lilendian0x00/xray-knife/v5/utils/customlog"
 )
 
+// HttpTestRequest encapsulates all parameters for an HTTP test job.
+type HttpTestRequest struct {
+	Links       []string `json:"links"`
+	ThreadCount uint16   `json:"threadCount"`
+	Options
+}
+
 // ConfigResults represents a slice of test results
 type ConfigResults []*Result
 

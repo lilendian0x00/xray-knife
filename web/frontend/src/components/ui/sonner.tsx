@@ -1,4 +1,4 @@
-import { useTheme } from "next-themes"
+import { useTheme } from "@/components/theme-provider"
 import { Toaster as Sonner } from "sonner"
 
 // This is the key change. We are creating our own ToasterProps type
