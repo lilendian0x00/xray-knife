@@ -248,8 +248,14 @@ func handleMultipleConfigs(examiner *pkghttp.Examiner, config *Config) error {
 	var collectorWg sync.WaitGroup
 	collectorWg.Add(1)
 	go func() {
+		var counter int
 		defer collectorWg.Done()
 		for res := range resultsChan {
+			// Print success details as soon as a result is received.
+			if res.Status == "passed" {
+				printSuccessDetails(counter, *res)
+				counter++
+			}
 			results = append(results, res)
 		}
 	}()
