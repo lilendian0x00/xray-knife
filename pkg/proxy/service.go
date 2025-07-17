@@ -375,6 +375,7 @@ func (s *Service) createExaminer() (*pkghttp.Examiner, error) {
 		TestEndpoint:           "https://cloudflare.com/cdn-cgi/trace",
 		TestEndpointHttpMethod: "GET",
 		DoSpeedtest:            false,
+		DoIPInfo:               true,
 	})
 }
 

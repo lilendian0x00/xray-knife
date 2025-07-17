@@ -29,7 +29,7 @@ export interface HttpTesterSettings {
     httpMethod: 'GET' | 'POST';
     insecureTLS: boolean;
     speedtest: boolean;
-    getIPInfo: boolean;
+    doIPInfo: boolean;
     speedtestAmount: number;
 }
 

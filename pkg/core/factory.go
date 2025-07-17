@@ -79,8 +79,13 @@ func (c *AutomaticCore) CreateProtocol(configLink string) (protocol.Protocol, er
 		return nil, err
 	}
 
-	selectedCore, ok := cproto[uri.Scheme]
-	if !ok {
+	var selectedCore Core
+	switch uri.Scheme {
+	case protocol.Hysteria2Identifier, "hy2":
+		selectedCore = c.singboxCore
+	case protocol.VmessIdentifier, protocol.VlessIdentifier, protocol.TrojanIdentifier, protocol.ShadowsocksIdentifier, protocol.SocksIdentifier, protocol.WireguardIdentifier:
+		selectedCore = c.xrayCore
+	default:
 		return nil, fmt.Errorf("unsupported protocol for automatic core: %s", uri.Scheme)
 	}
 

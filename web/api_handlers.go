@@ -1,6 +1,8 @@
 package web
 
 import (
+	"bufio"
+	"encoding/csv"
 	"fmt"
 	"io"
 	"log"
@@ -9,10 +11,61 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/lilendian0x00/xray-knife/v5/cmd/scanner"
+	"github.com/gocarina/gocsv"
 	pkghttp "github.com/lilendian0x00/xray-knife/v5/pkg/http"
 	"github.com/lilendian0x00/xray-knife/v5/pkg/proxy"
+	"github.com/lilendian0x00/xray-knife/v5/pkg/scanner"
 )
+
+// appendResultsToCSV appends a batch of results to a CSV file.
+func appendResultsToCSV(filePath string, batch interface{}) error {
+	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open file for appending: %w", err)
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	bufWriter := bufio.NewWriter(file)
+	csvWriter := csv.NewWriter(bufWriter)
+
+	if info.Size() == 0 {
+		err = gocsv.MarshalCSV(batch, csvWriter)
+	} else {
+		err = gocsv.MarshalCSVWithoutHeaders(batch, csvWriter)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to marshal and append results to CSV: %w", err)
+	}
+
+	csvWriter.Flush()
+	return bufWriter.Flush()
+}
+
+// loadResultsFromCSV loads results from a CSV file into the provided slice pointer.
+func loadResultsFromCSV(filePath string, v interface{}) error {
+	file, err := os.Open(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer file.Close()
+
+	if err := gocsv.UnmarshalFile(file, v); err != nil {
+		if err.Error() == "EOF" {
+			return nil
+		}
+		return fmt.Errorf("failed to parse CSV file: %w", err)
+	}
+	return nil
+}
 
 // APIHandler holds dependencies for API endpoints.
 type APIHandler struct {
@@ -33,7 +86,10 @@ func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/proxy/status", h.handleProxyStatus)
 	mux.HandleFunc("/api/v1/proxy/details", h.handleProxyDetails)
 	mux.HandleFunc("/api/v1/http/test", h.handleHttpTest)
+	mux.HandleFunc("/api/v1/http/test/status", h.handleHttpTestStatus)
 	mux.HandleFunc("/api/v1/http/test/stop", h.handleHttpTestStop)
+	mux.HandleFunc("/api/v1/http/test/history", h.handleHttpTestHistory)
+	mux.HandleFunc("/api/v1/http/test/clear_history", h.handleHttpTestClearHistory)
 	mux.HandleFunc("/api/v1/scanner/cf/start", h.handleCfScannerStart)
 	mux.HandleFunc("/api/v1/scanner/cf/stop", h.handleCfScannerStop)
 	mux.HandleFunc("/api/v1/scanner/cf/status", h.handleCfScannerStatus)
@@ -140,6 +196,15 @@ func (h *APIHandler) handleHttpTest(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, http.StatusAccepted, map[string]string{"status": "HTTP test started"})
 }
 
+func (h *APIHandler) handleHttpTestStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	status := h.manager.GetHttpTestStatus()
+	writeJSONResponse(w, http.StatusOK, map[string]string{"status": status})
+}
+
 func (h *APIHandler) handleHttpTestStop(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)
@@ -147,6 +212,35 @@ func (h *APIHandler) handleHttpTestStop(w http.ResponseWriter, r *http.Request) 
 	}
 	h.manager.StopHttpTest()
 	writeJSONResponse(w, http.StatusOK, map[string]string{"status": "HTTP test stop signal sent"})
+}
+
+func (h *APIHandler) handleHttpTestHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	var results []*pkghttp.Result
+	if err := loadResultsFromCSV(httpTesterHistoryFile, &results); err != nil {
+		writeJSONError(w, fmt.Sprintf("failed to load http test history: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if results == nil {
+		results = []*pkghttp.Result{}
+	}
+	writeJSONResponse(w, http.StatusOK, results)
+}
+
+func (h *APIHandler) handleHttpTestClearHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	err := os.Remove(httpTesterHistoryFile)
+	if err != nil && !os.IsNotExist(err) {
+		writeJSONError(w, fmt.Sprintf("Failed to clear http test history file: %v", err), http.StatusInternalServerError)
+		return
+	}
+	writeJSONResponse(w, http.StatusOK, map[string]string{"status": "History cleared"})
 }
 
 // --- CF Scanner Handlers ---
@@ -191,9 +285,9 @@ func (h *APIHandler) handleCfScannerHistory(w http.ResponseWriter, r *http.Reque
 		methodNotAllowed(w)
 		return
 	}
-	results, err := scanner.LoadResultsForResume(cfScannerHistoryFile)
-	if err != nil {
-		results = []*scanner.ScanResult{} // Return empty list on error
+	var results []*scanner.ScanResult
+	if err := loadResultsFromCSV(cfScannerHistoryFile, &results); err != nil {
+		results = []*scanner.ScanResult{}
 	}
 	writeJSONResponse(w, http.StatusOK, results)
 }

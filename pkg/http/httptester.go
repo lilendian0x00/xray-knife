@@ -1,3 +1,4 @@
+// pkg/http/httptester.go
 package http
 
 import (
@@ -100,14 +101,13 @@ func (tm *TestManager) RunTests(ctx context.Context, links []string, resultsChan
 				wg.Done()
 			}()
 
-			select {
-			case <-ctx.Done():
+			// Return early if context is cancelled before starting work
+			if ctx.Err() != nil {
 				return
-			default:
 			}
 
 			res, err := tm.examiner.ExamineConfig(ctx, link)
-			if err != nil {
+			if err != nil && !strings.Contains(err.Error(), "context canceled") {
 				logMsg := fmt.Sprintf("[-] Error: %s - broken config: %s\n", err.Error(), link)
 				if tm.logger != nil {
 					tm.logger.Print(logMsg)
@@ -116,27 +116,26 @@ func (tm *TestManager) RunTests(ctx context.Context, links []string, resultsChan
 				}
 			}
 
-			// Check context before sending result, to avoid panic on closed channel
+			// THE FIX: This `select` statement makes the channel send operation
+			// aware of the context cancellation. If the context is done, it will
+			// not attempt to send on the channel, preventing the panic.
 			select {
 			case resultsChan <- &res:
+				// Result sent successfully
 				if res.Status == "passed" && tm.logger != nil {
 					logMsg := fmt.Sprintf("[+] SUCCESS | %s | Delay: %dms\n", res.ConfigLink, res.Delay)
 					tm.logger.Print(logMsg)
 				}
 			case <-ctx.Done():
-				// Don't send, just return
+				// Context was cancelled, do not send result.
 				return
 			}
 		}(link, i)
 	}
 
-	// Wait for all workers to finish, or for the context to be cancelled
-	waitChan := make(chan struct{})
-	go func() { wg.Wait(); close(waitChan) }()
-	select {
-	case <-waitChan: // All workers finished
-	case <-ctx.Done(): // Context was cancelled
-	}
+	// Wait for all spawned goroutines to complete before returning.
+	// This ensures the caller can safely close the results channel.
+	wg.Wait()
 }
 
 //// TestConfigs tests multiple configurations concurrently

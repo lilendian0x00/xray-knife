@@ -1,6 +1,18 @@
 // src/types/dashboard.ts
 export type ProxyStatus = 'stopped' | 'running' | 'starting' | 'stopping';
 
+export interface HttpResult {
+    link: string;
+    status: 'passed' | 'failed' | 'broken' | 'timeout' | 'semi-passed';
+    reason: string;
+    tls: string;
+    ip: string;
+    delay: number;
+    download: number;
+    upload: number;
+    location: string;
+}
+
 export interface GeneralConfig {
     Protocol: string;
     Address: string;

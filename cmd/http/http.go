@@ -176,8 +176,10 @@ func handlePingMode(examiner *pkghttp.Examiner, config *Config) error {
 		fmt.Printf("%d packets transmitted, %d received, %.1f%% packet loss\n", sent, received, loss)
 
 		if received > 0 {
-			avgLatency := totalLatency / int64(received)
-			fmt.Printf("rtt min/avg/max = %d/%d/%d ms\n", minLatency, avgLatency, maxLatency)
+			if received > 0 {
+				avgLatency := totalLatency / int64(received)
+				fmt.Printf("rtt min/avg/max = %d/%d/%d ms\n", minLatency, avgLatency, maxLatency)
+			}
 		}
 	}()
 
@@ -196,7 +198,7 @@ func handlePingMode(examiner *pkghttp.Examiner, config *Config) error {
 				continue
 			}
 
-			delay, _, err := pkghttp.MeasureDelay(context.Background(), client, false, config.DestURL, config.HTTPMethod)
+			delay, _, _, err := pkghttp.MeasureDelay(context.Background(), client, false, config.DestURL, config.HTTPMethod)
 			instance.Close()
 
 			if err != nil {

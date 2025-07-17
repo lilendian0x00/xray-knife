@@ -20,6 +20,7 @@ import { HttpTesterTab } from "./dashboard/HttpTesterTab";
 import { CfScannerTab } from "./dashboard/CFScannerTab";
 import { ProxyStatusCard } from "./dashboard/ProxyStatusCard";
 import { type ProxyDetails, type ProxyStatus } from "@/types/dashboard";
+import { api } from "@/services/api";
 
 type Page = 'proxy' | 'http-tester' | 'cf-scanner';
 const navItems = [{ id: 'proxy' as Page, label: 'Proxy Service', icon: Server }, { id: 'http-tester' as Page, label: 'HTTP Tester', icon: Globe }, { id: 'cf-scanner' as Page, label: 'CF Scanner', icon: FaCloudflare }];
@@ -27,9 +28,9 @@ const navItems = [{ id: 'proxy' as Page, label: 'Proxy Service', icon: Server },
 export default function Dashboard() {
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [activePage, setActivePage] = useState<Page>('proxy');
-    
+
     // Get state from the global store
-    const { proxyStatus, setProxyStatus, setScanStatus, setScanResults, proxyDetails, setProxyDetails } = useAppStore();
+    const { proxyStatus, setProxyStatus, setScanStatus, setScanResults, proxyDetails, setProxyDetails, setHttpResults, setHttpTestStatus } = useAppStore();
 
     const terminalRef = useRef<HTMLDivElement>(null);
     const term = useRef<Terminal | null>(null);
@@ -45,7 +46,7 @@ export default function Dashboard() {
             addon.fit();
             term.current = terminal;
             fitAddon.current = addon;
-            
+
             webSocketService.connect({ writeln: (text) => term.current?.writeln(text) });
 
             const resizeHandler = () => fitAddon.current?.fit();
@@ -59,7 +60,13 @@ export default function Dashboard() {
     useEffect(() => {
         const fetchInitialState = async () => {
             try {
-                const [scanRes, historyRes, proxyRes] = await Promise.all([ axios.get('/api/v1/scanner/cf/status'), axios.get('/api/v1/scanner/cf/history'), axios.get('/api/v1/proxy/status') ]);
+                const [scanRes, historyRes, proxyRes, httpHistoryRes, httpTestStatusRes] = await Promise.all([
+                    axios.get('/api/v1/scanner/cf/status'), 
+                    axios.get('/api/v1/scanner/cf/history'), 
+                    axios.get('/api/v1/proxy/status'),
+                    api.getHttpTestHistory(),
+                    api.getHttpTestStatus(),
+                ]);
                 if (scanRes.data.is_scanning) { setScanStatus('scanning'); toast.info("A scan is already in progress."); }
                 if (historyRes.data && Array.isArray(historyRes.data)) setScanResults(historyRes.data);
                 if (proxyRes.data.status) {
@@ -67,15 +74,22 @@ export default function Dashboard() {
                     setProxyStatus(status);
                     if (status === 'running') { toast.info("Proxy service is already running."); }
                 }
+                if (httpTestStatusRes.data.status && httpTestStatusRes.data.status !== 'idle') {
+                    setHttpTestStatus(httpTestStatusRes.data.status);
+                    toast.info("An HTTP test is already in progress.");
+                }
+                if (httpHistoryRes.data && Array.isArray(httpHistoryRes.data)) {
+                    setHttpResults(httpHistoryRes.data);
+                }
             } catch (error) { toast.error("Could not fetch initial server state."); }
         };
         fetchInitialState();
-    }, [setProxyStatus, setScanStatus, setScanResults]);
+    }, [setProxyStatus, setScanStatus, setScanResults, setHttpResults, setHttpTestStatus]);
 
     // Polling for proxy details when running
     useEffect(() => {
         if (proxyStatus === 'running') {
-            const fetchDetails = async () => { try { const res = await axios.get<ProxyDetails>('/api/v1/proxy/details'); setProxyDetails(res.data); } catch { setProxyDetails(null); }};
+            const fetchDetails = async () => { try { const res = await axios.get<ProxyDetails>('/api/v1/proxy/details'); setProxyDetails(res.data); } catch { setProxyDetails(null); } };
             fetchDetails(); // Initial fetch
             const interval = setInterval(fetchDetails, 5000);
             return () => clearInterval(interval);
@@ -85,13 +99,13 @@ export default function Dashboard() {
     }, [proxyStatus, setProxyDetails]);
 
     useEffect(() => { const timer = setTimeout(() => fitAddon.current?.fit(), 100); return () => clearTimeout(timer); }, [activePage, isSidebarCollapsed]);
-    
+
     const getProxyStatusColor = (status: ProxyStatus) => {
         if (status === 'running') return 'bg-green-500 text-primary-foreground';
         if (status === 'stopped') return 'bg-destructive';
         return 'bg-yellow-500 text-destructive-foreground';
     };
-    
+
     const clearLogs = () => term.current?.clear();
 
     const currentPageInfo = navItems.find(item => item.id === activePage);

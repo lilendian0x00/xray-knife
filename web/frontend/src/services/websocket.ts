@@ -1,9 +1,14 @@
 import { toast } from "sonner";
 import { useAppStore } from "@/stores/appStore";
+import { type HttpResult } from "@/types/dashboard";
+
+const BATCH_INTERVAL = 250; // ms
 
 class WebSocketService {
     private ws: WebSocket | null = null;
     private term: { writeln: (text: string) => void } | null = null;
+    private httpResultBuffer: HttpResult[] = [];
+    private httpResultTimer: number | null = null;
 
     connect(terminal: { writeln: (text: string) => void }) {
         this.term = terminal;
@@ -17,6 +22,7 @@ class WebSocketService {
         this.ws.onmessage = this.handleMessage.bind(this);
         this.ws.onclose = () => {
             this.term?.writeln("\x1b[31m[WebSocket] Connection closed. Retrying in 3 seconds...\x1b[0m");
+            this.stopHttpResultBatching();
             setTimeout(() => this.connect(terminal), 3000);
         };
         this.ws.onerror = (error) => {
@@ -26,18 +32,50 @@ class WebSocketService {
         };
     }
 
+    private flushHttpResultBuffer() {
+        if (this.httpResultBuffer.length > 0) {
+            useAppStore.getState().addHttpResultsBatch(this.httpResultBuffer);
+            this.httpResultBuffer = [];
+        }
+    }
+
+    private startHttpResultBatching() {
+        if (this.httpResultTimer === null) {
+            this.httpResultTimer = window.setInterval(() => {
+                this.flushHttpResultBuffer();
+            }, BATCH_INTERVAL);
+        }
+    }
+
+    private stopHttpResultBatching() {
+        if (this.httpResultTimer !== null) {
+            clearInterval(this.httpResultTimer);
+            this.httpResultTimer = null;
+        }
+        // Final flush to ensure no results are missed
+        this.flushHttpResultBuffer();
+    }
+
     private handleMessage(event: MessageEvent) {
+        const rawData = event.data;
+        if (!rawData) return;
+
         try {
-            const message = JSON.parse(event.data);
-            const { setState } = useAppStore;
+            const message = JSON.parse(rawData);
 
             switch (message.type) {
+                case 'log':
+                    this.term?.writeln(message.data);
+                    break;
                 case 'http_result':
-                    setState(state => ({ httpResults: [...state.httpResults, message.data] }));
+                    this.startHttpResultBatching();
+                    this.httpResultBuffer.push(message.data);
                     break;
                 case 'http_test_status':
+                    this.stopHttpResultBatching();
                     if (message.data === 'finished' || message.data === 'stopped') {
-                        setState({ httpTestStatus: 'idle' });
+                        useAppStore.getState().setHttpTestStatus('idle');
+                        
                         if (message.data === 'finished') {
                             toast.success("HTTP test finished.");
                         } else {
@@ -46,11 +84,11 @@ class WebSocketService {
                     }
                     break;
                 case 'cfscan_result':
-                    setState(state => ({ scanResults: [...state.scanResults.filter(r => r.ip !== message.data.ip), message.data] }));
+                    useAppStore.getState().updateScanResults(message.data);
                     break;
                 case 'cfscan_status':
                     if (message.data === 'finished' || message.data === 'error') {
-                        setState({ scanStatus: 'idle' });
+                        useAppStore.getState().setScanStatus('idle');
                         if (message.data === 'finished') {
                             toast.success("Cloudflare scan finished.");
                         } else {
@@ -59,15 +97,18 @@ class WebSocketService {
                     }
                     break;
                 default:
-                    this.term?.writeln(`[RAW JSON] ${event.data.trimEnd()}`);
+                    this.term?.writeln(`\x1b[33m[WebSocket] Unhandled message type: ${message.type}\x1b[0m`);
+                    console.warn("Unhandled WebSocket message:", message);
                     break;
             }
         } catch (e) {
-            this.term?.writeln(event.data.trimEnd());
+            console.error("WebSocket received non-JSON message:", rawData, "Error:", e);
+            this.term?.writeln(`\x1b[31m[WebSocket] Received invalid data: ${rawData}\x1b[0m`);
         }
     }
 
     disconnect() {
+        this.stopHttpResultBatching();
         this.ws?.close();
     }
 }

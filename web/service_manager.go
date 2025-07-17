@@ -5,17 +5,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/lilendian0x00/xray-knife/v5/cmd/scanner"
 	pkghttp "github.com/lilendian0x00/xray-knife/v5/pkg/http"
 	"github.com/lilendian0x00/xray-knife/v5/pkg/proxy"
+	"github.com/lilendian0x00/xray-knife/v5/pkg/scanner"
 )
 
 const cfScannerHistoryFile = "results.csv"
+const httpTesterHistoryFile = "http-results.csv"
 
 // ServiceManager holds the state of the running proxy and scanner services.
 type ServiceManager struct {
@@ -30,16 +32,17 @@ type ServiceManager struct {
 	scannerWg          sync.WaitGroup
 	isScanning         bool
 	httpTestCancelFunc context.CancelFunc
-	isHttpTesting      bool
+	httpTestWg         sync.WaitGroup
+	httpTestStatus     string // Changed from isHttpTesting
 }
 
 // NewServiceManager creates a new service manager.
 func NewServiceManager(logger *log.Logger, hub *Hub) *ServiceManager {
 	return &ServiceManager{
-		logger:        logger,
-		hub:           hub,
-		proxyStatus:   "stopped",
-		isHttpTesting: false,
+		logger:         logger,
+		hub:            hub,
+		proxyStatus:    "stopped",
+		httpTestStatus: "idle", // Initial state
 	}
 }
 
@@ -135,24 +138,47 @@ func (sm *ServiceManager) RotateProxy() error {
 	}
 }
 
+func (sm *ServiceManager) GetHttpTestStatus() string {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	return sm.httpTestStatus
+}
+
 func (sm *ServiceManager) StartHttpTest(req pkghttp.HttpTestRequest) error {
 	sm.mu.Lock()
-	if sm.isHttpTesting {
+	if sm.httpTestStatus != "idle" {
 		sm.mu.Unlock()
 		return fmt.Errorf("an HTTP test is already in progress")
 	}
+
+	// Clear previous history before starting a new test
+	if err := os.Remove(httpTesterHistoryFile); err != nil && !os.IsNotExist(err) {
+		// Log the error but don't necessarily block the test from starting
+		sm.logger.Printf("Warning: could not clear previous http test history file: %v", err)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
-	sm.isHttpTesting = true
+	sm.httpTestStatus = "testing"
 	sm.httpTestCancelFunc = cancel
+	sm.httpTestWg.Add(1)
 	sm.mu.Unlock()
 
 	go func() {
 		defer sm.recoverAndLogPanic()
+		defer sm.httpTestWg.Done()
 		defer func() {
 			sm.mu.Lock()
-			sm.isHttpTesting = false
+			finalStatus := "finished"
+			if ctx.Err() != nil {
+				finalStatus = "stopped"
+			}
+			sm.httpTestStatus = "idle"
 			sm.httpTestCancelFunc = nil
 			sm.mu.Unlock()
+
+			sm.logger.Printf("HTTP test has %s.", finalStatus)
+			statusMsg, _ := json.Marshal(map[string]interface{}{"type": "http_test_status", "data": finalStatus})
+			sm.hub.Broadcast(statusMsg)
 		}()
 
 		sm.logger.Printf("Starting HTTP test for %d links with %d threads.", len(req.Links), req.ThreadCount)
@@ -162,39 +188,77 @@ func (sm *ServiceManager) StartHttpTest(req pkghttp.HttpTestRequest) error {
 			return
 		}
 		testManager := pkghttp.NewTestManager(examiner, req.ThreadCount, false, sm.logger)
-		resultsChan := make(chan *pkghttp.Result, len(req.Links))
+		resultsChan := make(chan *pkghttp.Result, req.ThreadCount)
+
+		var consumerWg sync.WaitGroup
+		consumerWg.Add(1)
 
 		go func() {
 			defer sm.recoverAndLogPanic()
-			for result := range resultsChan {
-				jsonResult, err := json.Marshal(map[string]interface{}{"type": "http_result", "data": result})
-				if err == nil {
-					sm.hub.broadcast <- jsonResult
+			defer consumerWg.Done()
+
+			// Batching logic for saving results to CSV
+			const saveBatchSize = 50
+			const saveInterval = 5 * time.Second
+			batch := make([]*pkghttp.Result, 0, saveBatchSize)
+			ticker := time.NewTicker(saveInterval)
+			defer ticker.Stop()
+
+			save := func() {
+				if len(batch) == 0 {
+					return
+				}
+				if err := appendResultsToCSV(httpTesterHistoryFile, batch); err != nil {
+					sm.logger.Printf("HTTP test history save failed: %v", err)
+				}
+				batch = make([]*pkghttp.Result, 0, saveBatchSize) // Reset batch
+			}
+
+			for {
+				select {
+				case result, ok := <-resultsChan:
+					if !ok {
+						save() // Save any remaining results
+						return
+					}
+					// Broadcast to UI
+					jsonResult, err := json.Marshal(map[string]interface{}{"type": "http_result", "data": result})
+					if err == nil {
+						sm.hub.Broadcast(jsonResult)
+					}
+					// Add to batch for saving
+					batch = append(batch, result)
+					if len(batch) >= saveBatchSize {
+						save()
+					}
+				case <-ticker.C:
+					save()
+				case <-ctx.Done():
+					save() // Final save on context cancellation
+					return
 				}
 			}
 		}()
+
 		testManager.RunTests(ctx, req.Links, resultsChan)
 		close(resultsChan)
-
-		if ctx.Err() != nil {
-			sm.logger.Println("HTTP test was cancelled.")
-			statusMsg, _ := json.Marshal(map[string]interface{}{"type": "http_test_status", "data": "stopped"})
-			sm.hub.broadcast <- statusMsg
-		} else {
-			sm.logger.Println("HTTP test finished.")
-			statusMsg, _ := json.Marshal(map[string]interface{}{"type": "http_test_status", "data": "finished"})
-			sm.hub.broadcast <- statusMsg
-		}
+		consumerWg.Wait()
 	}()
 	return nil
 }
 
 func (sm *ServiceManager) StopHttpTest() {
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	if sm.isHttpTesting && sm.httpTestCancelFunc != nil {
-		sm.httpTestCancelFunc()
+	if sm.httpTestStatus != "testing" || sm.httpTestCancelFunc == nil {
+		sm.mu.Unlock()
+		return
 	}
+	sm.logger.Println("HTTP test stop signal received. Cancelling context.")
+	sm.httpTestStatus = "stopping"
+	sm.httpTestCancelFunc()
+	sm.mu.Unlock()
+
+	sm.httpTestWg.Wait()
 }
 
 func (sm *ServiceManager) GetScannerStatus() bool {
@@ -235,7 +299,7 @@ func (sm *ServiceManager) StartScanner(cfg scanner.ScannerConfig) error {
 
 			sm.logger.Println("[SCAN-STATUS] Scan goroutine finished.")
 			statusMsg, _ := json.Marshal(map[string]interface{}{"type": "cfscan_status", "data": "finished"})
-			sm.hub.broadcast <- statusMsg
+			sm.hub.Broadcast(statusMsg)
 
 			sm.scannerWg.Done()
 		}()
@@ -248,7 +312,7 @@ func (sm *ServiceManager) StartScanner(cfg scanner.ScannerConfig) error {
 				result.PrepareForMarshal()
 				jsonResult, err := json.Marshal(map[string]interface{}{"type": "cfscan_result", "data": result})
 				if err == nil {
-					sm.hub.broadcast <- jsonResult
+					sm.hub.Broadcast(jsonResult)
 				}
 			}
 		}()
@@ -257,7 +321,7 @@ func (sm *ServiceManager) StartScanner(cfg scanner.ScannerConfig) error {
 			if !strings.Contains(err.Error(), "context canceled") {
 				sm.logger.Printf("[SCAN-STATUS] Scan exited with error: %v", err)
 				statusMsg, _ := json.Marshal(map[string]interface{}{"type": "cfscan_status", "data": "error", "message": err.Error()})
-				sm.hub.broadcast <- statusMsg
+				sm.hub.Broadcast(statusMsg)
 			}
 		}
 	}()

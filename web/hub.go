@@ -1,7 +1,12 @@
 package web
 
 import (
+	"encoding/json"
+	"fmt"
 	"log"
+	"os"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -14,7 +19,6 @@ type Hub struct {
 	clients map[*Client]bool
 
 	// Inbound messages to be broadcasted to all clients.
-	// This channel is now buffered to prevent blocking the logger.
 	broadcast chan []byte
 
 	// Register requests from the clients.
@@ -22,13 +26,13 @@ type Hub struct {
 
 	// Unregister requests from clients.
 	unregister chan *Client
+
+	mu sync.RWMutex
 }
 
 func newHub() *Hub {
 	return &Hub{
-		// FIX: The broadcast channel is now buffered.
-		// This prevents customlog.Printf from blocking when the hub is busy.
-		broadcast:  make(chan []byte, 256),
+		broadcast:  make(chan []byte, 1024),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		clients:    make(map[*Client]bool),
@@ -39,13 +43,20 @@ func (h *Hub) run() {
 	for {
 		select {
 		case client := <-h.register:
+			h.mu.Lock()
 			h.clients[client] = true
+			h.mu.Unlock()
+
 		case client := <-h.unregister:
+			h.mu.Lock()
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
 				close(client.send)
 			}
+			h.mu.Unlock()
+
 		case message := <-h.broadcast:
+			h.mu.RLock()
 			for client := range h.clients {
 				select {
 				case client.send <- message:
@@ -54,22 +65,45 @@ func (h *Hub) run() {
 					delete(h.clients, client)
 				}
 			}
+			h.mu.RUnlock()
 		}
 	}
 }
 
-// Write allows Hub to be used as an io.Writer for the custom logger.
-// It broadcasts any data written to it to all connected WebSocket clients.
+// Write allows Hub to be used as an io.Writer.
+// It wraps the raw log message in a structured JSON object before broadcasting.
 func (h *Hub) Write(p []byte) (n int, err error) {
-	// We need to copy the byte slice because the logger's buffer might be reused.
-	message := make([]byte, len(p))
-	copy(message, p)
+	// The log package may send empty messages or just newlines, which we can ignore.
+	trimmedMessage := strings.TrimSpace(string(p))
+	if trimmedMessage == "" {
+		return len(p), nil
+	}
 
-	// Send the message to the broadcast channel.
-	// This is a non-blocking call as long as the buffer is not full.
-	h.broadcast <- message
+	// Wrap the log message in a structured JSON object.
+	logEntry := map[string]string{
+		"type": "log",
+		"data": trimmedMessage,
+	}
 
+	jsonMessage, err := json.Marshal(logEntry)
+	if err != nil {
+		// This is a programmatic error, should not happen in normal operation.
+		// Log to stderr directly to avoid an infinite loop.
+		fmt.Fprintf(os.Stderr, "Web UI Hub: failed to marshal log message to JSON: %v\n", err)
+		return len(p), nil // Report as written to not break the logger.
+	}
+
+	h.Broadcast(jsonMessage)
 	return len(p), nil
+}
+
+// Broadcast sends a message to the hub's broadcast channel without blocking.
+func (h *Hub) Broadcast(message []byte) {
+	select {
+	case h.broadcast <- message:
+	default:
+		fmt.Fprintf(os.Stderr, "Web UI Hub: broadcast channel full, dropping broadcast message.\n")
+	}
 }
 
 // Client is a middleman between the websocket connection and the hub.
@@ -133,22 +167,11 @@ func (c *Client) writePump() {
 				return
 			}
 
-			w, err := c.conn.NextWriter(websocket.TextMessage)
-			if err != nil {
+			// This prevents multiple JSON objects from being concatenated into one frame.
+			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
 				return
 			}
-			w.Write(message)
 
-			// Add queued chat messages to the current websocket message.
-			n := len(c.send)
-			for i := 0; i < n; i++ {
-				// No extra newline needed, as the Go logger already provides one.
-				w.Write(<-c.send)
-			}
-
-			if err := w.Close(); err != nil {
-				return
-			}
 		case <-ticker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {

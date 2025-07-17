@@ -67,21 +67,18 @@ var (
 )
 
 type Options struct {
-	Core         string
-	CoreInstance core.Core
+	Core         string    `json:"core"`
+	CoreInstance core.Core `json:"-"` // This field should not be part of the JSON payload
 
-	// Maximum allowed delay (in ms)
-	MaxDelay    uint16
-	Verbose     bool
-	ShowBody    bool
-	InsecureTLS bool
-
-	DoSpeedtest bool
-	DoIPInfo    bool
-
-	TestEndpoint           string
-	TestEndpointHttpMethod string
-	SpeedtestKbAmount      uint32
+	MaxDelay               uint16 `json:"maxDelay"`
+	Verbose                bool   `json:"verbose"`
+	ShowBody               bool   `json:"showBody"`
+	InsecureTLS            bool   `json:"insecureTLS"`
+	DoSpeedtest            bool   `json:"speedtest"`
+	DoIPInfo               bool   `json:"doIPInfo"`
+	TestEndpoint           string `json:"destURL"`
+	TestEndpointHttpMethod string `json:"httpMethod"`
+	SpeedtestKbAmount      uint32 `json:"speedtestAmount"`
 }
 
 func NewExaminer(opts Options) (*Examiner, error) {
@@ -126,6 +123,26 @@ func NewExaminer(opts Options) (*Examiner, error) {
 	}
 
 	return e, nil
+}
+
+// parseTraceBody is a helper function to parse the output of a /cdn-cgi/trace request.
+func parseTraceBody(body []byte, r *Result) {
+	if len(body) == 0 {
+		return
+	}
+	scanner := bufio.NewScanner(strings.NewReader(string(body)))
+	for scanner.Scan() {
+		line := scanner.Text()
+		// Use strings.Cut for a slightly cleaner way to split on the first '='.
+		if key, val, found := strings.Cut(line, "="); found {
+			switch key {
+			case "ip":
+				r.RealIPAddr = val
+			case "loc":
+				r.IpAddrLoc = val
+			}
+		}
+	}
 }
 
 func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, error) {
@@ -188,7 +205,7 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 	}
 	defer instance.Close()
 
-	delay, _, err := MeasureDelay(ctx, client, e.ShowBody, e.TestEndpoint, e.TestEndpointHttpMethod)
+	delay, _, body, err := MeasureDelay(ctx, client, e.ShowBody, e.TestEndpoint, e.TestEndpointHttpMethod)
 	if err != nil {
 		r.Status = "failed"
 		r.Reason = err.Error()
@@ -203,20 +220,21 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 	}
 
 	if e.DoIPInfo {
-		_, body, err := CoreHTTPRequestCustom(ctx, client, time.Duration(10000)*time.Millisecond, speedtest.MakeDebugRequest())
-		if err != nil {
-			// Do nothing
+		// If the latency test URL was already the trace endpoint, use its body.
+		if strings.Contains(e.TestEndpoint, "/cdn-cgi/trace") {
+			parseTraceBody(body, &r)
 		} else {
-			for _, line := range strings.Split(string(body), "\n") {
-				s := strings.SplitN(line, "=", 2)
-				if len(s) == 2 {
-					if s[0] == "ip" {
-						r.RealIPAddr = s[1]
-					} else if s[0] == "loc" {
-						r.IpAddrLoc = s[1]
-						break
-					}
+			// Otherwise, make a dedicated request for the IP info.
+			// Use a standard, reliable trace endpoint.
+			req, _ := http.NewRequestWithContext(ctx, "GET", "https://cloudflare.com/cdn-cgi/trace", nil)
+			_, ipBody, traceErr := CoreHTTPRequestCustom(ctx, client, 10*time.Second, req)
+			if traceErr != nil {
+				if r.Reason != "" {
+					r.Reason += "; "
 				}
+				r.Reason += "ip_info_failed"
+			} else {
+				parseTraceBody(ipBody, &r)
 			}
 		}
 	}
@@ -240,16 +258,16 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 	return r, nil
 }
 
-func MeasureDelay(ctx context.Context, client *http.Client, showBody bool, dest string, httpMethod string) (int64, int, error) {
+func MeasureDelay(ctx context.Context, client *http.Client, showBody bool, dest string, httpMethod string) (int64, int, []byte, error) {
 	start := time.Now()
 	code, body, err := CoreHTTPRequest(ctx, client, httpMethod, dest)
 	if err != nil {
-		return -1, -1, err
+		return -1, -1, nil, err
 	}
 	if showBody {
 		fmt.Printf("Response body: \n%s\n", body)
 	}
-	return time.Since(start).Milliseconds(), code, nil
+	return time.Since(start).Milliseconds(), code, body, nil
 }
 
 // zeroReader is an io.Reader that endlessly produces zero bytes.

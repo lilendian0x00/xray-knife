@@ -13,14 +13,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Globe, ClipboardCopy, Settings, RotateCcw, StopCircle } from 'lucide-react';
+import { Loader2, Globe, ClipboardCopy, Settings, RotateCcw, StopCircle, Trash2 } from 'lucide-react';
 import { useAppStore } from "@/stores/appStore";
 import { api } from "@/services/api";
-
-export interface HttpResult {
-    link: string; status: 'passed' | 'failed' | 'broken' | 'timeout' | 'semi-passed'; reason: string;
-    tls: string; ip: string; delay: number; download: number; upload: number; location: string;
-}
+import { type HttpResult } from "@/types/dashboard";
 
 export function HttpTesterTab() {
     const { httpSettings, updateHttpSettings, resetHttpSettings, httpResults, clearHttpResults, httpTestStatus, setHttpTestStatus } = useAppStore();
@@ -57,10 +53,21 @@ export function HttpTesterTab() {
         setHttpTestStatus('stopping');
         try {
             await api.stopHttpTest();
-            toast.info("Sending stop signal to HTTP tester...");
+            toast.success("HTTP test stopped successfully.");
         } catch (error) {
-            toast.error("Failed to send stop signal.");
-            setHttpTestStatus('testing'); // Revert status if stop fails
+            toast.error("Failed to stop the test.");
+        } finally {
+            setHttpTestStatus('idle');
+        }
+    };
+
+    const handleClearHistory = async () => {
+        try {
+            await api.clearHttpTestHistory();
+            clearHttpResults();
+            toast.success("HTTP test history cleared.");
+        } catch (error) {
+            toast.error("Failed to clear history.");
         }
     };
 
@@ -124,7 +131,7 @@ export function HttpTesterTab() {
                                     <div className="flex flex-col gap-4 py-4">
                                         <div className="grid grid-cols-4 items-center gap-4"><Label htmlFor="dest-url" className="text-right">Test URL</Label><Input id="dest-url" value={httpSettings.destURL} onChange={(e) => updateHttpSettings({ destURL: e.target.value })} className="col-span-3" /></div>
                                         <div className="grid grid-cols-4 items-center gap-4"><Label htmlFor="http-method-modal" className="text-right">Method</Label><Select value={httpSettings.httpMethod} onValueChange={(v) => updateHttpSettings({ httpMethod: v as any })}><SelectTrigger id="http-method-modal" className="col-span-3"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="GET">GET</SelectItem><SelectItem value="POST">POST</SelectItem></SelectContent></Select></div>
-                                        <div className="col-span-4 flex items-center justify-end space-x-2"><Checkbox id="get-ip-info-modal" checked={httpSettings.getIPInfo} onCheckedChange={(c) => updateHttpSettings({ getIPInfo: Boolean(c) })} /><Label htmlFor="get-ip-info-modal" className="font-normal cursor-pointer">Get IP Info</Label></div>
+                                        <div className="col-span-4 flex items-center justify-end space-x-2"><Checkbox id="get-ip-info-modal" checked={httpSettings.doIPInfo} onCheckedChange={(c) => updateHttpSettings({ doIPInfo: Boolean(c) })} /><Label htmlFor="get-ip-info-modal" className="font-normal cursor-pointer">Get IP Info</Label></div>
                                         <div className="col-span-4 flex items-center justify-end space-x-2"><Checkbox id="insecure-tls-modal" checked={httpSettings.insecureTLS} onCheckedChange={(c) => updateHttpSettings({ insecureTLS: Boolean(c) })} /><Label htmlFor="insecure-tls-modal" className="font-normal cursor-pointer">Allow Insecure TLS</Label></div>
                                     </div>
                                 </DialogContent>
@@ -135,12 +142,38 @@ export function HttpTesterTab() {
             </div>
             <div className="lg:col-span-3">
                 <Card>
-                    <CardHeader><CardTitle>Test Results</CardTitle><CardDescription>Showing {httpResults.length} results. Sorted by delay.</CardDescription></CardHeader>
+                    <CardHeader>
+                        <div className="flex flex-wrap items-center justify-between gap-4">
+                            <div className="flex flex-col gap-1.5">
+                                <CardTitle>Test Results</CardTitle>
+                                <CardDescription>Showing {httpResults.length} results from history. Sorted by delay.</CardDescription>
+                            </div>
+                            <Dialog>
+                                <DialogTrigger asChild>
+                                    <Button variant="outline" size="sm" disabled={isBusy || httpResults.length === 0}>
+                                        <Trash2 className="mr-2 h-4 w-4" />Clear History
+                                    </Button>
+                                </DialogTrigger>
+                                <DialogContent>
+                                    <DialogHeader>
+                                        <DialogTitle>Clear History</DialogTitle>
+                                        <DialogDescription>
+                                            This will permanently delete all saved HTTP test results. Are you sure?
+                                        </DialogDescription>
+                                    </DialogHeader>
+                                    <DialogFooter>
+                                        <DialogClose asChild><Button variant="secondary">Cancel</Button></DialogClose>
+                                        <DialogClose asChild><Button variant="destructive" onClick={handleClearHistory}>Clear</Button></DialogClose>
+                                    </DialogFooter>
+                                </DialogContent>
+                            </Dialog>
+                        </div>
+                    </CardHeader>
                     <CardContent>
                         <div className="border rounded-md max-h-[600px] lg:min-h-[374px] overflow-auto">
                             <Table><TableHeader className="sticky top-0 bg-muted/95 backdrop-blur-sm"><TableRow><TableHead className="w-[100px]">Status</TableHead><TableHead>Delay</TableHead><TableHead>Download</TableHead><TableHead>Upload</TableHead><TableHead>Location</TableHead><TableHead>Link</TableHead></TableRow></TableHeader>
                                 <TableBody ref={animationParent}>
-                                    {sortedResults.length > 0 ? (sortedResults.map((result, index) => (<TableRow key={index}><TableCell><Badge variant={getStatusBadgeVariant(result.status)} className="capitalize">{result.status}</Badge></TableCell><TableCell>{result.status === 'passed' ? `${result.delay}ms` : '-'}</TableCell><TableCell>{result.download > 0 ? `${result.download.toFixed(2)} Mbps` : '-'}</TableCell><TableCell>{result.upload > 0 ? `${result.upload.toFixed(2)} Mbps` : '-'}</TableCell><TableCell>{result.location !== 'null' ? result.location : 'N/A'}</TableCell><TableCell className="font-mono text-xs"><div className="flex items-center justify-between gap-2 max-w-sm"><span className="truncate">{result.link}</span><Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => handleCopyLink(result.link)}><ClipboardCopy className="h-4 w-4" /></Button></div></TableCell></TableRow>))) : (<TableRow><TableCell colSpan={6} className="h-24 text-center">No results yet. Run a test.</TableCell></TableRow>)}
+                                    {sortedResults.length > 0 ? (sortedResults.map((result, index) => (<TableRow key={`${result.link}-${index}`}><TableCell><Badge variant={getStatusBadgeVariant(result.status)} className="capitalize">{result.status}</Badge></TableCell><TableCell>{result.status === 'passed' ? `${result.delay}ms` : '-'}</TableCell><TableCell>{result.download > 0 ? `${result.download.toFixed(2)} Mbps` : '-'}</TableCell><TableCell>{result.upload > 0 ? `${result.upload.toFixed(2)} Mbps` : '-'}</TableCell><TableCell>{result.location !== 'null' ? result.location : 'N/A'}</TableCell><TableCell className="font-mono text-xs"><div className="flex items-center justify-between gap-2 max-w-sm"><span className="truncate">{result.link}</span><Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => handleCopyLink(result.link)}><ClipboardCopy className="h-4 w-4" /></Button></div></TableCell></TableRow>))) : (<TableRow><TableCell colSpan={6} className="h-24 text-center">No results yet. Run a test to build history.</TableCell></TableRow>)}
                                 </TableBody>
                             </Table>
                         </div>
