@@ -4,30 +4,63 @@ import { type HttpResult, type ProxyDetails, type ProxyStatus } from "@/types/da
 
 const BATCH_INTERVAL = 250; // ms
 
+// Define the types for our event listeners
+type EventCallback = (data: any) => void;
+type Listeners = {
+    [key: string]: Set<EventCallback>;
+};
+
 class WebSocketService {
     private ws: WebSocket | null = null;
-    private term: { writeln: (text: string) => void } | null = null;
+    private listeners: Listeners = {}; // Event emitter store
     private httpResultBuffer: HttpResult[] = [];
     private httpResultTimer: number | null = null;
 
-    connect(terminal: { writeln: (text: string) => void }) {
-        this.term = terminal;
+    // --- Event Emitter Methods ---
+    on(event: string, callback: EventCallback) {
+        if (!this.listeners[event]) {
+            this.listeners[event] = new Set();
+        }
+        this.listeners[event].add(callback);
+    }
+
+    off(event: string, callback: EventCallback) {
+        if (this.listeners[event]) {
+            this.listeners[event].delete(callback);
+        }
+    }
+
+    private emit(event: string, data: any) {
+        if (this.listeners[event]) {
+            this.listeners[event].forEach(callback => {
+                try {
+                    callback(data);
+                } catch (e) {
+                    console.error(`Error in WebSocket event listener for '${event}':`, e);
+                }
+            });
+        }
+    }
+
+    // --- Connection Management ---
+    connect() {
+        // No longer accepts a terminal object
         if (this.ws && this.ws.readyState < 2) return;
 
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
         this.ws = new WebSocket(wsUrl);
 
-        this.ws.onopen = () => this.term?.writeln("\x1b[32m[WebSocket] Connection established.\x1b[0m");
+        this.ws.onopen = () => this.emit('log', "\x1b[32m[WebSocket] Connection established.\x1b[0m");
         this.ws.onmessage = this.handleMessage.bind(this);
         this.ws.onclose = () => {
-            this.term?.writeln("\x1b[31m[WebSocket] Connection closed. Retrying in 3 seconds...\x1b[0m");
+            this.emit('log', "\x1b[31m[WebSocket] Connection closed. Retrying in 3 seconds...\x1b[0m");
             this.stopHttpResultBatching();
-            setTimeout(() => this.connect(terminal), 3000);
+            setTimeout(() => this.connect(), 3000);
         };
         this.ws.onerror = (error) => {
             console.error("WebSocket error:", error);
-            this.term?.writeln(`\x1b[31m[WebSocket] Error: ${(error as Event).type}\x1b[0m`);
+            this.emit('log', `\x1b[31m[WebSocket] Error: ${(error as Event).type}\x1b[0m`);
             this.ws?.close();
         };
     }
@@ -64,7 +97,7 @@ class WebSocketService {
             const message = JSON.parse(rawData);
             switch (message.type) {
                 case 'log':
-                    this.term?.writeln(message.data);
+                    this.emit('log', message.data);
                     break;
                 
                 case 'proxy_status': {
@@ -75,11 +108,10 @@ class WebSocketService {
 
                     if (proxyStatus === 'stopped') {
                         setProxyDetails(null); 
-                        // Check for an error message and show a specific toast
                         if (message.error) {
                             toast.error("Proxy stopped due to an error.", { description: message.error });
                         } else if (wasStopping) {
-                            // Suppress success toast if user manually stopped it, as the button already shows feedback
+                            // Suppress success toast if user manually stopped it
                         }
                     }
                     break;
@@ -126,13 +158,13 @@ class WebSocketService {
                     setScanProgress(message.data);
                     break;
                 default:
-                    this.term?.writeln(`\x1b[33m[WebSocket] Unhandled message type: ${message.type}\x1b[0m`);
+                    this.emit('log', `\x1b[33m[WebSocket] Unhandled message type: ${message.type}\x1b[0m`);
                     console.warn("Unhandled WebSocket message:", message);
                     break;
             }
         } catch (e) {
             console.error("WebSocket received non-JSON message:", rawData, "Error:", e);
-            this.term?.writeln(`\x1b[31m[WebSocket] Received invalid data: ${rawData}\x1b[0m`);
+            this.emit('log', `\x1b[31m[WebSocket] Received invalid data: ${rawData}\x1b[0m`);
         }
     }
 

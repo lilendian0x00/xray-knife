@@ -11,7 +11,8 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { Sheet, SheetClose, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Server, Globe, TerminalSquare, Menu, Package2, PanelLeft } from 'lucide-react';
+import { Input } from "@/components/ui/input";
+import { Server, Globe, TerminalSquare, Menu, Package2, PanelLeft, Search, Scroll, Ban } from 'lucide-react';
 import { useAppStore } from "@/stores/appStore";
 import { webSocketService } from "@/services/websocket";
 import { ProxyTab } from "./dashboard/ProxyTab";
@@ -20,6 +21,7 @@ import { CfScannerTab } from "./dashboard/CFScannerTab";
 import { ProxyStatusCard } from "./dashboard/ProxyStatusCard";
 import { type ProxyStatus } from "@/types/dashboard";
 import { api } from "@/services/api";
+import { useTheme } from "@/components/theme-provider";
 
 type Page = 'proxy' | 'http-tester' | 'cf-scanner';
 const navItems = [
@@ -39,61 +41,96 @@ export default function Dashboard() {
         setHttpResults, setHttpTestStatus
     } = useAppStore();
 
+    const { theme } = useTheme();
     const terminalRef = useRef<HTMLDivElement>(null);
     const term = useRef<Terminal | null>(null);
     const fitAddon = useRef<FitAddon | null>(null);
+    const [logSearchTerm, setLogSearchTerm] = useState('');
+    const [isAutoScroll, setIsAutoScroll] = useState(true);
 
+    // --- Terminal and WebSocket Initialization ---
     useEffect(() => {
-        // This effect should only run once to initialize the terminal.
         if (terminalRef.current && !term.current) {
             const terminal = new Terminal({
                 convertEol: true,
                 cursorBlink: true,
                 fontFamily: 'monospace',
-                theme: { background: '#18181b', foreground: '#e4e4e7' },
-                // Add some padding for better aesthetics
-                
+                fontSize: 13,
+                // FIX: Set the initial theme directly during creation
+                theme: theme === 'dark' 
+                    ? { background: '#18181b', foreground: '#e4e4e7' } 
+                    : { background: '#FFFFFF', foreground: '#09090b' },
             });
             const addon = new FitAddon();
             terminal.loadAddon(addon);
             terminal.open(terminalRef.current);
             
-            // Initial fit to set the size correctly on load
-            addon.fit();
+            // FIX: Delay the initial fit() call to prevent race condition
+            setTimeout(() => addon.fit(), 1);
 
             term.current = terminal;
             fitAddon.current = addon;
 
-            webSocketService.connect({ writeln: (text) => term.current?.writeln(text) });
+            webSocketService.connect();
 
-            // Create a ResizeObserver to watch the terminal's container element
+            const logListener = (text: string) => {
+                if (logSearchTerm && !text.toLowerCase().includes(logSearchTerm.toLowerCase())) {
+                    return;
+                }
+                term.current?.writeln(text);
+                if (isAutoScroll) {
+                    term.current?.scrollToBottom();
+                }
+            };
+
+            webSocketService.on('log', logListener);
+            
             const resizeObserver = new ResizeObserver(() => {
-                // We use a small timeout to ensure the fit happens after any animations
-                // and to prevent rapid-fire calls during a resize drag.
-                setTimeout(() => {
-                    try {
-                        fitAddon.current?.fit();
-                    } catch (e) {
-                        // This can sometimes throw an error if the terminal is not visible.
-                        // We can safely ignore it.
-                        console.log("Fit addon failed to resize, probably hidden.", e);
-                    }
-                }, 10);
+                setTimeout(() => fitAddon.current?.fit(), 10);
             });
-
-            // Start observing the terminal's parent container
             resizeObserver.observe(terminalRef.current);
 
-            // Cleanup function: This is crucial to prevent memory leaks
             return () => {
-                resizeObserver.disconnect(); // Stop observing
-                webSocketService.disconnect();
+                resizeObserver.disconnect();
+                webSocketService.off('log', logListener);
                 term.current?.dispose();
-                term.current = null; // Clear the ref
+                term.current = null;
             };
         }
-    }, []);
+    }, []); // This effect should only run ONCE
 
+    // --- Theme Update Effect ---
+    useEffect(() => {
+        // This effect handles THEME CHANGES after the terminal is initialized.
+        if (term.current) {
+            // FIX: Use the correct API to set the theme option
+            term.current.options.theme = theme === 'dark' 
+                ? { background: '#18181b', foreground: '#e4e4e7' } 
+                : { background: '#FFFFFF', foreground: '#09090b' };
+        }
+    }, [theme]);
+    
+    // --- Log Filtering Effect ---
+    useEffect(() => {
+        // This effect re-binds the log listener when the filter term changes.
+        const logListener = (text: string) => {
+            if (logSearchTerm && !text.toLowerCase().includes(logSearchTerm.toLowerCase())) {
+                return;
+            }
+            term.current?.writeln(text);
+            if (isAutoScroll) {
+                term.current?.scrollToBottom();
+            }
+        };
+
+        webSocketService.on('log', logListener);
+
+        return () => {
+            webSocketService.off('log', logListener);
+        };
+    }, [logSearchTerm, isAutoScroll]);
+
+    // --- Initial State Fetching ---
     useEffect(() => {
         const fetchInitialState = async () => {
             try {
@@ -135,6 +172,7 @@ export default function Dashboard() {
         fetchInitialState();
     }, [setProxyStatus, setProxyDetails, setScanStatus, setScanResults, setHttpResults, setHttpTestStatus]);
 
+    // --- Terminal resizing effect ---
     useEffect(() => {
         const timer = setTimeout(() => fitAddon.current?.fit(), 100);
         return () => clearTimeout(timer);
@@ -149,12 +187,27 @@ export default function Dashboard() {
     const clearLogs = () => term.current?.clear();
     const currentPageInfo = navItems.find(item => item.id === activePage);
 
-    // LAYOUT FIX: Applying the flexbox scrolling child pattern to the Card.
     const logsCard = (
-        <Card className="flex flex-col">
-            <CardHeader className="flex-row items-center justify-between">
-                <div className="flex-col gap-1.5"><CardTitle>Live Logs</CardTitle><CardDescription>Real-time output from the backend.</CardDescription></div>
-                <Button variant="outline" size="sm" onClick={clearLogs}><TerminalSquare className="mr-2 h-4 w-4" />Clear</Button>
+        <Card className="flex flex-col h-full">
+            <CardHeader>
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="flex-col gap-1.5">
+                        <CardTitle>Live Logs</CardTitle>
+                        <CardDescription>Real-time output from the backend.</CardDescription>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="relative w-full max-w-sm">
+                           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                           <Input placeholder="Filter logs..." className="pl-8" value={logSearchTerm} onChange={(e) => setLogSearchTerm(e.target.value)} />
+                        </div>
+                        <Button variant="outline" size="icon" onClick={() => setIsAutoScroll(prev => !prev)} title={isAutoScroll ? "Disable Auto-Scroll" : "Enable Auto-Scroll"}>
+                           {isAutoScroll ? <Scroll className="h-4 w-4" /> : <Ban className="h-4 w-4" />}
+                        </Button>
+                        <Button variant="outline" size="icon" onClick={clearLogs} title="Clear Logs">
+                            <TerminalSquare className="h-4 w-4" />
+                        </Button>
+                    </div>
+                </div>
             </CardHeader>
             <CardContent className="flex-1 min-h-0">
                 <div ref={terminalRef} className="h-full w-full rounded-md border bg-muted/20 overflow-hidden" />
@@ -165,22 +218,25 @@ export default function Dashboard() {
     const renderPageLayout = () => {
         if (activePage === 'proxy') {
             return (
-                <div className="grid items-start gap-4 lg:grid-cols-5 lg:gap-8">
+                <div className="grid h-full items-start gap-4 lg:grid-cols-5 lg:gap-8">
                     <div className="grid auto-rows-max items-start gap-4 lg:col-span-2">
                         <ProxyTab />
                     </div>
-                    <div className="grid auto-rows-max items-start gap-4 lg:col-span-3">
+                    <div className="flex flex-col items-start gap-4 lg:col-span-3 h-full">
                         <ProxyStatusCard details={proxyDetails} />
-                        {/* No changes needed here, the fix is in the `logsCard` component itself */}
-                        <div className={cn(proxyDetails === null && 'hidden')} >{logsCard}</div>
+                        <div className="flex-1 min-h-0 w-full">
+                            {logsCard}
+                        </div>
                     </div>
                 </div>
             );
         }
         return (
-            <div className="flex flex-col gap-4 lg:gap-6">
+            <div className="flex h-full flex-col gap-4 lg:gap-6">
                 {activePage === 'http-tester' ? <HttpTesterTab /> : <CfScannerTab />}
-                {logsCard}
+                <div className="flex-1 min-h-0">
+                    {logsCard}
+                </div>
             </div>
         );
     };
@@ -199,7 +255,6 @@ export default function Dashboard() {
                         <div className="flex-1 overflow-auto"><nav className={cn("grid items-start gap-1 mt-2", isSidebarCollapsed ? "px-2" : "px-2 lg:px-4")}>{navItems.map(item => (<Button key={item.id} variant={activePage === item.id ? "default" : "ghost"} className={cn("w-full gap-2", isSidebarCollapsed ? "justify-center" : "justify-start")} onClick={() => setActivePage(item.id)}><item.icon className="h-4 w-4" /><span className={cn(isSidebarCollapsed && "sr-only")}>{item.label}</span></Button>))}</nav></div>
                     </div>
                 </div>
-                {/* No changes needed here, the fixes above handle the layout */}
                 <div className="flex flex-col overflow-hidden min-w-0">
                     <header className="flex h-14 items-center gap-4 border-b bg-muted/40 px-4 lg:h-[60px] lg:px-6">
                         <Sheet><SheetTrigger asChild><Button variant="outline" size="icon" className="shrink-0 md:hidden"><Menu className="h-5 w-5" /><span className="sr-only">Toggle menu</span></Button></SheetTrigger>
@@ -211,7 +266,7 @@ export default function Dashboard() {
                         <Badge className={cn("capitalize", getProxyStatusColor(proxyStatus))}>Proxy: {proxyStatus}</Badge>
                     </header>
                     <main className="flex-1 overflow-auto p-4 lg:p-6 min-w-0">
-                        <div className="mx-auto w-full max-w-screen-2xl">
+                        <div className="mx-auto h-full w-full max-w-screen-2xl">
                             {renderPageLayout()}
                         </div>
                     </main>

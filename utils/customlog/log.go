@@ -33,12 +33,12 @@ type TypesDetails struct {
 
 // logTypeMap maps a log Type to its visual details (symbol and color).
 var logTypeMap = map[Type]TypesDetails{
-	Success:    {symbol: "[+]", color: color.New(color.Bold, color.FgGreen)},
-	Failure:    {symbol: "[-]", color: color.New(color.Bold, color.FgRed)},
-	Processing: {symbol: "[/]", color: color.New(color.Bold, color.FgBlue)},
-	Finished:   {symbol: "[$]", color: color.New(color.BgGreen, color.FgBlack)},
-	Info:       {symbol: "[i]", color: color.New(color.Bold, color.FgCyan)},
-	Warning:    {symbol: "[!]", color: color.New(color.Bold, color.FgYellow)},
+	Success:    {symbol: "✅", color: color.New(color.Bold, color.FgGreen)},
+	Failure:    {symbol: "❌", color: color.New(color.Bold, color.FgRed)},
+	Processing: {symbol: "⚙️ ", color: color.New(color.Bold, color.FgBlue)},
+	Finished:   {symbol: "🎉", color: color.New(color.BgGreen, color.FgBlack)},
+	Info:       {symbol: "ℹ️ ", color: color.New(color.Bold, color.FgCyan)},
+	Warning:    {symbol: "⚠️ ", color: color.New(color.Bold, color.FgYellow)},
 	None:       {symbol: "", color: color.New()}, // No symbol, default color
 }
 
