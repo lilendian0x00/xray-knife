@@ -1,5 +1,3 @@
-// src/types/settings.ts
-
 export interface ProxySettings {
     coreType: 'xray' | 'sing-box';
     listenAddr: string;

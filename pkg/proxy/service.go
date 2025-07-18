@@ -302,7 +302,9 @@ func (s *Service) findAndStartWorkingConfig(
 		}
 	}()
 
-	testManager.RunTests(context.Background(), linksToTest, resultsChan)
+	testManager.RunTests(context.Background(), linksToTest, resultsChan, func() {
+
+	})
 	close(resultsChan)
 	wg.Wait()
 

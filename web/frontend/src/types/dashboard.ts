@@ -1,4 +1,3 @@
-// src/types/dashboard.ts
 export type ProxyStatus = 'stopped' | 'running' | 'starting' | 'stopping';
 
 export interface HttpResult {
@@ -11,6 +10,14 @@ export interface HttpResult {
     download: number;
     upload: number;
     location: string;
+}
+
+export interface ScanResult {
+    ip: string;
+    latency_ms: number;
+    download_mbps: number;
+    upload_mbps: number;
+    error: string;
 }
 
 export interface GeneralConfig {

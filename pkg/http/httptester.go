@@ -81,10 +81,9 @@ func NewTestManager(examiner *Examiner, threadCount uint16, verbose bool, logger
 	}
 }
 
-// RunTests tests multiple configurations concurrently. This is a BLOCKING call.
-// It sends each result to the provided channel as it becomes available.
-// The caller is responsible for consuming from the channel. This function does NOT close the channel.
-func (tm *TestManager) RunTests(ctx context.Context, links []string, resultsChan chan<- *Result) {
+// RunTests tests multiple configurations concurrently.
+// It accepts an optional onProgress callback which is fired after each test.
+func (tm *TestManager) RunTests(ctx context.Context, links []string, resultsChan chan<- *Result, onProgress func()) {
 	semaphore := make(chan int, tm.threadCount)
 	var wg sync.WaitGroup
 
@@ -99,9 +98,11 @@ func (tm *TestManager) RunTests(ctx context.Context, links []string, resultsChan
 			defer func() {
 				<-semaphore
 				wg.Done()
+				if onProgress != nil {
+					onProgress() // Call the progress callback on completion
+				}
 			}()
 
-			// Return early if context is cancelled before starting work
 			if ctx.Err() != nil {
 				return
 			}
@@ -116,75 +117,20 @@ func (tm *TestManager) RunTests(ctx context.Context, links []string, resultsChan
 				}
 			}
 
-			// THE FIX: This `select` statement makes the channel send operation
-			// aware of the context cancellation. If the context is done, it will
-			// not attempt to send on the channel, preventing the panic.
 			select {
 			case resultsChan <- &res:
-				// Result sent successfully
 				if res.Status == "passed" && tm.logger != nil {
 					logMsg := fmt.Sprintf("[+] SUCCESS | %s | Delay: %dms\n", res.ConfigLink, res.Delay)
 					tm.logger.Print(logMsg)
 				}
 			case <-ctx.Done():
-				// Context was cancelled, do not send result.
 				return
 			}
 		}(link, i)
 	}
 
-	// Wait for all spawned goroutines to complete before returning.
-	// This ensures the caller can safely close the results channel.
 	wg.Wait()
 }
-
-//// TestConfigs tests multiple configurations concurrently
-//func (tm *TestManager) TestConfigs(links []string) ConfigResults {
-//	semaphore := make(chan int, tm.threadCount)
-//	var wg sync.WaitGroup
-//	results := make(ConfigResults, 0)
-//	var resultsMu sync.Mutex
-//
-//	for i := range links {
-//		semaphore <- 1
-//		wg.Add(1)
-//		go tm.testSingleConfig(links[i], i, &results, &resultsMu, semaphore, &wg)
-//	}
-//
-//	wg.Wait()
-//	close(semaphore)
-//	return results
-//}
-
-//// testSingleConfig tests a single configuration
-//func (tm *TestManager) testSingleConfig(link string, index int, results *ConfigResults, resultsMu *sync.Mutex, semaphore chan int, wg *sync.WaitGroup) {
-//	defer func() {
-//		<-semaphore
-//		wg.Done()
-//	}()
-//
-//	res, err := tm.examiner.ExamineConfig(link)
-//	if err != nil {
-//		logMsg := fmt.Sprintf("[-] Error: %s - broken config: %s\n", err.Error(), link)
-//		if tm.logger != nil {
-//			tm.logger.Print(logMsg)
-//		} else if tm.verbose {
-//			customlog.Printf(customlog.Failure, "Error: %s - broken config: %s\n", err.Error(), link)
-//		}
-//		return
-//	}
-//
-//	if res.Status == "passed" && tm.logger != nil {
-//		logMsg := fmt.Sprintf("[+] SUCCESS | %s | Delay: %dms\n", res.ConfigLink, res.Delay)
-//		tm.logger.Print(logMsg)
-//	}
-//
-//	if tm.processor.outputType == "csv" || res.Status == "passed" {
-//		resultsMu.Lock()
-//		*results = append(*results, &res)
-//		resultsMu.Unlock()
-//	}
-//}
 
 // SaveResults saves the test results to a file
 func (rp *ResultProcessor) SaveResults(results ConfigResults) error {

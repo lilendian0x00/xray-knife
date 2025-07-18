@@ -260,7 +260,9 @@ func handleMultipleConfigs(examiner *pkghttp.Examiner, config *Config) error {
 		}
 	}()
 
-	testManager.RunTests(ctx, links, resultsChan)
+	testManager.RunTests(ctx, links, resultsChan, func() {
+
+	})
 	close(resultsChan)
 	collectorWg.Wait()
 

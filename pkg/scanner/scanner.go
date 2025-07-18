@@ -231,6 +231,9 @@ func (s *ScannerService) Run(ctx context.Context, progressChan chan<- *ScanResul
 	return nil
 }
 
+// OnIPScanned is a global hook for progress reporting. TODO: Not ideal, but avoids a large refactor.
+var OnIPScanned func()
+
 func (s *ScannerService) runLatencyScan(ctx context.Context, workerResultsChan chan<- *ScanResult) error {
 	s.logger.Printf("Phase 1: Scanning for latency with %d threads...", s.config.ThreadCount)
 	pool := pond.NewPool(s.config.ThreadCount)
@@ -265,10 +268,18 @@ func (s *ScannerService) runLatencyScan(ctx context.Context, workerResultsChan c
 			r.Shuffle(len(listIP), func(i, j int) { listIP[i], listIP[j] = listIP[j], listIP[i] })
 			for _, ip := range listIP {
 				if _, exists := s.scannedIPs[ip]; exists {
+					if OnIPScanned != nil {
+						OnIPScanned()
+					}
 					continue
 				}
 				ipToScan := ip
 				group.Submit(func() {
+					defer func() {
+						if OnIPScanned != nil {
+							OnIPScanned() // Increment after scan
+						}
+					}()
 					res := s.scanIPForLatency(group.Context(), ipToScan)
 					select {
 					case workerResultsChan <- res:
@@ -290,9 +301,17 @@ func (s *ScannerService) runLatencyScan(ctx context.Context, workerResultsChan c
 				copy(ipToScan, currentIP)
 				ipStr := ipToScan.String()
 				if _, exists := s.scannedIPs[ipStr]; exists {
+					if OnIPScanned != nil {
+						OnIPScanned()
+					} // Also count skipped IPs
 					continue
 				}
 				group.Submit(func() {
+					defer func() {
+						if OnIPScanned != nil {
+							OnIPScanned() // Increment after scan
+						}
+					}()
 					res := s.scanIPForLatency(group.Context(), ipStr)
 					select {
 					case workerResultsChan <- res:

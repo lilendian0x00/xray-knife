@@ -1,6 +1,6 @@
 import { toast } from "sonner";
-import { useAppStore } from "@/stores/appStore";
-import { type HttpResult } from "@/types/dashboard";
+import { useAppStore, type TaskStatus } from "@/stores/appStore";
+import { type HttpResult, type ProxyDetails, type ProxyStatus } from "@/types/dashboard";
 
 const BATCH_INTERVAL = 250; // ms
 
@@ -52,49 +52,70 @@ class WebSocketService {
             clearInterval(this.httpResultTimer);
             this.httpResultTimer = null;
         }
-        // Final flush to ensure no results are missed
         this.flushHttpResultBuffer();
     }
 
     private handleMessage(event: MessageEvent) {
+        const { setHttpTestStatus, updateScanResults, setScanStatus, setHttpTestProgress, setScanProgress, setProxyDetails, setProxyStatus } = useAppStore.getState();
         const rawData = event.data;
         if (!rawData) return;
 
         try {
             const message = JSON.parse(rawData);
-
             switch (message.type) {
                 case 'log':
                     this.term?.writeln(message.data);
+                    break;
+                
+                // --- FIX: HANDLE PROXY STATUS UPDATES ---
+                case 'proxy_status':
+                    const proxyStatus = message.data as ProxyStatus;
+                    setProxyStatus(proxyStatus);
+                    if (proxyStatus === 'stopped') {
+                        setProxyDetails(null); // Clear details card when proxy stops
+                    }
+                    break;
+                // --- END FIX ---
+                
+                case 'proxy_details':
+                    setProxyDetails(message.data as ProxyDetails);
                     break;
                 case 'http_result':
                     this.startHttpResultBatching();
                     this.httpResultBuffer.push(message.data);
                     break;
-                case 'http_test_status':
+                case 'http_test_status': {
                     this.stopHttpResultBatching();
-                    if (message.data === 'finished' || message.data === 'stopped') {
-                        useAppStore.getState().setHttpTestStatus('idle');
-                        
-                        if (message.data === 'finished') {
-                            toast.success("HTTP test finished.");
-                        } else {
-                            toast.info("HTTP test stopped.");
+                    const status = message.data as 'finished' | 'stopped' | 'running';
+                    if (status === 'finished' || status === 'stopped') {
+                        setHttpTestStatus('idle');
+                        if (useAppStore.getState().httpTestStatus !== 'stopping') {
+                           toast.success(status === 'finished' ? "HTTP test finished." : "HTTP test stopped.");
                         }
+                    } else {
+                        setHttpTestStatus(status as TaskStatus);
                     }
                     break;
+                }
                 case 'cfscan_result':
-                    useAppStore.getState().updateScanResults(message.data);
+                    updateScanResults(message.data);
                     break;
-                case 'cfscan_status':
-                    if (message.data === 'finished' || message.data === 'error') {
-                        useAppStore.getState().setScanStatus('idle');
-                        if (message.data === 'finished') {
-                            toast.success("Cloudflare scan finished.");
-                        } else {
-                            toast.error(`Scan failed: ${message.message || 'Unknown error'}`);
-                        }
+                case 'cfscan_status': {
+                    const status = message.data as 'finished' | 'error' | 'running' | 'stopped';
+                     if (status === 'finished' || status === 'error' || status === 'stopped') {
+                        setScanStatus('idle');
+                        if (status === 'finished') toast.success("Cloudflare scan finished.");
+                        else if (status === 'error') toast.error(`Scan failed: ${message.message || 'Unknown error'}`);
+                    } else {
+                         setScanStatus(status as TaskStatus);
                     }
+                    break;
+                }
+                case 'http_test_progress':
+                    setHttpTestProgress(message.data);
+                    break;
+                case 'cf_scan_progress':
+                    setScanProgress(message.data);
                     break;
                 default:
                     this.term?.writeln(`\x1b[33m[WebSocket] Unhandled message type: ${message.type}\x1b[0m`);

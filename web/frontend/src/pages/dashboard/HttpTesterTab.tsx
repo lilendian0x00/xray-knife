@@ -17,12 +17,13 @@ import { Loader2, Globe, ClipboardCopy, Settings, RotateCcw, StopCircle, Trash2 
 import { useAppStore } from "@/stores/appStore";
 import { api } from "@/services/api";
 import { type HttpResult } from "@/types/dashboard";
+import { Progress } from "@/components/ui/progress";
 
 export function HttpTesterTab() {
-    const { httpSettings, updateHttpSettings, resetHttpSettings, httpResults, clearHttpResults, httpTestStatus, setHttpTestStatus } = useAppStore();
-    const [animationParent] = useAutoAnimate();
+    const { httpSettings, updateHttpSettings, resetHttpSettings, httpResults, clearHttpResults, httpTestStatus, setHttpTestStatus, httpTestProgress } = useAppStore();
+    const [animationParent] = useAutoAnimate<HTMLTableSectionElement>();
     const [httpTestConfigs, setHttpTestConfigs] = useState('');
-    
+
     const sortedResults = useMemo(() => {
         return [...httpResults].sort((a, b) => {
             if (a.status === 'passed' && b.status !== 'passed') return -1;
@@ -31,12 +32,13 @@ export function HttpTesterTab() {
         });
     }, [httpResults]);
 
-    const isBusy = httpTestStatus === 'testing' || httpTestStatus === 'stopping';
+    const isBusy = httpTestStatus === 'running' || httpTestStatus === 'stopping' || httpTestStatus === 'starting';
+    const progressValue = httpTestProgress.total > 0 ? (httpTestProgress.completed / httpTestProgress.total) * 100 : 0;
 
     const handleRunHttpTest = async () => {
         if (!httpTestConfigs.trim()) { toast.error("HTTP Test configurations cannot be empty."); return; }
         clearHttpResults();
-        setHttpTestStatus('testing');
+        setHttpTestStatus('starting');
         toast.info("Starting HTTP configuration test...");
         try {
             const links = httpTestConfigs.trim().split('\n').map(link => link.trim()).filter(link => link);
@@ -53,11 +55,10 @@ export function HttpTesterTab() {
         setHttpTestStatus('stopping');
         try {
             await api.stopHttpTest();
-            toast.success("HTTP test stopped successfully.");
+            // Status will be set to idle by WebSocket
         } catch (error) {
             toast.error("Failed to stop the test.");
-        } finally {
-            setHttpTestStatus('idle');
+            setHttpTestStatus('running'); // Revert if stop fails
         }
     };
 
@@ -79,6 +80,15 @@ export function HttpTesterTab() {
         if (status === 'passed') return 'default';
         if (status === 'semi-passed') return 'secondary';
         return 'destructive';
+    };
+
+    const getButtonContent = () => {
+        switch (httpTestStatus) {
+            case 'starting': return <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Starting...</>;
+            case 'running': return <><Loader2 className="mr-2 h-4 w-4 animate-spin" />In Progress...</>;
+            case 'stopping': return <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Stopping...</>;
+            default: return <><Globe className="mr-2 h-4 w-4" />Run Test</>;
+        }
     };
 
     return (
@@ -117,25 +127,36 @@ export function HttpTesterTab() {
                                 </AnimatePresence>
                             </div>
                         </fieldset>
-                        <div className="flex flex-col sm:flex-row gap-4 pt-2">
-                            <Button onClick={handleRunHttpTest} disabled={isBusy}>
-                                {isBusy ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />In Progress...</> : <><Globe className="mr-2 h-4 w-4" />Run Test</>}
-                            </Button>
-                            <Button onClick={handleStopHttpTest} variant="destructive" disabled={httpTestStatus !== 'testing'}>
-                                <StopCircle className="mr-2 h-4 w-4" />Stop Test
-                            </Button>
-                            <Dialog>
-                                <DialogTrigger asChild><Button variant="outline" disabled={isBusy}><Settings className="mr-2 h-4 w-4" />Advanced</Button></DialogTrigger>
-                                <DialogContent className="sm:max-w-[425px]">
-                                    <DialogHeader><DialogTitle>Advanced Settings</DialogTitle><DialogDescription>Modify advanced options for the HTTP tester.</DialogDescription></DialogHeader>
-                                    <div className="flex flex-col gap-4 py-4">
-                                        <div className="grid grid-cols-4 items-center gap-4"><Label htmlFor="dest-url" className="text-right">Test URL</Label><Input id="dest-url" value={httpSettings.destURL} onChange={(e) => updateHttpSettings({ destURL: e.target.value })} className="col-span-3" /></div>
-                                        <div className="grid grid-cols-4 items-center gap-4"><Label htmlFor="http-method-modal" className="text-right">Method</Label><Select value={httpSettings.httpMethod} onValueChange={(v) => updateHttpSettings({ httpMethod: v as any })}><SelectTrigger id="http-method-modal" className="col-span-3"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="GET">GET</SelectItem><SelectItem value="POST">POST</SelectItem></SelectContent></Select></div>
-                                        <div className="col-span-4 flex items-center justify-end space-x-2"><Checkbox id="get-ip-info-modal" checked={httpSettings.doIPInfo} onCheckedChange={(c) => updateHttpSettings({ doIPInfo: Boolean(c) })} /><Label htmlFor="get-ip-info-modal" className="font-normal cursor-pointer">Get IP Info</Label></div>
-                                        <div className="col-span-4 flex items-center justify-end space-x-2"><Checkbox id="insecure-tls-modal" checked={httpSettings.insecureTLS} onCheckedChange={(c) => updateHttpSettings({ insecureTLS: Boolean(c) })} /><Label htmlFor="insecure-tls-modal" className="font-normal cursor-pointer">Allow Insecure TLS</Label></div>
-                                    </div>
-                                </DialogContent>
-                            </Dialog>
+                        <div className="flex flex-col gap-2">
+                            <div className="flex flex-col sm:flex-row gap-4">
+                                <Button onClick={handleRunHttpTest} disabled={isBusy} className="flex-1">{getButtonContent()}</Button>
+                                <Button onClick={handleStopHttpTest} variant="destructive" disabled={httpTestStatus !== 'running'} className="flex-1">
+                                    <StopCircle className="mr-2 h-4 w-4" />Stop Test
+                                </Button>
+                                <Dialog>
+                                    <DialogTrigger asChild><Button variant="outline" disabled={isBusy}><Settings className="mr-2 h-4 w-4" />Advanced</Button></DialogTrigger>
+                                    <DialogContent className="sm:max-w-[425px]">
+                                        <DialogHeader><DialogTitle>Advanced Settings</DialogTitle><DialogDescription>Modify advanced options for the HTTP tester.</DialogDescription></DialogHeader>
+                                        <div className="flex flex-col gap-4 py-4">
+                                            <div className="grid grid-cols-4 items-center gap-4"><Label htmlFor="dest-url" className="text-right">Test URL</Label><Input id="dest-url" value={httpSettings.destURL} onChange={(e) => updateHttpSettings({ destURL: e.target.value })} className="col-span-3" /></div>
+                                            <div className="grid grid-cols-4 items-center gap-4"><Label htmlFor="http-method-modal" className="text-right">Method</Label><Select value={httpSettings.httpMethod} onValueChange={(v) => updateHttpSettings({ httpMethod: v as any })}><SelectTrigger id="http-method-modal" className="col-span-3"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="GET">GET</SelectItem><SelectItem value="POST">POST</SelectItem></SelectContent></Select></div>
+                                            <div className="col-span-4 flex items-center justify-end space-x-2"><Checkbox id="get-ip-info-modal" checked={httpSettings.doIPInfo} onCheckedChange={(c) => updateHttpSettings({ doIPInfo: Boolean(c) })} /><Label htmlFor="get-ip-info-modal" className="font-normal cursor-pointer">Get IP Info</Label></div>
+                                            <div className="col-span-4 flex items-center justify-end space-x-2"><Checkbox id="insecure-tls-modal" checked={httpSettings.insecureTLS} onCheckedChange={(c) => updateHttpSettings({ insecureTLS: Boolean(c) })} /><Label htmlFor="insecure-tls-modal" className="font-normal cursor-pointer">Allow Insecure TLS</Label></div>
+                                        </div>
+                                    </DialogContent>
+                                </Dialog>
+                            </div>
+                             <AnimatePresence>
+                                {httpTestStatus === 'running' && (
+                                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-2 pt-4">
+                                        <div className="flex justify-between text-sm text-muted-foreground">
+                                            <span>Progress</span>
+                                            <span>{httpTestProgress.completed} / {httpTestProgress.total}</span>
+                                        </div>
+                                        <Progress value={progressValue} />
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
                         </div>
                     </CardContent>
                 </Card>
@@ -144,27 +165,12 @@ export function HttpTesterTab() {
                 <Card>
                     <CardHeader>
                         <div className="flex flex-wrap items-center justify-between gap-4">
-                            <div className="flex flex-col gap-1.5">
-                                <CardTitle>Test Results</CardTitle>
-                                <CardDescription>Showing {httpResults.length} results from history. Sorted by delay.</CardDescription>
-                            </div>
+                            <div className="flex flex-col gap-1.5"><CardTitle>Test Results</CardTitle><CardDescription>Showing {httpResults.length} results. Sorted by delay.</CardDescription></div>
                             <Dialog>
-                                <DialogTrigger asChild>
-                                    <Button variant="outline" size="sm" disabled={isBusy || httpResults.length === 0}>
-                                        <Trash2 className="mr-2 h-4 w-4" />Clear History
-                                    </Button>
-                                </DialogTrigger>
+                                <DialogTrigger asChild><Button variant="outline" size="sm" disabled={isBusy || httpResults.length === 0}><Trash2 className="mr-2 h-4 w-4" />Clear History</Button></DialogTrigger>
                                 <DialogContent>
-                                    <DialogHeader>
-                                        <DialogTitle>Clear History</DialogTitle>
-                                        <DialogDescription>
-                                            This will permanently delete all saved HTTP test results. Are you sure?
-                                        </DialogDescription>
-                                    </DialogHeader>
-                                    <DialogFooter>
-                                        <DialogClose asChild><Button variant="secondary">Cancel</Button></DialogClose>
-                                        <DialogClose asChild><Button variant="destructive" onClick={handleClearHistory}>Clear</Button></DialogClose>
-                                    </DialogFooter>
+                                    <DialogHeader><DialogTitle>Clear History</DialogTitle><DialogDescription>This will permanently delete all saved HTTP test results. Are you sure?</DialogDescription></DialogHeader>
+                                    <DialogFooter><DialogClose asChild><Button variant="secondary">Cancel</Button></DialogClose><DialogClose asChild><Button variant="destructive" onClick={handleClearHistory}>Clear</Button></DialogClose></DialogFooter>
                                 </DialogContent>
                             </Dialog>
                         </div>
@@ -173,7 +179,7 @@ export function HttpTesterTab() {
                         <div className="border rounded-md max-h-[600px] lg:min-h-[374px] overflow-auto">
                             <Table><TableHeader className="sticky top-0 bg-muted/95 backdrop-blur-sm"><TableRow><TableHead className="w-[100px]">Status</TableHead><TableHead>Delay</TableHead><TableHead>Download</TableHead><TableHead>Upload</TableHead><TableHead>Location</TableHead><TableHead>Link</TableHead></TableRow></TableHeader>
                                 <TableBody ref={animationParent}>
-                                    {sortedResults.length > 0 ? (sortedResults.map((result, index) => (<TableRow key={`${result.link}-${index}`}><TableCell><Badge variant={getStatusBadgeVariant(result.status)} className="capitalize">{result.status}</Badge></TableCell><TableCell>{result.status === 'passed' ? `${result.delay}ms` : '-'}</TableCell><TableCell>{result.download > 0 ? `${result.download.toFixed(2)} Mbps` : '-'}</TableCell><TableCell>{result.upload > 0 ? `${result.upload.toFixed(2)} Mbps` : '-'}</TableCell><TableCell>{result.location !== 'null' ? result.location : 'N/A'}</TableCell><TableCell className="font-mono text-xs"><div className="flex items-center justify-between gap-2 max-w-sm"><span className="truncate">{result.link}</span><Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => handleCopyLink(result.link)}><ClipboardCopy className="h-4 w-4" /></Button></div></TableCell></TableRow>))) : (<TableRow><TableCell colSpan={6} className="h-24 text-center">No results yet. Run a test to build history.</TableCell></TableRow>)}
+                                    {sortedResults.length > 0 ? (sortedResults.map((result, index) => (<TableRow key={`${result.link}-${index}`}><TableCell><Badge variant={getStatusBadgeVariant(result.status)} className="capitalize">{result.status}</Badge></TableCell><TableCell>{result.status === 'passed' ? `${result.delay}ms` : '-'}</TableCell><TableCell>{result.download > 0 ? `${result.download.toFixed(2)} Mbps` : '-'}</TableCell><TableCell>{result.upload > 0 ? `${result.upload.toFixed(2)} Mbps` : '-'}</TableCell><TableCell>{result.location !== 'null' ? result.location : 'N/A'}</TableCell><TableCell className="font-mono text-xs"><div className="flex items-center justify-between gap-2 max-w-sm"><span className="truncate">{result.link}</span><Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => handleCopyLink(result.link)}><ClipboardCopy className="h-4 w-4" /></Button></div></TableCell></TableRow>))) : (<TableRow><TableCell colSpan={6} className="h-24 text-center text-muted-foreground">{isBusy ? "Testing..." : "No results yet. Run a test to see results."}</TableCell></TableRow>)}
                                 </TableBody>
                             </Table>
                         </div>

@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 export function usePersistentState<T>(
     key: string,
     defaultValue: T,
-    // Optional merge function to handle updates from older versions of the app
     merge: (loaded: Partial<T>) => T = (loaded) => ({ ...defaultValue, ...loaded })
 ): [T, React.Dispatch<React.SetStateAction<T>>] {
     const [value, setValue] = useState<T>(() => {

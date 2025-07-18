@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { AnimatePresence, motion } from "framer-motion";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogClose } from "@/components/ui/dialog";
-import { RotateCcw, Settings } from "lucide-react";
+import { Loader2, RotateCcw, Settings } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 import { api } from "@/services/api";
 
@@ -43,30 +43,32 @@ export function ProxyTab() {
             return;
         }
         setProxyStatus("starting");
-        toast.info("Starting proxy service...");
+        const toastId = toast.loading("Starting proxy service...");
 
         try {
             await api.startProxy(proxySettings, proxyConfigs.trim().split('\n'));
             setProxyStatus("running");
-            toast.success("Proxy service started successfully.");
+            toast.success("Proxy service started successfully.", { id: toastId });
             const res = await api.getProxyDetails();
             setProxyDetails(res.data);
         } catch (err: any) {
             const errorMessage = err.response?.data?.error || err.message || "An unknown error occurred.";
-            toast.error(`Failed to start proxy: ${errorMessage}`);
+            toast.error(`Failed to start proxy: ${errorMessage}`, { id: toastId });
             setProxyStatus("stopped");
         }
     };
 
     const handleStopProxy = async () => {
         setProxyStatus("stopping");
+        const toastId = toast.loading("Stopping proxy service...");
+
         try {
             await api.stopProxy();
-            toast.success("Proxy service stopped.");
+            toast.success("Proxy service stopped.", { id: toastId });
         } catch (err: any) {
-            toast.error("Failed to stop proxy service.");
+            toast.error("Failed to stop proxy service.", { id: toastId });
         } finally {
-            setProxyStatus("stopped");
+            // The stopped status will be confirmed by the backend or a timeout
         }
     };
 
@@ -193,7 +195,18 @@ export function ProxyTab() {
                 <div className="flex flex-col gap-3"><Label htmlFor="proxy-configs">Configuration Links</Label>
                     <Textarea id="proxy-configs" placeholder="vmess://&#10;vless://...&#10;trojan://...&#10;ss://..." className="h-40 font-mono text-sm" value={proxyConfigs} onChange={(e) => setProxyConfigs(e.target.value)} disabled={proxyStatus === 'running'} />
                 </div>
-                <div className="flex gap-4 flex-col sm:flex-row"><Button onClick={handleStartProxy} disabled={proxyStatus !== 'stopped'}>{proxyStatus === 'starting' ? 'Starting...' : 'Start Proxy'}</Button><Button onClick={handleStopProxy} variant="destructive" disabled={proxyStatus !== 'running'}>{proxyStatus === 'stopping' ? 'Stopping...' : 'Stop Proxy'}</Button><Button onClick={handleRotateProxy} variant="secondary" disabled={proxyStatus !== 'running'}>Rotate Now</Button></div>
+                <div className="flex gap-4 flex-col sm:flex-row">
+                    <Button onClick={handleStartProxy} disabled={proxyStatus !== 'stopped'}>
+                        {proxyStatus === 'starting' && <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Starting...</>}
+                        {proxyStatus !== 'starting' && 'Start Proxy'}
+                    </Button>
+                    <Button onClick={handleStopProxy} variant="destructive" disabled={proxyStatus !== 'running'}>
+
+                        {proxyStatus === 'stopping' && <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Stopping...</>}
+                        {proxyStatus !== 'stopping' && 'Stop Proxy'}
+                    </Button>
+                    <Button onClick={handleRotateProxy} variant="secondary" disabled={proxyStatus !== 'running'}>Rotate Now</Button>
+                </div>
             </CardContent>
         </Card>
     );

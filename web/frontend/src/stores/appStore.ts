@@ -1,9 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { type ProxySettings, type HttpTesterSettings, type CfScannerSettings } from '@/types/settings';
-import { type HttpResult } from '@/types/dashboard';
-import { type ScanResult, type ScanStatus } from '@/pages/dashboard/CFScannerTab';
-import { type ProxyStatus, type ProxyDetails } from '@/types/dashboard';
+import { type HttpResult, type ProxyStatus, type ProxyDetails, type ScanResult } from '@/types/dashboard';
 
 // --- Default States ---
 const defaultProxySettings: ProxySettings = {
@@ -22,33 +20,37 @@ const defaultCfScannerSettings: CfScannerSettings = {
     advancedOptions: { configLink: '', insecureTLS: false, shuffleIPs: false, shuffleSubnets: false }
 };
 
+// --- Progress State ---
+interface ProgressState { completed: number; total: number; }
+const initialProgress: ProgressState = { completed: 0, total: 0 };
+
 // --- Store Interfaces ---
+export type TaskStatus = 'idle' | 'starting' | 'running' | 'stopping' | 'finished';
+
 interface AppState {
-    // Persisted Settings
     proxySettings: ProxySettings;
     httpSettings: HttpTesterSettings;
     cfScannerSettings: CfScannerSettings;
-    // Transient State
     proxyStatus: ProxyStatus;
-    scanStatus: ScanStatus;
-    httpTestStatus: 'idle' | 'testing' | 'stopping';
+    scanStatus: TaskStatus;
+    httpTestStatus: TaskStatus;
     httpResults: HttpResult[];
     scanResults: ScanResult[];
     proxyDetails: ProxyDetails | null;
+    httpTestProgress: ProgressState;
+    scanProgress: ProgressState;
 }
 
 interface AppActions {
-    // Setters for settings
     updateProxySettings: (settings: Partial<ProxySettings>) => void;
     updateHttpSettings: (settings: Partial<HttpTesterSettings>) => void;
     updateCfScannerSettings: (settings: Partial<CfScannerSettings>) => void;
     resetProxySettings: () => void;
     resetHttpSettings: () => void;
     resetCfScannerSettings: () => void;
-    // Setters for transient state
     setProxyStatus: (status: ProxyStatus) => void;
-    setScanStatus: (status: ScanStatus) => void;
-    setHttpTestStatus: (status: 'idle' | 'testing' | 'stopping') => void;
+    setScanStatus: (status: TaskStatus) => void;
+    setHttpTestStatus: (status: TaskStatus) => void;
     addHttpResultsBatch: (results: HttpResult[]) => void;
     clearHttpResults: () => void;
     setHttpResults: (results: HttpResult[]) => void;
@@ -56,24 +58,24 @@ interface AppActions {
     setScanResults: (results: ScanResult[]) => void;
     clearScanResults: () => void;
     setProxyDetails: (details: ProxyDetails | null) => void;
+    setHttpTestProgress: (progress: ProgressState) => void;
+    setScanProgress: (progress: ProgressState) => void;
 }
 
-// --- Zustand Store ---
 export const useAppStore = create<AppState & AppActions>()(
     persist(
         (set) => ({
-            // --- Persisted State ---
             proxySettings: defaultProxySettings,
             httpSettings: defaultHttpSettings,
             cfScannerSettings: defaultCfScannerSettings,
-            // --- Transient State ---
             proxyStatus: 'stopped',
             scanStatus: 'idle',
             httpTestStatus: 'idle',
             httpResults: [],
             scanResults: [],
             proxyDetails: null,
-            // --- Actions ---
+            httpTestProgress: initialProgress,
+            scanProgress: initialProgress,
             updateProxySettings: (newSettings) => set(state => ({ proxySettings: { ...state.proxySettings, ...newSettings } })),
             updateHttpSettings: (newSettings) => set(state => ({ httpSettings: { ...state.httpSettings, ...newSettings } })),
             updateCfScannerSettings: (newSettings) => set(state => ({ cfScannerSettings: { ...state.cfScannerSettings, ...newSettings } })),
@@ -81,8 +83,14 @@ export const useAppStore = create<AppState & AppActions>()(
             resetHttpSettings: () => set({ httpSettings: defaultHttpSettings }),
             resetCfScannerSettings: () => set({ cfScannerSettings: defaultCfScannerSettings }),
             setProxyStatus: (status) => set({ proxyStatus: status }),
-            setScanStatus: (status) => set({ scanStatus: status }),
-            setHttpTestStatus: (status) => set({ httpTestStatus: status }),
+            setScanStatus: (status) => set({ 
+                scanStatus: status,
+                ...(status === 'idle' && { scanProgress: initialProgress })
+            }),
+            setHttpTestStatus: (status) => set({
+                httpTestStatus: status,
+                ...(status === 'idle' && { httpTestProgress: initialProgress })
+            }),
             addHttpResultsBatch: (results) => set(state => ({ httpResults: [...state.httpResults, ...results] })),
             clearHttpResults: () => set({ httpResults: [] }),
             setHttpResults: (results) => set({ httpResults: results }),
@@ -90,15 +98,17 @@ export const useAppStore = create<AppState & AppActions>()(
             setScanResults: (results) => set({ scanResults: results }),
             clearScanResults: () => set({ scanResults: [] }),
             setProxyDetails: (details) => set({ proxyDetails: details }),
+            setHttpTestProgress: (progress) => set({ httpTestProgress: progress }),
+            setScanProgress: (progress) => set({ scanProgress: progress }),
         }),
         {
-            name: 'xray-knife-app-storage', // name of the item in the storage (must be unique)
-            storage: createJSONStorage(() => localStorage), // (optional) by default, 'localStorage' is used
+            name: 'xray-knife-app-storage',
+            storage: createJSONStorage(() => localStorage),
             partialize: (state) => ({ 
                 proxySettings: state.proxySettings,
                 httpSettings: state.httpSettings,
                 cfScannerSettings: state.cfScannerSettings
-            }), // Only persist the settings
+            }),
         }
     )
 );
