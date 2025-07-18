@@ -83,10 +83,11 @@ func (s *BaseService) Status() ServiceState {
 // Stop cancels the service's context and waits for it to finish.
 func (s *BaseService) Stop() error {
 	s.mu.Lock()
-	if s.state != StateRunning {
+	if s.state != StateRunning && s.state != StateStarting {
 		s.mu.Unlock()
-		return fmt.Errorf("service '%s' is not running", s.serviceType)
+		return fmt.Errorf("service '%s' is not running or starting", s.serviceType)
 	}
+
 	s.state = StateStopping
 	s.logger.Printf("[%s] Stop signal received. Cancelling context.", strings.ToUpper(s.serviceType))
 	if s.cancelFunc != nil {
@@ -290,8 +291,11 @@ func (ht *HttpTestRunner) Start(config interface{}) error {
 func (ht *HttpTestRunner) run(ctx context.Context, req pkghttp.HttpTestRequest) {
 	defer ht.recoverAndLogPanic()
 	defer ht.wg.Done()
+	defer ht.SetState(StateIdle) // Final state should be idle
 
 	ht.SetState(StateRunning)
+	statusMsgRunning, _ := json.Marshal(map[string]interface{}{"type": "http_test_status", "data": "running"})
+	ht.hub.Broadcast(statusMsgRunning)
 
 	total := len(req.Links)
 	var completed atomic.Int32
@@ -321,11 +325,12 @@ func (ht *HttpTestRunner) run(ctx context.Context, req pkghttp.HttpTestRequest) 
 	close(resultsChan)
 	consumerWg.Wait()
 
-	finalState := StateFinished
 	if ctx.Err() != nil {
-		finalState = StateIdle
+		// Was cancelled, Stop() will send the 'stopped' message.
+		return
 	}
-	ht.SetState(finalState)
+
+	ht.SetState(StateFinished) // Transient state to signal completion
 	statusMsg, _ := json.Marshal(map[string]interface{}{"type": "http_test_status", "data": "finished"})
 	ht.hub.Broadcast(statusMsg)
 }
@@ -412,8 +417,11 @@ func (s *CfScannerRunner) Start(config interface{}) error {
 func (s *CfScannerRunner) run(ctx context.Context, service *scanner.ScannerService, cfg scanner.ScannerConfig) {
 	defer s.recoverAndLogPanic()
 	defer s.wg.Done()
+	defer s.SetState(StateIdle) // Final state should be idle
 
 	s.SetState(StateRunning)
+	statusMsgRunning, _ := json.Marshal(map[string]interface{}{"type": "cfscan_status", "data": "running"})
+	s.hub.Broadcast(statusMsgRunning)
 
 	var totalIPs int
 	for _, cidr := range cfg.Subnets {
@@ -433,6 +441,7 @@ func (s *CfScannerRunner) run(ctx context.Context, service *scanner.ScannerServi
 
 	progressChan := make(chan *scanner.ScanResult, cfg.ThreadCount)
 	go func() {
+		defer s.recoverAndLogPanic() // Also recover this goroutine
 		for result := range progressChan {
 			result.PrepareForMarshal()
 			jsonResult, _ := json.Marshal(map[string]interface{}{"type": "cfscan_result", "data": result})
@@ -450,11 +459,12 @@ func (s *CfScannerRunner) run(ctx context.Context, service *scanner.ScannerServi
 		}
 	}
 
-	finalState := StateFinished
 	if ctx.Err() != nil {
-		finalState = StateIdle
+		// Was cancelled, Stop() will send the 'stopped' message.
+		return
 	}
-	s.SetState(finalState)
+
+	s.SetState(StateFinished)
 	statusMsg, _ := json.Marshal(map[string]interface{}{"type": "cfscan_status", "data": "finished"})
 	s.hub.Broadcast(statusMsg)
 }

@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -152,14 +151,6 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 		Delay:      failedDelay,
 		RealIPAddr: "null",
 		IpAddrLoc:  "null",
-	}
-
-	if link == "" {
-		reader := bufio.NewReader(os.Stdin)
-		fmt.Println("Reading config from STDIN:")
-		text, _ := reader.ReadString('\n')
-		link = text
-		fmt.Printf("\n")
 	}
 
 	// Remove any spaces from the link

@@ -64,11 +64,13 @@ export function ProxyTab() {
 
         try {
             await api.stopProxy();
+
             toast.success("Proxy service stopped.", { id: toastId });
+            setProxyStatus("stopped");
+
         } catch (err: any) {
             toast.error("Failed to stop proxy service.", { id: toastId });
-        } finally {
-            // The stopped status will be confirmed by the backend or a timeout
+            setProxyStatus("running");
         }
     };
 

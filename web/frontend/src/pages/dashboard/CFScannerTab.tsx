@@ -20,16 +20,16 @@ import { Progress } from "@/components/ui/progress";
 
 export function CfScannerTab() {
     const { cfScannerSettings, updateCfScannerSettings, resetCfScannerSettings, scanResults, clearScanResults, scanStatus, setScanStatus, scanProgress } = useAppStore();
-    
+
     const [subnets, setSubnets] = useState('');
     const [isLoadingRanges, setIsLoadingRanges] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
     const [onlySpeedtestResults, setOnlySpeedtestResults] = useState(false);
-    
+
     useDebounce(() => setDebouncedSearchTerm(searchTerm), 300, [searchTerm]);
     const [animationParent] = useAutoAnimate<HTMLTableSectionElement>();
-    
+
     const isBusy = scanStatus === 'running' || scanStatus === 'stopping' || scanStatus === 'starting';
     const progressValue = scanProgress.total > 0 ? (scanProgress.completed / scanProgress.total) * 100 : 0;
 
@@ -38,7 +38,7 @@ export function CfScannerTab() {
             setSearchTerm("");
         }
     }, [scanStatus]);
-    
+
     const filteredAndSortedResults = useMemo(() => {
         const successfulResults = scanResults.filter(r => !r.error);
         const speedtestFiltered = onlySpeedtestResults ? successfulResults.filter(r => r.download_mbps > 0 || r.upload_mbps > 0) : successfulResults;
@@ -63,7 +63,7 @@ export function CfScannerTab() {
         setScanStatus('starting');
         setSearchTerm("");
         const toastId = toast.loading(isResuming ? "Resuming scan..." : "Starting new scan...");
-        
+
         if (!isResuming) {
             try { await api.clearCfScanHistory(); clearScanResults(); } catch { toast.warning("Could not clear previous history, continuing."); }
         }
@@ -77,15 +77,17 @@ export function CfScannerTab() {
             setScanStatus('idle');
         }
     };
-    
+
     const handleStopScan = async () => {
         setScanStatus('stopping');
         const toastId = toast.loading("Sending stop signal...");
-        try { 
-            await api.stopCfScan(); 
-        } catch { 
-            toast.error("Failed to send stop signal.", { id: toastId }); 
-            setScanStatus('running');
+        try {
+            await api.stopCfScan();
+            toast.success("Scanner has been stopped.", { id: toastId });
+            setScanStatus('idle');
+        } catch {
+            toast.error("Failed to send stop signal.", { id: toastId });
+            setScanStatus('running'); // Revert to running on API failure
         }
     };
 
@@ -106,7 +108,7 @@ export function CfScannerTab() {
                     <CardHeader>
                         <div className="flex flex-row gap-2 justify-between items-start">
                             <div className="flex flex-col"><CardTitle>Cloudflare Scanner</CardTitle><CardDescription>Find optimal IPs by scanning subnets.</CardDescription></div>
-                             <Dialog><DialogTrigger asChild><Button variant="ghost" size="icon" className="shrink-0"><RotateCcw className="size-4" /></Button></DialogTrigger>
+                            <Dialog><DialogTrigger asChild><Button variant="ghost" size="icon" className="shrink-0"><RotateCcw className="size-4" /></Button></DialogTrigger>
                                 <DialogContent><DialogHeader><DialogTitle>Reset Settings</DialogTitle><DialogDescription>Reset all scanner settings to defaults?</DialogDescription></DialogHeader>
                                     <DialogFooter><DialogClose asChild><Button variant="secondary">Cancel</Button></DialogClose><DialogClose asChild><Button variant="destructive" onClick={resetCfScannerSettings}>Reset</Button></DialogClose></DialogFooter>
                                 </DialogContent>

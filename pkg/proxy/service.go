@@ -303,7 +303,7 @@ func (s *Service) findAndStartWorkingConfig(
 	}()
 
 	testManager.RunTests(context.Background(), linksToTest, resultsChan, func() {
-
+		// This callback is for progress, which isn't used here, but is fine to keep.
 	})
 	close(resultsChan)
 	wg.Wait()
@@ -311,6 +311,7 @@ func (s *Service) findAndStartWorkingConfig(
 	sort.Sort(results)
 
 	for _, res := range results {
+		// This check is now safe because we know `res.Protocol` is non-nil if status is "passed".
 		if res.Status == "passed" && res.Protocol != nil && res.ConfigLink != lastUsedLink {
 			s.logf(customlog.Success, "Found working config: %s (Delay: %dms)\n", res.ConfigLink, res.Delay)
 			s.logf(customlog.Info, "==========OUTBOUND==========")
@@ -333,12 +334,41 @@ func (s *Service) findAndStartWorkingConfig(
 				continue
 			}
 			s.mu.Lock()
-			res.Protocol = res.Protocol // Ensure protocol field is set.
 			s.activeOutbound = res
 			s.mu.Unlock()
 			return instance, res, nil
 		}
 	}
+
+	// FIX #3: Provide a useful error message summarizing the failures.
+	errorSummary := make(map[string]int)
+	var brokenCount int
+	for _, res := range results {
+		if res.Status != "passed" {
+			if res.Reason != "" {
+				errorSummary[res.Reason]++
+			} else if res.Status == "broken" {
+				brokenCount++
+			}
+		}
+	}
+
+	var errorStrings []string
+	if brokenCount > 0 {
+		errorStrings = append(errorStrings, fmt.Sprintf("%d were broken (invalid link format)", brokenCount))
+	}
+	// To avoid overly long error messages, you might want to limit how many reasons are shown.
+	for reason, count := range errorSummary {
+		errorStrings = append(errorStrings, fmt.Sprintf("%d failed with: %s", count, reason))
+	}
+
+	if len(errorStrings) > 0 {
+		return nil, nil, fmt.Errorf(
+			"no new working configs found in batch. Error summary: %s",
+			strings.Join(errorStrings, "; "),
+		)
+	}
+
 	return nil, nil, errors.New("failed to find any new working outbound configuration in this batch")
 }
 

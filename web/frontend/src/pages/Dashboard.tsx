@@ -1,10 +1,8 @@
-// web/frontend/src/pages/Dashboard.tsx
-
 import { useState, useEffect, useRef } from "react";
 import { Toaster } from "@/components/ui/sonner";
-import { Terminal } from 'xterm';
-import { FitAddon } from 'xterm-addon-fit';
-import 'xterm/css/xterm.css';
+import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import '@xterm/xterm/css/xterm.css';
 import { toast } from "sonner";
 import { FaCloudflare } from "react-icons/fa";
 import { cn } from "@/lib/utils";
@@ -33,12 +31,12 @@ const navItems = [
 export default function Dashboard() {
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [activePage, setActivePage] = useState<Page>('proxy');
-    
-    const { 
-        proxyStatus, setProxyStatus, 
+
+    const {
+        proxyStatus, setProxyStatus,
         proxyDetails, setProxyDetails,
-        setScanStatus, setScanResults, 
-        setHttpResults, setHttpTestStatus 
+        setScanStatus, setScanResults,
+        setHttpResults, setHttpTestStatus
     } = useAppStore();
 
     const terminalRef = useRef<HTMLDivElement>(null);
@@ -46,21 +44,52 @@ export default function Dashboard() {
     const fitAddon = useRef<FitAddon | null>(null);
 
     useEffect(() => {
+        // This effect should only run once to initialize the terminal.
         if (terminalRef.current && !term.current) {
-            const terminal = new Terminal({ convertEol: true, cursorBlink: true, fontFamily: 'monospace', theme: { background: '#18181b', foreground: '#e4e4e7' } });
+            const terminal = new Terminal({
+                convertEol: true,
+                cursorBlink: true,
+                fontFamily: 'monospace',
+                theme: { background: '#18181b', foreground: '#e4e4e7' },
+                // Add some padding for better aesthetics
+                
+            });
             const addon = new FitAddon();
             terminal.loadAddon(addon);
             terminal.open(terminalRef.current);
+            
+            // Initial fit to set the size correctly on load
             addon.fit();
+
             term.current = terminal;
             fitAddon.current = addon;
+
             webSocketService.connect({ writeln: (text) => term.current?.writeln(text) });
-            const resizeHandler = () => fitAddon.current?.fit();
-            window.addEventListener('resize', resizeHandler);
-            return () => { 
-                window.removeEventListener('resize', resizeHandler); 
-                webSocketService.disconnect(); 
-                term.current?.dispose(); 
+
+            // Create a ResizeObserver to watch the terminal's container element
+            const resizeObserver = new ResizeObserver(() => {
+                // We use a small timeout to ensure the fit happens after any animations
+                // and to prevent rapid-fire calls during a resize drag.
+                setTimeout(() => {
+                    try {
+                        fitAddon.current?.fit();
+                    } catch (e) {
+                        // This can sometimes throw an error if the terminal is not visible.
+                        // We can safely ignore it.
+                        console.log("Fit addon failed to resize, probably hidden.", e);
+                    }
+                }, 10);
+            });
+
+            // Start observing the terminal's parent container
+            resizeObserver.observe(terminalRef.current);
+
+            // Cleanup function: This is crucial to prevent memory leaks
+            return () => {
+                resizeObserver.disconnect(); // Stop observing
+                webSocketService.disconnect();
+                term.current?.dispose();
+                term.current = null; // Clear the ref
             };
         }
     }, []);
@@ -69,19 +98,19 @@ export default function Dashboard() {
         const fetchInitialState = async () => {
             try {
                 const [scanStatusRes, scanHistoryRes, proxyStatusRes, httpHistoryRes, httpTestStatusRes] = await Promise.all([
-                    api.getCfScannerStatus(), 
-                    api.getCfScannerHistory(), 
+                    api.getCfScannerStatus(),
+                    api.getCfScannerHistory(),
                     api.getProxyStatus(),
                     api.getHttpTestHistory(),
                     api.getHttpTestStatus(),
                 ]);
 
-                if (scanStatusRes.data.is_scanning) { 
-                    setScanStatus('running'); 
-                    toast.info("A scan is already in progress."); 
+                if (scanStatusRes.data.is_scanning) {
+                    setScanStatus('running');
+                    toast.info("A scan is already in progress.");
                 }
                 if (scanHistoryRes.data && Array.isArray(scanHistoryRes.data)) setScanResults(scanHistoryRes.data);
-                
+
                 if (proxyStatusRes.data.status) {
                     const status = proxyStatusRes.data.status as ProxyStatus;
                     setProxyStatus(status);
@@ -91,7 +120,7 @@ export default function Dashboard() {
                         toast.info("Proxy service is running.");
                     }
                 }
-                
+
                 if (httpTestStatusRes.data.status && httpTestStatusRes.data.status !== 'idle') {
                     setHttpTestStatus(httpTestStatusRes.data.status as any);
                     toast.info("An HTTP test is already in progress.");
@@ -99,16 +128,16 @@ export default function Dashboard() {
                 if (httpHistoryRes.data && Array.isArray(httpHistoryRes.data)) {
                     setHttpResults(httpHistoryRes.data);
                 }
-            } catch (error) { 
-                toast.error("Could not fetch initial server state."); 
+            } catch (error) {
+                toast.error("Could not fetch initial server state.");
             }
         };
         fetchInitialState();
     }, [setProxyStatus, setProxyDetails, setScanStatus, setScanResults, setHttpResults, setHttpTestStatus]);
 
-    useEffect(() => { 
-        const timer = setTimeout(() => fitAddon.current?.fit(), 100); 
-        return () => clearTimeout(timer); 
+    useEffect(() => {
+        const timer = setTimeout(() => fitAddon.current?.fit(), 100);
+        return () => clearTimeout(timer);
     }, [activePage, isSidebarCollapsed]);
 
     const getProxyStatusColor = (status: ProxyStatus) => {
@@ -120,13 +149,16 @@ export default function Dashboard() {
     const clearLogs = () => term.current?.clear();
     const currentPageInfo = navItems.find(item => item.id === activePage);
 
+    // LAYOUT FIX: Applying the flexbox scrolling child pattern to the Card.
     const logsCard = (
-        <Card>
+        <Card className="flex flex-col">
             <CardHeader className="flex-row items-center justify-between">
                 <div className="flex-col gap-1.5"><CardTitle>Live Logs</CardTitle><CardDescription>Real-time output from the backend.</CardDescription></div>
                 <Button variant="outline" size="sm" onClick={clearLogs}><TerminalSquare className="mr-2 h-4 w-4" />Clear</Button>
             </CardHeader>
-            <CardContent><div ref={terminalRef} className="h-64 sm:h-[400px] w-full rounded-md border bg-muted/20 overflow-hidden" /></CardContent>
+            <CardContent className="flex-1 min-h-0">
+                <div ref={terminalRef} className="h-full w-full rounded-md border bg-muted/20 overflow-hidden" />
+            </CardContent>
         </Card>
     );
 
@@ -134,9 +166,12 @@ export default function Dashboard() {
         if (activePage === 'proxy') {
             return (
                 <div className="grid items-start gap-4 lg:grid-cols-5 lg:gap-8">
-                    <div className="grid auto-rows-max items-start gap-4 lg:col-span-2"><ProxyTab /></div>
+                    <div className="grid auto-rows-max items-start gap-4 lg:col-span-2">
+                        <ProxyTab />
+                    </div>
                     <div className="grid auto-rows-max items-start gap-4 lg:col-span-3">
                         <ProxyStatusCard details={proxyDetails} />
+                        {/* No changes needed here, the fix is in the `logsCard` component itself */}
                         <div className={cn(proxyDetails === null && 'hidden')} >{logsCard}</div>
                     </div>
                 </div>
@@ -153,7 +188,6 @@ export default function Dashboard() {
     return (
         <>
             <Toaster position="top-right" />
-            {/* FIX 1: Restore `h-screen` to make the main grid container fill the viewport height. */}
             <div className={cn("grid h-screen w-full transition-[grid-template-columns]", isSidebarCollapsed ? "md:grid-cols-[68px_1fr]" : "md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]")}>
                 <div className="hidden border-r bg-muted/40 md:block">
                     <div className="flex h-full max-h-screen flex-col">
@@ -165,8 +199,8 @@ export default function Dashboard() {
                         <div className="flex-1 overflow-auto"><nav className={cn("grid items-start gap-1 mt-2", isSidebarCollapsed ? "px-2" : "px-2 lg:px-4")}>{navItems.map(item => (<Button key={item.id} variant={activePage === item.id ? "default" : "ghost"} className={cn("w-full gap-2", isSidebarCollapsed ? "justify-center" : "justify-start")} onClick={() => setActivePage(item.id)}><item.icon className="h-4 w-4" /><span className={cn(isSidebarCollapsed && "sr-only")}>{item.label}</span></Button>))}</nav></div>
                     </div>
                 </div>
-                {/* FIX 2: Add `overflow-hidden` to this column. This prevents the header/main content from overflowing the grid cell, forcing the inner scroll to activate. */}
-                <div className="flex flex-col overflow-hidden">
+                {/* No changes needed here, the fixes above handle the layout */}
+                <div className="flex flex-col overflow-hidden min-w-0">
                     <header className="flex h-14 items-center gap-4 border-b bg-muted/40 px-4 lg:h-[60px] lg:px-6">
                         <Sheet><SheetTrigger asChild><Button variant="outline" size="icon" className="shrink-0 md:hidden"><Menu className="h-5 w-5" /><span className="sr-only">Toggle menu</span></Button></SheetTrigger>
                             <SheetContent side="left" className="flex flex-col">
@@ -176,8 +210,7 @@ export default function Dashboard() {
                         <div className="w-full flex-1"><Breadcrumb><BreadcrumbList><BreadcrumbItem><BreadcrumbLink href="/">Home</BreadcrumbLink></BreadcrumbItem><BreadcrumbSeparator /><BreadcrumbItem><BreadcrumbPage>{currentPageInfo?.label}</BreadcrumbPage></BreadcrumbItem></BreadcrumbList></Breadcrumb></div>
                         <Badge className={cn("capitalize", getProxyStatusColor(proxyStatus))}>Proxy: {proxyStatus}</Badge>
                     </header>
-                    {/* FIX 3: `flex-1` makes the main content area grow, and `overflow-auto` makes IT scrollable, not the whole page. */}
-                    <main className="flex-1 overflow-auto p-4 lg:p-6">
+                    <main className="flex-1 overflow-auto p-4 lg:p-6 min-w-0">
                         <div className="mx-auto w-full max-w-screen-2xl">
                             {renderPageLayout()}
                         </div>

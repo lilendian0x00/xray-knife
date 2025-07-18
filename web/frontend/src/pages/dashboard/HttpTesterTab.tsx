@@ -1,5 +1,4 @@
-import { useState, useMemo } from "react";
-import { useAutoAnimate } from '@formkit/auto-animate/react';
+import { useState, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -18,10 +17,12 @@ import { useAppStore } from "@/stores/appStore";
 import { api } from "@/services/api";
 import { type HttpResult } from "@/types/dashboard";
 import { Progress } from "@/components/ui/progress";
+import { useVirtualizer } from '@tanstack/react-virtual';
 
 export function HttpTesterTab() {
     const { httpSettings, updateHttpSettings, resetHttpSettings, httpResults, clearHttpResults, httpTestStatus, setHttpTestStatus, httpTestProgress } = useAppStore();
-    const [animationParent] = useAutoAnimate<HTMLTableSectionElement>();
+    // REMOVED: No longer using useAutoAnimate.
+    // const [animationParent] = useAutoAnimate<HTMLTableSectionElement>();
     const [httpTestConfigs, setHttpTestConfigs] = useState('');
 
     const sortedResults = useMemo(() => {
@@ -34,6 +35,15 @@ export function HttpTesterTab() {
 
     const isBusy = httpTestStatus === 'running' || httpTestStatus === 'stopping' || httpTestStatus === 'starting';
     const progressValue = httpTestProgress.total > 0 ? (httpTestProgress.completed / httpTestProgress.total) * 100 : 0;
+
+    // ADDED: Logic for the virtualizer.
+    const parentRef = useRef<HTMLDivElement>(null);
+    const rowVirtualizer = useVirtualizer({
+        count: sortedResults.length,
+        getScrollElement: () => parentRef.current,
+        estimateSize: () => 65, // Estimate the height of a single row in pixels.
+        overscan: 5, // Render 5 extra items above and below the visible area.
+    });
 
     const handleRunHttpTest = async () => {
         if (!httpTestConfigs.trim()) { toast.error("HTTP Test configurations cannot be empty."); return; }
@@ -55,10 +65,9 @@ export function HttpTesterTab() {
         setHttpTestStatus('stopping');
         try {
             await api.stopHttpTest();
-            // Status will be set to idle by WebSocket
         } catch (error) {
             toast.error("Failed to stop the test.");
-            setHttpTestStatus('running'); // Revert if stop fails
+            setHttpTestStatus('running');
         }
     };
 
@@ -146,7 +155,7 @@ export function HttpTesterTab() {
                                     </DialogContent>
                                 </Dialog>
                             </div>
-                             <AnimatePresence>
+                            <AnimatePresence>
                                 {httpTestStatus === 'running' && (
                                     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-2 pt-4">
                                         <div className="flex justify-between text-sm text-muted-foreground">
@@ -164,6 +173,7 @@ export function HttpTesterTab() {
             <div className="lg:col-span-3">
                 <Card>
                     <CardHeader>
+                        {/* ... CardHeader remains the same ... */}
                         <div className="flex flex-wrap items-center justify-between gap-4">
                             <div className="flex flex-col gap-1.5"><CardTitle>Test Results</CardTitle><CardDescription>Showing {httpResults.length} results. Sorted by delay.</CardDescription></div>
                             <Dialog>
@@ -176,10 +186,57 @@ export function HttpTesterTab() {
                         </div>
                     </CardHeader>
                     <CardContent>
-                        <div className="border rounded-md max-h-[600px] lg:min-h-[374px] overflow-auto">
-                            <Table><TableHeader className="sticky top-0 bg-muted/95 backdrop-blur-sm"><TableRow><TableHead className="w-[100px]">Status</TableHead><TableHead>Delay</TableHead><TableHead>Download</TableHead><TableHead>Upload</TableHead><TableHead>Location</TableHead><TableHead>Link</TableHead></TableRow></TableHeader>
-                                <TableBody ref={animationParent}>
-                                    {sortedResults.length > 0 ? (sortedResults.map((result, index) => (<TableRow key={`${result.link}-${index}`}><TableCell><Badge variant={getStatusBadgeVariant(result.status)} className="capitalize">{result.status}</Badge></TableCell><TableCell>{result.status === 'passed' ? `${result.delay}ms` : '-'}</TableCell><TableCell>{result.download > 0 ? `${result.download.toFixed(2)} Mbps` : '-'}</TableCell><TableCell>{result.upload > 0 ? `${result.upload.toFixed(2)} Mbps` : '-'}</TableCell><TableCell>{result.location !== 'null' ? result.location : 'N/A'}</TableCell><TableCell className="font-mono text-xs"><div className="flex items-center justify-between gap-2 max-w-sm"><span className="truncate">{result.link}</span><Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => handleCopyLink(result.link)}><ClipboardCopy className="h-4 w-4" /></Button></div></TableCell></TableRow>))) : (<TableRow><TableCell colSpan={6} className="h-24 text-center text-muted-foreground">{isBusy ? "Testing..." : "No results yet. Run a test to see results."}</TableCell></TableRow>)}
+                        <div ref={parentRef} className="border rounded-md max-h-[600px] lg:min-h-[374px] overflow-auto">
+                            <Table className="table-fixed">
+                                <TableHeader className="sticky top-0 bg-muted/95 backdrop-blur-sm z-10">
+                                    <TableRow>
+                                        <TableHead className="w-[100px]">Status</TableHead>
+                                        <TableHead>Delay</TableHead>
+                                        <TableHead>Download</TableHead>
+                                        <TableHead>Upload</TableHead>
+                                        <TableHead>Location</TableHead>
+                                        <TableHead>Link</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: 'relative' }}>
+                                    {sortedResults.length > 0 ? (
+                                        rowVirtualizer.getVirtualItems().map((virtualItem) => {
+                                            const result = sortedResults[virtualItem.index];
+                                            return (
+                                                <TableRow
+                                                    key={virtualItem.key}
+                                                    style={{
+                                                        position: 'absolute',
+                                                        top: 0,
+                                                        left: 0,
+                                                        width: '100%',
+                                                        height: `${virtualItem.size}px`,
+                                                        transform: `translateY(${virtualItem.start}px)`,
+                                                    }}
+                                                >
+                                                    <TableCell><Badge variant={getStatusBadgeVariant(result.status)} className="capitalize">{result.status}</Badge></TableCell>
+                                                    <TableCell>{result.status === 'passed' ? `${result.delay}ms` : '-'}</TableCell>
+                                                    <TableCell>{result.download > 0 ? `${result.download.toFixed(2)} Mbps` : '-'}</TableCell>
+                                                    <TableCell>{result.upload > 0 ? `${result.upload.toFixed(2)} Mbps` : '-'}</TableCell>
+                                                    <TableCell>{result.location !== 'null' ? result.location : 'N/A'}</TableCell>
+                                                    <TableCell className="font-mono text-xs">
+                                                        <div className="flex items-center justify-between gap-2 max-w-sm">
+                                                            <span className="truncate">{result.link}</span>
+                                                            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => handleCopyLink(result.link)}>
+                                                                <ClipboardCopy className="h-4 w-4" />
+                                                            </Button>
+                                                        </div>
+                                                    </TableCell>
+                                                </TableRow>
+                                            );
+                                        })
+                                    ) : (
+                                        <TableRow>
+                                            <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                                                {isBusy ? "Testing..." : "No results yet. Run a test to see results."}
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
                                 </TableBody>
                             </Table>
                         </div>
