@@ -67,15 +67,23 @@ class WebSocketService {
                     this.term?.writeln(message.data);
                     break;
                 
-                // --- FIX: HANDLE PROXY STATUS UPDATES ---
-                case 'proxy_status':
+                case 'proxy_status': {
                     const proxyStatus = message.data as ProxyStatus;
+                    const wasStopping = useAppStore.getState().proxyStatus === 'stopping';
+
                     setProxyStatus(proxyStatus);
+
                     if (proxyStatus === 'stopped') {
-                        setProxyDetails(null); // Clear details card when proxy stops
+                        setProxyDetails(null); 
+                        // Check for an error message and show a specific toast
+                        if (message.error) {
+                            toast.error("Proxy stopped due to an error.", { description: message.error });
+                        } else if (wasStopping) {
+                            // Suppress success toast if user manually stopped it, as the button already shows feedback
+                        }
                     }
                     break;
-                // --- END FIX ---
+                }
                 
                 case 'proxy_details':
                     setProxyDetails(message.data as ProxyDetails);

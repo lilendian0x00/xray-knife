@@ -13,15 +13,17 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      // Proxy API requests to the Go backend
+      // Any request starting with '/api' will be forwarded to the Go backend.
+      // Example: A request to '/api/v1/proxy/start' from the frontend
+      // will be sent to 'http://127.0.0.1:8080/api/v1/proxy/start'.
       '/api': {
-        target: 'http://127.0.0.1:8080', // Default address of the Go backend
-        changeOrigin: true, // Recommended for virtual hosts
+        target: 'http://127.0.0.1:8080', // The address of your Go backend.
+        changeOrigin: true, // Recommended for virtual hosts and proper proxying.
       },
-      // Proxy WebSocket connections for live logs
+      // Any WebSocket connection attempt to '/ws' will be forwarded.
       '/ws': {
-        target: 'ws://127.0.0.1:8080', // WebSocket endpoint
-        ws: true, // Enable WebSocket proxying
+        target: 'ws://127.0.0.1:8080', // The WebSocket endpoint of your Go backend.
+        ws: true, // This enables WebSocket proxying.
       },
     },
   },

@@ -94,29 +94,22 @@ func (s *BaseService) Stop() error {
 	}
 	s.mu.Unlock()
 
-	s.wg.Wait() // Wait for the goroutine to fully exit
+	s.wg.Wait()
 	s.logger.Printf("[%s] Service stopped successfully.", strings.ToUpper(s.serviceType))
 
-	// After waiting, broadcast the final "stopped" or "idle" state.
 	var messageType, finalState string
-	switch s.serviceType {
+	switch s.serviceType { // stopped = idle in frontend
 	case "proxy":
-		messageType = "proxy_status"
-		finalState = "stopped"
+		messageType, finalState = "proxy_status", "stopped"
 	case "http-tester":
-		messageType = "http_test_status"
-		finalState = "stopped" // The frontend will interpret this as 'idle'
+		messageType, finalState = "http_test_status", "stopped"
 	case "cf-scanner":
-		messageType = "cfscan_status"
-		finalState = "stopped" // The frontend will interpret this as 'idle'
+		messageType, finalState = "cfscan_status", "stopped"
 	default:
-		return nil // Don't broadcast for unknown types
+		return nil
 	}
 
-	payload, err := json.Marshal(map[string]interface{}{
-		"type": messageType,
-		"data": finalState,
-	})
+	payload, err := json.Marshal(map[string]interface{}{"type": messageType, "data": finalState})
 	if err == nil {
 		s.hub.Broadcast(payload)
 	}
@@ -192,11 +185,10 @@ func (p *ProxyServiceRunner) Start(config interface{}) error {
 		return fmt.Errorf("invalid config type for proxy service")
 	}
 
-	// FIX: Directly set the state instead of calling SetState to avoid deadlock.
 	p.state = StateStarting
 	service, err := proxy.New(cfg, p.logger)
 	if err != nil {
-		p.state = StateError // Also update state directly on error
+		p.state = StateError
 		return fmt.Errorf("failed to create proxy service: %w", err)
 	}
 
@@ -214,11 +206,24 @@ func (p *ProxyServiceRunner) Start(config interface{}) error {
 func (p *ProxyServiceRunner) run(ctx context.Context) {
 	defer p.recoverAndLogPanic()
 	defer p.wg.Done()
-	defer p.SetState(StateIdle) // Final state
+	defer p.SetState(StateIdle)
 
+	// Immediately set state to running and notify UI.
 	p.SetState(StateRunning)
+	statusMsgRunning, _ := json.Marshal(map[string]interface{}{"type": "proxy_status", "data": "running"})
+	p.hub.Broadcast(statusMsgRunning)
+
+	// This is the blocking call.
 	if err := p.service.Run(ctx, p.forceRotate); err != nil {
 		p.logger.Printf("Proxy service exited with error: %v", err)
+
+		// Inform the frontend of the failure
+		statusMsgStopped, _ := json.Marshal(map[string]interface{}{
+			"type":  "proxy_status",
+			"data":  "stopped",
+			"error": err.Error(), // err msg
+		})
+		p.hub.Broadcast(statusMsgStopped)
 	}
 }
 

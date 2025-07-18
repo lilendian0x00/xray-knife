@@ -1,3 +1,5 @@
+// web/frontend/src/pages/Dashboard.tsx
+
 import { useState, useEffect, useRef } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { Terminal } from 'xterm';
@@ -151,6 +153,7 @@ export default function Dashboard() {
     return (
         <>
             <Toaster position="top-right" />
+            {/* FIX 1: Restore `h-screen` to make the main grid container fill the viewport height. */}
             <div className={cn("grid h-screen w-full transition-[grid-template-columns]", isSidebarCollapsed ? "md:grid-cols-[68px_1fr]" : "md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]")}>
                 <div className="hidden border-r bg-muted/40 md:block">
                     <div className="flex h-full max-h-screen flex-col">
@@ -162,7 +165,8 @@ export default function Dashboard() {
                         <div className="flex-1 overflow-auto"><nav className={cn("grid items-start gap-1 mt-2", isSidebarCollapsed ? "px-2" : "px-2 lg:px-4")}>{navItems.map(item => (<Button key={item.id} variant={activePage === item.id ? "default" : "ghost"} className={cn("w-full gap-2", isSidebarCollapsed ? "justify-center" : "justify-start")} onClick={() => setActivePage(item.id)}><item.icon className="h-4 w-4" /><span className={cn(isSidebarCollapsed && "sr-only")}>{item.label}</span></Button>))}</nav></div>
                     </div>
                 </div>
-                <div className="flex flex-col">
+                {/* FIX 2: Add `overflow-hidden` to this column. This prevents the header/main content from overflowing the grid cell, forcing the inner scroll to activate. */}
+                <div className="flex flex-col overflow-hidden">
                     <header className="flex h-14 items-center gap-4 border-b bg-muted/40 px-4 lg:h-[60px] lg:px-6">
                         <Sheet><SheetTrigger asChild><Button variant="outline" size="icon" className="shrink-0 md:hidden"><Menu className="h-5 w-5" /><span className="sr-only">Toggle menu</span></Button></SheetTrigger>
                             <SheetContent side="left" className="flex flex-col">
@@ -172,7 +176,12 @@ export default function Dashboard() {
                         <div className="w-full flex-1"><Breadcrumb><BreadcrumbList><BreadcrumbItem><BreadcrumbLink href="/">Home</BreadcrumbLink></BreadcrumbItem><BreadcrumbSeparator /><BreadcrumbItem><BreadcrumbPage>{currentPageInfo?.label}</BreadcrumbPage></BreadcrumbItem></BreadcrumbList></Breadcrumb></div>
                         <Badge className={cn("capitalize", getProxyStatusColor(proxyStatus))}>Proxy: {proxyStatus}</Badge>
                     </header>
-                    <main className="flex-1 overflow-auto p-4 lg:p-6"><div className="mx-auto w-full max-w-screen-2xl">{renderPageLayout()}</div></main>
+                    {/* FIX 3: `flex-1` makes the main content area grow, and `overflow-auto` makes IT scrollable, not the whole page. */}
+                    <main className="flex-1 overflow-auto p-4 lg:p-6">
+                        <div className="mx-auto w-full max-w-screen-2xl">
+                            {renderPageLayout()}
+                        </div>
+                    </main>
                 </div>
             </div>
         </>
