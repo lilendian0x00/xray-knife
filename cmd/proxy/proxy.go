@@ -7,8 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	pkgproxy "github.com/lilendian0x00/xray-knife/v5/pkg/proxy"
-	"github.com/lilendian0x00/xray-knife/v5/utils/customlog"
+	pkgproxy "github.com/lilendian0x00/xray-knife/v6/pkg/proxy"
+	"github.com/lilendian0x00/xray-knife/v6/utils/customlog"
 
 	"github.com/spf13/cobra"
 )

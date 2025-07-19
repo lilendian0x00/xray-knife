@@ -2,9 +2,9 @@ package webui
 
 import (
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/v5/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v6/utils/customlog"
 
-	"github.com/lilendian0x00/xray-knife/v5/web"
+	"github.com/lilendian0x00/xray-knife/v6/web"
 	"github.com/spf13/cobra"
 )
 

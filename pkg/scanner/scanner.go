@@ -20,9 +20,9 @@ import (
 
 	"github.com/alitto/pond/v2"
 	"github.com/gocarina/gocsv"
-	"github.com/lilendian0x00/xray-knife/v5/pkg/core"
-	"github.com/lilendian0x00/xray-knife/v5/pkg/core/protocol"
-	"github.com/lilendian0x00/xray-knife/v5/utils"
+	"github.com/lilendian0x00/xray-knife/v6/pkg/core"
+	"github.com/lilendian0x00/xray-knife/v6/pkg/core/protocol"
+	"github.com/lilendian0x00/xray-knife/v6/utils"
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/http2"
 )

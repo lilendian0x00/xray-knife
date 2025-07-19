@@ -3,7 +3,7 @@ package singbox
 import (
 	"context"
 
-	"github.com/lilendian0x00/xray-knife/v5/pkg/core/protocol"
+	"github.com/lilendian0x00/xray-knife/v6/pkg/core/protocol"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"

@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lilendian0x00/xray-knife/v5/utils"
-	"github.com/lilendian0x00/xray-knife/v5/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v6/utils"
+	"github.com/lilendian0x00/xray-knife/v6/utils/customlog"
 
 	"github.com/spf13/cobra"
 )
@@ -64,7 +64,7 @@ func (fc *FetchCommand) runCommand(cmd *cobra.Command, args []string) error {
 		UserAgent:   fc.config.UserAgent,
 		Method:      fc.config.HTTPMethod,
 		ConfigLinks: []string{},
-		Proxy: fc.config.Proxy,
+		Proxy:       fc.config.Proxy,
 	}
 
 	if sub.Url == "" {
@@ -90,6 +90,6 @@ func (fc *FetchCommand) runCommand(cmd *cobra.Command, args []string) error {
 
 // saveConfigs saves the fetched configurations to a file
 func (fc *FetchCommand) saveConfigs(configs []string) error {
-	content := strings.Join(configs, "\n")+"\n"
+	content := strings.Join(configs, "\n") + "\n"
 	return utils.WriteIntoFile(fc.config.OutputFile, []byte(content))
 }

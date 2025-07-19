@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/lilendian0x00/xray-knife/v5/pkg/core/protocol"
+	"github.com/lilendian0x00/xray-knife/v6/pkg/core/protocol"
 )
 
 func (c *Core) CreateProtocol(configLink string) (protocol.Protocol, error) {

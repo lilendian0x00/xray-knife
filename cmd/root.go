@@ -1,15 +1,15 @@
 package cmd
 
 import (
-	"github.com/lilendian0x00/xray-knife/v5/cmd/http"
-	"github.com/lilendian0x00/xray-knife/v5/cmd/scanner"
-	"github.com/lilendian0x00/xray-knife/v5/cmd/webui"
+	"github.com/lilendian0x00/xray-knife/v6/cmd/http"
+	"github.com/lilendian0x00/xray-knife/v6/cmd/scanner"
+	"github.com/lilendian0x00/xray-knife/v6/cmd/webui"
 	"os"
 
-	"github.com/lilendian0x00/xray-knife/v5/cmd/net"
-	"github.com/lilendian0x00/xray-knife/v5/cmd/parse"
-	"github.com/lilendian0x00/xray-knife/v5/cmd/proxy"
-	"github.com/lilendian0x00/xray-knife/v5/cmd/subs"
+	"github.com/lilendian0x00/xray-knife/v6/cmd/net"
+	"github.com/lilendian0x00/xray-knife/v6/cmd/parse"
+	"github.com/lilendian0x00/xray-knife/v6/cmd/proxy"
+	"github.com/lilendian0x00/xray-knife/v6/cmd/subs"
 
 	"github.com/spf13/cobra"
 )
@@ -18,7 +18,7 @@ import (
 var rootCmd = &cobra.Command{
 	Use:     "xray-knife",
 	Short:   "Swiss Army Knife for xray-core & sing-box",
-	Version: "6.2.5",
+	Version: "6.2.6",
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.

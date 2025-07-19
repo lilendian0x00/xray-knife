@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lilendian0x00/xray-knife/v5/pkg/core/protocol"
-	"github.com/lilendian0x00/xray-knife/v5/utils"
+	"github.com/lilendian0x00/xray-knife/v6/pkg/core/protocol"
+	"github.com/lilendian0x00/xray-knife/v6/utils"
 
 	"github.com/fatih/color"
 	"github.com/xtls/xray-core/infra/conf"

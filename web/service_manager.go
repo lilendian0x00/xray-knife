@@ -6,9 +6,9 @@ import (
 	"log"
 	"time"
 
-	pkghttp "github.com/lilendian0x00/xray-knife/v5/pkg/http"
-	"github.com/lilendian0x00/xray-knife/v5/pkg/proxy"
-	"github.com/lilendian0x00/xray-knife/v5/pkg/scanner"
+	pkghttp "github.com/lilendian0x00/xray-knife/v6/pkg/http"
+	"github.com/lilendian0x00/xray-knife/v6/pkg/proxy"
+	"github.com/lilendian0x00/xray-knife/v6/pkg/scanner"
 )
 
 const cfScannerHistoryFile = "results.csv"

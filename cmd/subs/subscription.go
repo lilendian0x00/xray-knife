@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/lilendian0x00/xray-knife/v5/utils"
-	"github.com/lilendian0x00/xray-knife/v5/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v6/utils"
+	"github.com/lilendian0x00/xray-knife/v6/utils/customlog"
 
 	"github.com/imroc/req/v3"
 )
@@ -19,7 +19,7 @@ type Subscription struct {
 	UserAgent   string
 	Method      string
 	ConfigLinks []string
-	Proxy string
+	Proxy       string
 }
 
 func (s *Subscription) FetchAll() ([]string, error) {

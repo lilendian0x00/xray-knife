@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	pkgscanner "github.com/lilendian0x00/xray-knife/v5/pkg/scanner"
-	"github.com/lilendian0x00/xray-knife/v5/utils"
-	"github.com/lilendian0x00/xray-knife/v5/utils/customlog"
+	pkgscanner "github.com/lilendian0x00/xray-knife/v6/pkg/scanner"
+	"github.com/lilendian0x00/xray-knife/v6/utils"
+	"github.com/lilendian0x00/xray-knife/v6/utils/customlog"
 	"github.com/spf13/cobra"
 )
 

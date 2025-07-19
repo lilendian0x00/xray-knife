@@ -13,10 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	pkghttp "github.com/lilendian0x00/xray-knife/v5/pkg/http"
-	"github.com/lilendian0x00/xray-knife/v5/pkg/proxy"
-	"github.com/lilendian0x00/xray-knife/v5/pkg/scanner"
-	"github.com/lilendian0x00/xray-knife/v5/utils"
+	pkghttp "github.com/lilendian0x00/xray-knife/v6/pkg/http"
+	"github.com/lilendian0x00/xray-knife/v6/pkg/proxy"
+	"github.com/lilendian0x00/xray-knife/v6/pkg/scanner"
+	"github.com/lilendian0x00/xray-knife/v6/utils"
 )
 
 // ServiceState represents the lifecycle state of a managed service.

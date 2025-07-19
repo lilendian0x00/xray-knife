@@ -4,7 +4,7 @@
 
 **The Ultimate Swiss Army Knife for Xray and Sing-box**
 
-A powerful command-line utility designed for testing, managing, and utilizing proxy configurations with dual-core support for both `xray-core` and `sing-box`.
+A powerful command-line utility and web UI designed for testing, managing, and utilizing proxy configurations with dual-core support for both `xray-core` and `sing-box`.
 
 </div>
 
@@ -20,6 +20,8 @@ A powerful command-line utility designed for testing, managing, and utilizing pr
 `xray-knife` is a versatile multi-tool that streamlines the process of working with proxy configurations. Whether you need to test a list of servers for latency and speed, run a local proxy that automatically rotates to the fastest outbound, or scan for optimal edge IPs, `xray-knife` provides a robust and efficient solution.
 
 ## ✨ Key Features
+
+- **🖥️ Modern Web UI**: Manage all features—proxy, testing, and scanning—through an intuitive, browser-based graphical interface with real-time logs and results.
 
 - **🚀 Dual-Core Engine**: Seamlessly works with both `xray-core` and `sing-box`, automatically selecting the right core for each configuration type (VLESS, VMess, Trojan, Shadowsocks, Hysteria2, WireGuard, etc.).
 
@@ -54,7 +56,7 @@ chmod +x xray-knife
 
 If you have Go installed, you can build and install `xray-knife` with a single command:
 ```bash
-go install github.com/lilendian0x00/xray-knife/v5@latest
+go install github.com/lilendian0x00/xray-knife/v6@latest
 ```
 
 ## 🛠️ Usage
@@ -63,6 +65,25 @@ go install github.com/lilendian0x00/xray-knife/v5@latest
 `xray-knife [command] [flags]`
 
 Here are some practical examples for the main commands.
+
+---
+
+### 🖥️ Using the Web UI (`webui`)
+
+Launch a local web server to access all of `xray-knife`'s features through a modern, graphical user interface.
+
+**1. Start the Web UI Server**
+Run the following command to start the server. By default, it will be accessible at `http://127.0.0.1:8080`.
+```bash
+xray-knife webui
+```
+You can then open the URL in your browser to manage the proxy, run tests, and view results in real-time.
+
+**2. Run on a different address or port**
+Use flags to change the listen address and port, for example, to make it accessible on your local network.
+```bash
+xray-knife webui --addr 0.0.0.0 --port 9090
+```
 
 ---
 
@@ -93,7 +114,7 @@ Start a local SOCKS5 proxy on port `9999`. It will test configs from `configs.tx
 ```bash
 xray-knife proxy -f configs.txt --port 9999 --rotate 300
 ```
-> **Pro Tip:** While the proxy is running, simply press `Enter` to force an immediate rotation to the next available fast configuration.
+> **Pro Tip:** While the proxy is running, simply press `Enter` in the terminal to force an immediate rotation to the next available fast configuration.
 
 **2. Use a Single, Static Config**
 Run the proxy using just one configuration link without rotation.
