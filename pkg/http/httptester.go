@@ -1,4 +1,3 @@
-// pkg/http/httptester.go
 package http
 
 import (

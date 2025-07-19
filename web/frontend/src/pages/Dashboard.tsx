@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Toaster } from "@/components/ui/sonner";
+import { motion, AnimatePresence } from 'framer-motion';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
@@ -48,78 +49,54 @@ export default function Dashboard() {
     const [logSearchTerm, setLogSearchTerm] = useState('');
     const [isAutoScroll, setIsAutoScroll] = useState(true);
 
-    // --- Terminal and WebSocket Initialization ---
+    // --- Terminal Lifecycle & WebSocket Connection ---
     useEffect(() => {
-        if (terminalRef.current && !term.current) {
+        if (terminalRef.current) {
             const terminal = new Terminal({
                 convertEol: true,
                 cursorBlink: true,
                 fontFamily: 'monospace',
                 fontSize: 13,
-                // FIX: Set the initial theme directly during creation
-                theme: theme === 'dark' 
-                    ? { background: '#18181b', foreground: '#e4e4e7' } 
+                theme: theme === 'dark'
+                    ? { background: '#18181b', foreground: '#e4e4e7' }
                     : { background: '#FFFFFF', foreground: '#09090b' },
             });
             const addon = new FitAddon();
             terminal.loadAddon(addon);
             terminal.open(terminalRef.current);
-            
-            // FIX: Delay the initial fit() call to prevent race condition
             setTimeout(() => addon.fit(), 1);
 
             term.current = terminal;
             fitAddon.current = addon;
 
-            webSocketService.connect();
-
-            const logListener = (text: string) => {
-                if (logSearchTerm && !text.toLowerCase().includes(logSearchTerm.toLowerCase())) {
-                    return;
-                }
-                term.current?.writeln(text);
-                if (isAutoScroll) {
-                    term.current?.scrollToBottom();
-                }
-            };
-
-            webSocketService.on('log', logListener);
-            
             const resizeObserver = new ResizeObserver(() => {
-                setTimeout(() => fitAddon.current?.fit(), 10);
+                setTimeout(() => fitAddon.current?.fit(), 1);
             });
             resizeObserver.observe(terminalRef.current);
 
+            // Cleanup function for this specific instance
             return () => {
                 resizeObserver.disconnect();
-                webSocketService.off('log', logListener);
-                term.current?.dispose();
+                terminal.dispose();
                 term.current = null;
             };
         }
-    }, []); // This effect should only run ONCE
+    }, [activePage, theme, isSidebarCollapsed]); // Re-create terminal on layout-affecting changes
 
-    // --- Theme Update Effect ---
     useEffect(() => {
-        // This effect handles THEME CHANGES after the terminal is initialized.
-        if (term.current) {
-            // FIX: Use the correct API to set the theme option
-            term.current.options.theme = theme === 'dark' 
-                ? { background: '#18181b', foreground: '#e4e4e7' } 
-                : { background: '#FFFFFF', foreground: '#09090b' };
-        }
-    }, [theme]);
-    
-    // --- Log Filtering Effect ---
-    useEffect(() => {
-        // This effect re-binds the log listener when the filter term changes.
+        // This effect manages the WebSocket connection and the SINGLE log listener.
+        // It prevents duplicate logs.
+        webSocketService.connect();
+
         const logListener = (text: string) => {
             if (logSearchTerm && !text.toLowerCase().includes(logSearchTerm.toLowerCase())) {
                 return;
             }
-            term.current?.writeln(text);
-            if (isAutoScroll) {
-                term.current?.scrollToBottom();
+            if (term.current) { // Check if terminal instance exists before writing
+                term.current.writeln(text);
+                if (isAutoScroll) {
+                    term.current.scrollToBottom();
+                }
             }
         };
 
@@ -128,8 +105,9 @@ export default function Dashboard() {
         return () => {
             webSocketService.off('log', logListener);
         };
-    }, [logSearchTerm, isAutoScroll]);
+    }, [logSearchTerm, isAutoScroll]); // Re-attach listener only when filter/scroll settings change
 
+    
     // --- Initial State Fetching ---
     useEffect(() => {
         const fetchInitialState = async () => {
@@ -172,12 +150,6 @@ export default function Dashboard() {
         fetchInitialState();
     }, [setProxyStatus, setProxyDetails, setScanStatus, setScanResults, setHttpResults, setHttpTestStatus]);
 
-    // --- Terminal resizing effect ---
-    useEffect(() => {
-        const timer = setTimeout(() => fitAddon.current?.fit(), 100);
-        return () => clearTimeout(timer);
-    }, [activePage, isSidebarCollapsed]);
-
     const getProxyStatusColor = (status: ProxyStatus) => {
         if (status === 'running') return 'bg-green-500 text-primary-foreground';
         if (status === 'stopped') return 'bg-destructive';
@@ -209,7 +181,7 @@ export default function Dashboard() {
                     </div>
                 </div>
             </CardHeader>
-            <CardContent className="flex-1 min-h-0">
+            <CardContent className="flex-1 min-h-0 max-w-screen">
                 <div ref={terminalRef} className="h-full w-full rounded-md border bg-muted/20 overflow-hidden" />
             </CardContent>
         </Card>
@@ -234,7 +206,7 @@ export default function Dashboard() {
         return (
             <div className="flex h-full flex-col gap-4 lg:gap-6">
                 {activePage === 'http-tester' ? <HttpTesterTab /> : <CfScannerTab />}
-                <div className="flex-1 min-h-0">
+                <div className="flex-1">
                     {logsCard}
                 </div>
             </div>
@@ -267,7 +239,18 @@ export default function Dashboard() {
                     </header>
                     <main className="flex-1 overflow-auto p-4 lg:p-6 min-w-0">
                         <div className="mx-auto h-full w-full max-w-screen-2xl">
-                            {renderPageLayout()}
+                            <AnimatePresence mode="wait">
+                                <motion.div
+                                    key={activePage}
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -20 }}
+                                    transition={{ duration: 0.2 }}
+                                    className="h-full"
+                                >
+                                    {renderPageLayout()}
+                                </motion.div>
+                            </AnimatePresence>
                         </div>
                     </main>
                 </div>

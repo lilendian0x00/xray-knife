@@ -92,6 +92,7 @@ class WebSocketService {
         const { setHttpTestStatus, updateScanResults, setScanStatus, setHttpTestProgress, setScanProgress, setProxyDetails, setProxyStatus } = useAppStore.getState();
         const rawData = event.data;
         if (!rawData) return;
+        console.log("[WS] RAW:", rawData);
 
         try {
             const message = JSON.parse(rawData);

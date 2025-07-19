@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Loader2, RotateCcw, Settings } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 import { api } from "@/services/api";
+import { usePersistentState } from "@/hooks/usePersistentState";
 
 export function ProxyTab() {
     const {
@@ -24,7 +25,8 @@ export function ProxyTab() {
         setProxyDetails
     } = useAppStore();
 
-    const [proxyConfigs, setProxyConfigs] = useState('');
+    const [proxyConfigs, setProxyConfigs] = usePersistentState('proxy-configs-input', '');
+
 
     const isTlsCompatible = proxySettings.inboundProtocol === 'vless' || proxySettings.inboundProtocol === 'vmess';
     const showTransportSettings = isTlsCompatible && ['ws', 'grpc', 'xhttp'].includes(proxySettings.inboundTransport);
@@ -174,15 +176,30 @@ export function ProxyTab() {
                     <div className="flex flex-col gap-2"><Label htmlFor="listen-port">Listen Port</Label><Input id="listen-port" value={proxySettings.listenPort} onChange={(e) => updateProxySettings({ listenPort: e.target.value })} disabled={proxyStatus !== 'stopped'} /></div>
                     <div className="flex flex-col gap-2"><Label htmlFor="inbound-uuid">Inbound UUID</Label><Input id="inbound-uuid" value={proxySettings.inboundUUID} onChange={(e) => updateProxySettings({ inboundUUID: e.target.value })} disabled={proxyStatus !== 'stopped'} /></div>
                     <div className="flex flex-col gap-2"><Label htmlFor="rotation-interval">Rotation Interval (s)</Label><InputNumber id="rotation-interval" min={1} value={proxySettings.rotationInterval} onChange={(v) => updateProxySettings({ rotationInterval: v })} disabled={proxyStatus !== 'stopped'} /></div>
-                    <div className="sm:col-span-2"><Label htmlFor="max-delay-proxy">Max Delay (ms)</Label><InputNumber id="max-delay-proxy" min={100} step={100} value={proxySettings.maximumAllowedDelay} onChange={(v) => updateProxySettings({ maximumAllowedDelay: v })} disabled={proxyStatus !== 'stopped'} /></div>
+                    <div className="flex flex-col gap-2">
+                        <Label htmlFor="max-delay-proxy">Max Delay (ms)</Label>
+                        <InputNumber id="max-delay-proxy" min={100} step={100} value={proxySettings.maximumAllowedDelay} onChange={(v) => updateProxySettings({ maximumAllowedDelay: v })} disabled={proxyStatus !== 'stopped'} />
+                    </div>
 
                     <AnimatePresence>
                         {isTlsCompatible && (
-                            <motion.div className="sm:col-span-2 space-y-4 pt-4 border-t" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
+                            <motion.div
+                                className="sm:col-span-2 space-y-4 pt-4 border-t"
+                                initial={{ opacity: 0, height: 0, paddingTop: 0, borderTopWidth: 0 }}
+                                animate={{ opacity: 1, height: 'auto', paddingTop: '1rem', borderTopWidth: '1px' }}
+                                exit={{ opacity: 0, height: 0, paddingTop: 0, borderTopWidth: 0 }}
+                                transition={{ duration: 0.3 }}
+                            >
                                 <div className="flex items-center space-x-2"><Checkbox id="enable-tls" checked={proxySettings.enableTls} onCheckedChange={(c) => updateProxySettings({ enableTls: Boolean(c) })} disabled={proxyStatus !== 'stopped' || proxySettings.inboundTransport === 'grpc'} /><Label htmlFor="enable-tls" className="font-medium cursor-pointer">Enable Inbound TLS {proxySettings.inboundTransport === 'grpc' && "(Required)"}</Label></div>
                                 <AnimatePresence>
                                     {proxySettings.enableTls && (
-                                        <motion.div className="grid grid-cols-1 sm:grid-cols-2 gap-4" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
+                                        <motion.div
+                                            className="grid grid-cols-1 sm:grid-cols-2 gap-4"
+                                            initial={{ opacity: 0, height: 0 }}
+                                            animate={{ opacity: 1, height: 'auto' }}
+                                            exit={{ opacity: 0, height: 0 }}
+                                            transition={{ duration: 0.2, delay: 0.1 }}
+                                        >
                                             <div className="flex flex-col gap-2"><Label htmlFor="tls-cert-path">TLS Cert Path</Label><Input id="tls-cert-path" placeholder="/path/to/cert.pem" value={proxySettings.tlsCertPath} onChange={(e) => updateProxySettings({ tlsCertPath: e.target.value })} disabled={proxyStatus !== 'stopped'} /></div>
                                             <div className="flex flex-col gap-2"><Label htmlFor="tls-key-path">TLS Key Path</Label><Input id="tls-key-path" placeholder="/path/to/key.pem" value={proxySettings.tlsKeyPath} onChange={(e) => updateProxySettings({ tlsKeyPath: e.target.value })} disabled={proxyStatus !== 'stopped'} /></div>
                                             <div className="flex flex-col gap-2"><Label htmlFor="tls-sni">SNI (Server Name)</Label><Input id="tls-sni" placeholder="your.domain.com" value={proxySettings.tlsSni} onChange={(e) => updateProxySettings({ tlsSni: e.target.value })} disabled={proxyStatus !== 'stopped'} /></div>
@@ -195,7 +212,10 @@ export function ProxyTab() {
                     </AnimatePresence>
                 </div>
                 <div className="flex flex-col gap-3"><Label htmlFor="proxy-configs">Configuration Links</Label>
-                    <Textarea id="proxy-configs" placeholder="vmess://&#10;vless://...&#10;trojan://...&#10;ss://..." className="h-40 font-mono text-sm" value={proxyConfigs} onChange={(e) => setProxyConfigs(e.target.value)} disabled={proxyStatus === 'running'} />
+                    <Textarea id="proxy-configs" placeholder="vmess://
+vless://...
+trojan://...
+ss://..." className="h-40 font-mono text-sm" value={proxyConfigs} onChange={(e) => setProxyConfigs(e.target.value)} disabled={proxyStatus === 'running'} />
                 </div>
                 <div className="flex gap-4 flex-col sm:flex-row">
                     <Button onClick={handleStartProxy} disabled={proxyStatus !== 'stopped'}>

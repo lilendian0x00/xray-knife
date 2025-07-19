@@ -17,11 +17,12 @@ import useDebounce from "react-use/lib/useDebounce";
 import { useAppStore } from "@/stores/appStore";
 import { api } from "@/services/api";
 import { Progress } from "@/components/ui/progress";
+import { usePersistentState } from "@/hooks/usePersistentState";
 
 export function CfScannerTab() {
     const { cfScannerSettings, updateCfScannerSettings, resetCfScannerSettings, scanResults, clearScanResults, scanStatus, setScanStatus, scanProgress } = useAppStore();
 
-    const [subnets, setSubnets] = useState('');
+    const [subnets, setSubnets] = usePersistentState('cfscanner-subnets-input', '');
     const [isLoadingRanges, setIsLoadingRanges] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");

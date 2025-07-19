@@ -85,11 +85,11 @@ export const useAppStore = create<AppState & AppActions>()(
             setProxyStatus: (status) => set({ proxyStatus: status }),
             setScanStatus: (status) => set({ 
                 scanStatus: status,
-                ...(status === 'idle' && { scanProgress: initialProgress })
+                ...((status === 'idle' || status === 'starting') && { scanProgress: initialProgress })
             }),
             setHttpTestStatus: (status) => set({
                 httpTestStatus: status,
-                ...(status === 'idle' && { httpTestProgress: initialProgress })
+                ...((status === 'idle' || status === 'starting') && { httpTestProgress: initialProgress })
             }),
             addHttpResultsBatch: (results) => set(state => ({ httpResults: [...state.httpResults, ...results] })),
             clearHttpResults: () => set({ httpResults: [] }),

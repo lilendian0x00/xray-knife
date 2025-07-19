@@ -134,6 +134,11 @@ func (s *BaseService) reportProgress(ctx context.Context, completed *atomic.Int3
 	for {
 		select {
 		case <-ticker.C:
+			// Check the service state before broadcasting. If it's no longer "running",
+			// this goroutine belongs to a stale task and should exit immediately.
+			if s.Status() != StateRunning {
+				return
+			}
 			progress := map[string]interface{}{
 				"type": messageType,
 				"data": map[string]int{
@@ -144,16 +149,6 @@ func (s *BaseService) reportProgress(ctx context.Context, completed *atomic.Int3
 			jsonProgress, _ := json.Marshal(progress)
 			s.hub.Broadcast(jsonProgress)
 		case <-ctx.Done():
-			// Send one final update
-			progress := map[string]interface{}{
-				"type": messageType,
-				"data": map[string]int{
-					"completed": int(completed.Load()),
-					"total":     total,
-				},
-			}
-			jsonProgress, _ := json.Marshal(progress)
-			s.hub.Broadcast(jsonProgress)
 			return
 		}
 	}

@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { motion, AnimatePresence } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { 
-    ClipboardCopy, AlertCircle, ServerOff, Timer, ArrowRightLeft, 
+import {
+    ClipboardCopy, AlertCircle, ServerOff, Timer, ArrowRightLeft,
     LogIn, LogOut, RefreshCw, MapPin, Tag, Server, Download, Upload, Hourglass, Loader2
 } from 'lucide-react';
 import { type ProxyDetails } from "@/types/dashboard";
@@ -16,17 +17,16 @@ interface DetailItemProps {
     label: string;
     icon: React.ElementType;
     children: React.ReactNode;
-    onCopy?: () => void;
     className?: string;
 }
 
 /**
  * A compact, flexible row item for displaying a piece of data.
  */
-const DetailItem = ({ label, icon: Icon, children, onCopy, className }: DetailItemProps) => {
+const DetailItem = ({ label, icon: Icon, children, className }: DetailItemProps) => {
     if (!children) return null;
     const content = (
-        <div className={cn("text-sm font-medium", onCopy ? "truncate" : "")}>
+        <div className="text-sm font-medium">
             {children}
         </div>
     );
@@ -37,19 +37,11 @@ const DetailItem = ({ label, icon: Icon, children, onCopy, className }: DetailIt
                 <Icon className="h-4 w-4 text-muted-foreground" />
                 <span className="text-sm text-muted-foreground">{label}</span>
             </div>
-            {onCopy ? (
-                <div className="flex items-center gap-1 min-w-0">
-                    <div className="truncate">{content}</div>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity" onClick={onCopy}>
-                        <ClipboardCopy className="h-3.5 w-3.5" />
-                    </Button>
-                </div>
-            ) : (
-                content
-            )}
+            {content}
         </div>
     );
 };
+
 
 /**
  * A memoized countdown timer to prevent unnecessary re-renders.
@@ -79,44 +71,81 @@ const Countdown = React.memo(({ to }: { to: string }) => {
 
 // --- Main Card Component ---
 
-export function ProxyStatusCard({ details }: { details: ProxyDetails | null }) {
-    if (!details) {
+const StoppedContent = () => (
+    <motion.div
+        key="stopped"
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -10 }}
+        transition={{ duration: 0.2 }}
+    >
+        <CardContent className="flex flex-col justify-center items-center text-center py-12">
+            <div className="bg-muted rounded-full p-3 w-fit mb-4">
+                <ServerOff className="h-8 w-8 text-muted-foreground" />
+            </div>
+            <p className="font-semibold">Proxy Service Stopped</p>
+            <p className="text-sm text-muted-foreground">Start the proxy to see live details.</p>
+        </CardContent>
+    </motion.div>
+);
+
+const RunningContent = ({ details }: { details: ProxyDetails }) => {
+    const { inbound, activeOutbound, rotationInterval, rotationStatus, nextRotationTime, totalConfigs } = details;
+    const handleCopy = (label: string, value: string) => navigator.clipboard.writeText(value).then(() => toast.success(`${label} copied!`));
+
+    const getRotationStatusBadge = () => {
+        const statusKey = rotationStatus || 'idle';
+        const content = () => {
+            switch (rotationStatus) {
+                case 'testing': return <><Loader2 className="mr-1.5 h-3 w-3 animate-spin" />Testing</>;
+                case 'switching': return <><ArrowRightLeft className="mr-1.5 h-3 w-3 animate-pulse" />Switching</>;
+                case 'stalled': return <><Hourglass className="mr-1.5 h-3 w-3" />Stalled</>;
+                default: return <Countdown to={nextRotationTime} />;
+            }
+        }
+        const variant = (): "default" | "secondary" | "destructive" | "outline" => {
+            switch (rotationStatus) {
+                case 'testing': return 'secondary';
+                case 'switching': return 'secondary';
+                case 'stalled': return 'destructive';
+                default: return 'outline';
+            }
+        }
+        const colorClass = () => {
+            switch (rotationStatus) {
+                case 'testing': return "bg-blue-500/20 text-blue-400 border-blue-500/30";
+                case 'switching': return "bg-purple-500/20 text-purple-400 border-purple-500/30";
+                case 'stalled': return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
+                default: return "";
+            }
+        }
+
         return (
-            <Card className="w-full">
-                <CardHeader>
-                    <CardTitle>Live Proxy Status</CardTitle>
-                    <CardDescription>Details of the currently active proxy instance.</CardDescription>
-                </CardHeader>
-                <CardContent className="flex flex-col justify-center items-center text-center py-12">
-                    <div className="bg-muted rounded-full p-3 w-fit mb-4">
-                        <ServerOff className="h-8 w-8 text-muted-foreground" />
-                    </div>
-                    <p className="font-semibold">Proxy Service Stopped</p>
-                    <p className="text-sm text-muted-foreground">Start the proxy to see live details.</p>
-                </CardContent>
-            </Card>
+            <AnimatePresence mode="wait">
+                <motion.div
+                    key={statusKey}
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    transition={{ duration: 0.15 }}
+                >
+                    <Badge variant={variant()} className={cn(colorClass())}>
+                        {content()}
+                    </Badge>
+                </motion.div>
+            </AnimatePresence>
         );
     }
 
-    const { inbound, activeOutbound, rotationInterval, rotationStatus, nextRotationTime, totalConfigs } = details;
-    const handleCopy = (label: string, value: string) => navigator.clipboard.writeText(value).then(() => toast.success(`${label} copied!`));
-    
-    const getRotationStatusBadge = () => {
-        switch (rotationStatus) {
-            case 'testing': return <Badge variant="secondary" className="bg-blue-500/20 text-blue-400 border-blue-500/30"><Loader2 className="mr-1.5 h-3 w-3 animate-spin" />Testing</Badge>;
-            case 'switching': return <Badge variant="secondary" className="bg-purple-500/20 text-purple-400 border-purple-500/30"><ArrowRightLeft className="mr-1.5 h-3 w-3 animate-pulse" />Switching</Badge>;
-            case 'stalled': return <Badge variant="destructive" className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30"><Hourglass className="mr-1.5 h-3 w-3" />Stalled</Badge>;
-            default: return <Badge variant="outline"><Countdown to={nextRotationTime} /></Badge>;
-        }
-    };
-
     return (
-        <Card>
-            <CardHeader>
-                <CardTitle>Live Proxy Status</CardTitle>
-                <CardDescription>Details of the currently active proxy instance.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
+        <motion.div
+            key="running"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+        >
+             <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 border rounded-lg p-4">
                     {/* Inbound Section */}
                     <div className="space-y-3">
@@ -124,8 +153,11 @@ export function ProxyStatusCard({ details }: { details: ProxyDetails | null }) {
                         <div className="space-y-2 pl-6">
                              <DetailItem icon={Badge} label="Protocol"><span className="font-mono text-xs font-bold">{inbound.Protocol.toUpperCase()}</span></DetailItem>
                             <DetailItem icon={Server} label="Address"><span className="font-mono text-xs">{`${inbound.Address}:${inbound.Port}`}</span></DetailItem>
-                            <DetailItem icon={ClipboardCopy} label="Link" onCopy={() => handleCopy('Inbound Link', inbound.OrigLink)}>
-                                <span className="font-mono text-xs">{inbound.OrigLink}</span>
+                            <DetailItem icon={ClipboardCopy} label="Link">
+                                <Button variant="secondary" size="sm" className="h-7" onClick={() => handleCopy('Inbound Link', inbound.OrigLink)}>
+                                    <ClipboardCopy className="mr-1.5 h-3.5 w-3.5" />
+                                    Copy
+                                </Button>
                             </DetailItem>
                         </div>
                     </div>
@@ -138,8 +170,20 @@ export function ProxyStatusCard({ details }: { details: ProxyDetails | null }) {
                                 <DetailItem icon={Tag} label="Remark"><span className="font-mono text-xs truncate max-w-[150px]">{activeOutbound.protocol.remark || 'N/A'}</span></DetailItem>
                                 <DetailItem icon={MapPin} label="Location"><span className="font-mono text-xs">{activeOutbound.location !== 'null' ? activeOutbound.location : 'N/A'}</span></DetailItem>
                                 <DetailItem icon={Timer} label="Delay"><Badge variant="secondary">{activeOutbound.delay}ms</Badge></DetailItem>
-                                <DetailItem icon={Download} label="Download"><span className="font-mono text-xs">{activeOutbound.download > 0 ? `${activeOutbound.download.toFixed(2)} Mbps` : 'N/A'}</span></DetailItem>
-                                <DetailItem icon={Upload} label="Upload"><span className="font-mono text-xs">{activeOutbound.upload > 0 ? `${activeOutbound.upload.toFixed(2)} Mbps` : 'N/A'}</span></DetailItem>
+                                <DetailItem icon={ArrowRightLeft} label="Speed (D/U)">
+                                    <div className="flex items-center gap-1.5 font-mono text-xs">
+                                        <div className="flex items-center gap-1"><Download className="size-3 text-muted-foreground" /><span>{activeOutbound.download > 0 ? activeOutbound.download.toFixed(2) : '-'}</span></div>
+                                        <span className="text-muted-foreground">/</span>
+                                        <div className="flex items-center gap-1"><Upload className="size-3 text-muted-foreground" /><span>{activeOutbound.upload > 0 ? activeOutbound.upload.toFixed(2) : '-'}</span></div>
+                                        <span className="text-xs text-muted-foreground">Mbps</span>
+                                    </div>
+                                </DetailItem>
+                                <DetailItem icon={ClipboardCopy} label="Link">
+                                    <Button variant="secondary" size="sm" className="h-7" onClick={() => handleCopy('Outbound Link', activeOutbound.link)}>
+                                        <ClipboardCopy className="mr-1.5 h-3.5 w-3.5" />
+                                        Copy
+                                    </Button>
+                                </DetailItem>
                             </div>
                         ) : (
                             <div className="flex items-center gap-2 text-muted-foreground text-sm pl-6 h-full">
@@ -159,6 +203,23 @@ export function ProxyStatusCard({ details }: { details: ProxyDetails | null }) {
                     </div>
                 </div>
             </CardContent>
+        </motion.div>
+    )
+}
+
+export function ProxyStatusCard({ details }: { details: ProxyDetails | null }) {
+    return (
+        <Card className="w-full">
+            <CardHeader>
+                <CardTitle>Live Proxy Status</CardTitle>
+                <CardDescription>Details of the currently active proxy instance.</CardDescription>
+            </CardHeader>
+            <AnimatePresence mode="wait">
+                {!details
+                    ? <StoppedContent />
+                    : <RunningContent details={details} />
+                }
+            </AnimatePresence>
         </Card>
     );
 }

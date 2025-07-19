@@ -10,8 +10,16 @@ export function usePersistentState<T>(
         try {
             const storedValue = window.localStorage.getItem(key);
             if (storedValue) {
-                // Merge the loaded state with defaults to ensure all keys are present
-                return merge(JSON.parse(storedValue) as Partial<T>);
+                const parsedValue = JSON.parse(storedValue);
+
+                // FIX: Only apply object-merging logic if the default value is a non-array object.
+                // This prevents strings, numbers, and other primitives from being incorrectly treated as objects.
+                if (typeof defaultValue === 'object' && defaultValue !== null && !Array.isArray(defaultValue)) {
+                    return merge(parsedValue as Partial<T>);
+                }
+                
+                // For primitives (like strings) and arrays, return the parsed value directly.
+                return parsedValue as T;
             }
         } catch (error) {
             console.error(`Error reading localStorage key “${key}”:`, error);
