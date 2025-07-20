@@ -38,7 +38,13 @@ A powerful command-line utility and web UI designed for testing, managing, and u
 - **💻 Cross-Platform**: A single, dependency-free binary available for Linux, Windows, macOS, and Android.
 
 ## 📦 Installation
-
+### Arch linux aur
+you can find package in [AUR](https://aur.archlinux.org/packages/xray-knife-bin) or use command bellow te get the latest version on Arch linux
+```bash
+yay -S xray-knife-bin ||
+paru -S xray-knife-bin ||
+pikaur -S xray-knife-bin
+```
 ### From GitHub Releases (Recommended)
 
 You can download the latest pre-compiled binary for your operating system from the [**GitHub Releases**](https://github.com/lilendian0x00/xray-knife/releases) page.
