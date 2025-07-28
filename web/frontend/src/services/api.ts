@@ -39,7 +39,7 @@ export const api = {
             ...rest,
             core: coreType,
             links,
-            verbose: true,
+            verbose: false,
         });
     },
     stopHttpTest() { return axios.post('/api/v1/http/test/stop'); },
@@ -68,7 +68,7 @@ export const api = {
             shuffleSubnets: settings.advancedOptions.shuffleSubnets,
             subnets: subnets,
             resume: isResuming,
-            verbose: true,
+            verbose: false,
         };
         return axios.post('/api/v1/scanner/cf/start', payload);
     },
