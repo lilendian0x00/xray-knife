@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/lilendian0x00/xray-knife/v6/database"
 	"io"
 	"log"
 	"math/rand"
@@ -85,6 +86,20 @@ func New(config Config, logger *log.Logger) (*Service, error) {
 		rotationStatus: "idle",
 	}
 
+	// If no config links are provided via flags, fetch them from the database.
+	if len(s.config.ConfigLinks) == 0 {
+		s.logf(customlog.Processing, "No config links provided, fetching from database...\n")
+		dbLinks, err := database.GetConfigsForProxy()
+		if err != nil {
+			return nil, fmt.Errorf("could not fetch configs from database: %w", err)
+		}
+		if len(dbLinks) == 0 {
+			return nil, errors.New("no configs found in the database. Use 'subs fetch' to populate it")
+		}
+		s.config.ConfigLinks = dbLinks
+		s.logf(customlog.Success, "Loaded %d configs from the database for rotation pool.\n", len(s.config.ConfigLinks))
+	}
+
 	switch config.CoreType {
 	case "xray":
 		s.core = core.CoreFactory(core.XrayCoreType, config.InsecureTLS, config.Verbose)
@@ -98,7 +113,7 @@ func New(config Config, logger *log.Logger) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create inbound: %w", err)
 	}
-	s.inbound = inbound // Store inbound
+	s.inbound = inbound
 
 	if err := s.core.SetInbound(inbound); err != nil {
 		return nil, fmt.Errorf("failed to set inbound: %w", err)

@@ -1,8 +1,15 @@
 import axios from 'axios';
+import { toast } from "sonner";
 import { type ProxySettings, type HttpTesterSettings, type CfScannerSettings } from '@/types/settings';
 import { type ProxyDetails, type HttpResult } from '@/types/dashboard';
+import { useAppStore } from '@/stores/appStore';
 
 export const api = {
+    // Auth Endpoint
+    login(username: String, password: String) {
+        return axios.post('/api/v1/login', { username, password });
+    },
+
     // Proxy Endpoints
     startProxy(settings: ProxySettings, links: string[]) {
         const payload = {
@@ -68,3 +75,24 @@ export const api = {
     stopCfScan() { return axios.post('/api/v1/scanner/cf/stop'); },
     clearCfScanHistory() { return axios.post('/api/v1/scanner/cf/clear_history'); },
 };
+
+// AXIOS INTERCEPTORS
+axios.interceptors.request.use(config => {
+    const token = useAppStore.getState().token;
+    if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+}, error => {
+    return Promise.reject(error);
+});
+
+axios.interceptors.response.use(response => response, error => {
+    if (error.response && error.response.status === 401) {
+        if (useAppStore.getState().isAuthenticated) {
+            useAppStore.getState().logout();
+            toast.error("Session expired. Please log in again.");
+        }
+    }
+    return Promise.reject(error);
+});

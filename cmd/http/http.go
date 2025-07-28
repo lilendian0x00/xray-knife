@@ -3,6 +3,7 @@ package http
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -12,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lilendian0x00/xray-knife/v6/database"
 	pkghttp "github.com/lilendian0x00/xray-knife/v6/pkg/http"
 	"github.com/lilendian0x00/xray-knife/v6/utils"
 	"github.com/lilendian0x00/xray-knife/v6/utils/customlog"
@@ -25,18 +27,27 @@ var HttpCmd = newHttpCommand()
 
 // Config holds all command configuration options
 type Config struct {
-	ConfigLink          string
-	ConfigLinksFile     string
-	OutputFile          string
-	OutputType          string
-	ThreadCount         uint16
-	CoreType            string
-	DestURL             string
-	HTTPMethod          string
-	ShowBody            bool
-	InsecureTLS         bool
-	Verbose             bool
-	SortedByRealDelay   bool
+	ConfigLink      string
+	ConfigLinksFile string
+	ThreadCount     uint16
+	CoreType        string
+	DestURL         string
+	HTTPMethod      string
+	ShowBody        bool
+	InsecureTLS     bool
+	Verbose         bool
+
+	// DB flags
+	FromDB         bool
+	Limit          int
+	SubscriptionID int64
+	Protocol       string
+
+	// File Output Flags
+	OutputFile        string
+	OutputType        string
+	SortedByRealDelay bool
+
 	Speedtest           bool
 	GetIPInfo           bool
 	SpeedtestAmount     uint32
@@ -52,19 +63,20 @@ func validateConfig(cfg *Config) error {
 		return fmt.Errorf("invalid core type. Available cores: (auto, xray, singbox)")
 	}
 
-	validOutputTypes := map[string]bool{"csv": true, "txt": true}
-	if !validOutputTypes[cfg.OutputType] {
-		return fmt.Errorf("bad output format. Allowed formats: txt, csv")
-	}
-
-	if cfg.OutputType == "csv" {
-		base := strings.TrimSuffix(cfg.OutputFile, filepath.Ext(cfg.OutputFile))
-		cfg.OutputFile = base + ".csv"
+	if cfg.OutputFile != "" {
+		validOutputTypes := map[string]bool{"csv": true, "txt": true}
+		if !validOutputTypes[cfg.OutputType] {
+			return fmt.Errorf("bad output format. Allowed formats: txt, csv")
+		}
+		if cfg.OutputType == "csv" {
+			base := strings.TrimSuffix(cfg.OutputFile, filepath.Ext(cfg.OutputFile))
+			cfg.OutputFile = base + ".csv"
+		}
 	}
 
 	if cfg.Ping {
-		if cfg.ConfigLinksFile != "" {
-			return fmt.Errorf("--ping flag cannot be used with --file flag")
+		if cfg.ConfigLinksFile != "" || cfg.FromDB {
+			return fmt.Errorf("--ping flag cannot be used with --file or --from-db flags")
 		}
 		if cfg.ConfigLink == "" {
 			// This is now fine, as we will read from stdin if it's empty.
@@ -74,7 +86,6 @@ func validateConfig(cfg *Config) error {
 			cfg.Speedtest = false
 		}
 	}
-
 	return nil
 }
 
@@ -86,7 +97,8 @@ func newHttpCommand() *cobra.Command {
 		Use:   "http",
 		Short: "Test proxy configurations for latency, speed, and IP info using HTTP requests.",
 		Long: `Tests one or more proxy configurations. 
-By default, if no --config or --file flag is provided, it will wait for a single config link from standard input.`,
+By default, if no flag is provided, it will wait for a single config link from standard input.
+Use --from-db to test configs from the database library.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validateConfig(config); err != nil {
 				return err
@@ -108,13 +120,30 @@ By default, if no --config or --file flag is provided, it will wait for a single
 				return fmt.Errorf("failed to create examiner: %w", err)
 			}
 
-			// 1. File mode has highest precedence (after validation).
-			if config.ConfigLinksFile != "" {
-				return handleMultipleConfigs(examiner, config)
+			// Determine source of configs for batch testing
+			var links []string
+			if config.FromDB {
+				var err error
+				customlog.Printf(customlog.Processing, "Fetching config links from the database...\n")
+				links, err = database.GetConfigsFromDB(config.SubscriptionID, config.Protocol, config.Limit)
+				if err != nil {
+					return err
+				}
+				if len(links) == 0 {
+					customlog.Printf(customlog.Warning, "No matching config links found in the database.\n")
+					return nil
+				}
+				customlog.Printf(customlog.Success, "Found %d config links to test.\n", len(links))
+			} else if config.ConfigLinksFile != "" {
+				links = utils.ParseFileByNewline(config.ConfigLinksFile)
 			}
 
-			// 2. Handle single config modes (ping or one-shot test).
-			// If config link is not provided via flag, read from stdin.
+			// If we have links for a batch test, run it.
+			if len(links) > 0 {
+				return handleMultipleConfigs(examiner, config, links)
+			}
+
+			// Handle single config modes (ping or one-shot test from flag/stdin).
 			if config.ConfigLink == "" {
 				customlog.Printf(customlog.Info, "Please enter a config link and press Enter:\n")
 				reader := bufio.NewReader(os.Stdin)
@@ -128,8 +157,6 @@ By default, if no --config or --file flag is provided, it will wait for a single
 				}
 			}
 
-			// By this point, config.ConfigLink is populated.
-			// Now decide between ping mode or single test mode.
 			if config.Ping {
 				return handlePingMode(examiner, config)
 			} else {
@@ -176,10 +203,8 @@ func handlePingMode(examiner *pkghttp.Examiner, config *Config) error {
 		fmt.Printf("%d packets transmitted, %d received, %.1f%% packet loss\n", sent, received, loss)
 
 		if received > 0 {
-			if received > 0 {
-				avgLatency := totalLatency / int64(received)
-				fmt.Printf("rtt min/avg/max = %d/%d/%d ms\n", minLatency, avgLatency, maxLatency)
-			}
+			avgLatency := totalLatency / int64(received)
+			fmt.Printf("rtt min/avg/max = %d/%d/%d ms\n", minLatency, avgLatency, maxLatency)
 		}
 	}()
 
@@ -199,7 +224,9 @@ func handlePingMode(examiner *pkghttp.Examiner, config *Config) error {
 			}
 
 			delay, _, _, err := pkghttp.MeasureDelay(context.Background(), client, false, config.DestURL, config.HTTPMethod)
-			instance.Close()
+			if instance != nil {
+				instance.Close()
+			}
 
 			if err != nil {
 				customlog.Printf(customlog.Failure, "Request failed: %v\n", err)
@@ -219,39 +246,57 @@ func handlePingMode(examiner *pkghttp.Examiner, config *Config) error {
 }
 
 // handleMultipleConfigs handles testing multiple configurations
-func handleMultipleConfigs(examiner *pkghttp.Examiner, config *Config) error {
+func handleMultipleConfigs(examiner *pkghttp.Examiner, config *Config, links []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	links := utils.ParseFileByNewline(config.ConfigLinksFile)
 	printConfiguration(config, len(links))
 
-	if config.Speedtest && config.OutputType != "csv" {
-		customlog.Printf(customlog.Processing, "Speedtest is enabled, switching to CSV output!\n\n")
-		config.OutputType = "csv"
-		base := strings.TrimSuffix(config.OutputFile, filepath.Ext(config.OutputFile))
-		config.OutputFile = base + ".csv"
+	// Create a test run entry in the database
+	opts := pkghttp.Options{
+		Core:                   config.CoreType,
+		MaxDelay:               config.MaximumAllowedDelay,
+		Verbose:                config.Verbose,
+		ShowBody:               config.ShowBody,
+		InsecureTLS:            config.InsecureTLS,
+		DoSpeedtest:            config.Speedtest,
+		DoIPInfo:               config.GetIPInfo,
+		TestEndpoint:           config.DestURL,
+		TestEndpointHttpMethod: config.HTTPMethod,
+		SpeedtestKbAmount:      config.SpeedtestAmount,
+	}
+	optsJson, err := json.Marshal(opts)
+	if err != nil {
+		return fmt.Errorf("failed to marshal test options to JSON: %w", err)
 	}
 
+	runID, err := database.CreateHttpTestRun(string(optsJson), len(links))
+	if err != nil {
+		return fmt.Errorf("failed to create database entry for test run: %w", err)
+	}
+	customlog.Printf(customlog.Info, "Created test run with ID: %d. Results will be saved to the database.\n", runID)
+
+	// Setup the result processor with the new runID and file options
 	processor := pkghttp.NewResultProcessor(
 		pkghttp.ResultProcessorOptions{
+			RunID:      runID,
 			OutputFile: config.OutputFile,
 			OutputType: config.OutputType,
 			Sorted:     config.SortedByRealDelay,
 		},
 	)
 
+	// Run the tests as before
 	testManager := pkghttp.NewTestManager(examiner, config.ThreadCount, config.Verbose, nil)
-
 	resultsChan := make(chan *pkghttp.Result, len(links))
 	var results pkghttp.ConfigResults
 	var collectorWg sync.WaitGroup
+
 	collectorWg.Add(1)
 	go func() {
-		var counter int
 		defer collectorWg.Done()
+		var counter int
 		for res := range resultsChan {
-			// Print success details as soon as a result is received.
 			if res.Status == "passed" {
 				printSuccessDetails(counter, *res)
 				counter++
@@ -260,18 +305,11 @@ func handleMultipleConfigs(examiner *pkghttp.Examiner, config *Config) error {
 		}
 	}()
 
-	testManager.RunTests(ctx, links, resultsChan, func() {
-
-	})
+	testManager.RunTests(ctx, links, resultsChan, func() {})
 	close(resultsChan)
 	collectorWg.Wait()
 
-	for i, res := range results {
-		if res.Status == "passed" {
-			printSuccessDetails(i, *res)
-		}
-	}
-
+	// Save results to both DB and file if specified
 	return processor.SaveResults(results)
 }
 
@@ -307,7 +345,7 @@ func printSuccessDetails(index int, res pkghttp.Result) {
 
 // printConfiguration prints the current configuration
 func printConfiguration(config *Config, totalConfigs int) {
-	fmt.Printf("%s: %d\n%s: %d\n%s: %dms\n%s: %t\n%s: %s\n%s: %t\n%s: %t\n%s: %s\n%s: %t\n\n",
+	fmt.Printf("%s: %d\n%s: %d\n%s: %dms\n%s: %t\n%s: %s\n%s: %t\n%s: %t\n",
 		color.RedString("Total configs"), totalConfigs,
 		color.RedString("Thread count"), config.ThreadCount,
 		color.RedString("Maximum delay"), config.MaximumAllowedDelay,
@@ -315,30 +353,50 @@ func printConfiguration(config *Config, totalConfigs int) {
 		color.RedString("Test url"), config.DestURL,
 		color.RedString("IP info"), config.GetIPInfo,
 		color.RedString("Insecure TLS"), config.InsecureTLS,
-		color.RedString("Output type"), config.OutputType,
-		color.RedString("Verbose"), config.Verbose)
+	)
+	if config.OutputFile != "" {
+		fmt.Printf("%s: %s\n", color.RedString("Output file"), config.OutputFile)
+	}
+	fmt.Println()
 }
 
 // addFlags adds all command-line flags to the command
 func addFlags(cmd *cobra.Command, config *Config) {
 	flags := cmd.Flags()
+
+	// Input flags
 	flags.StringVarP(&config.ConfigLink, "config", "c", "", "The xray config link")
 	flags.StringVarP(&config.ConfigLinksFile, "file", "f", "", "Read config links from a file")
-	flags.Uint16VarP(&config.ThreadCount, "thread", "t", 5, "Number of threads to be used for checking links from file")
+
+	// Core flags
+	flags.Uint16VarP(&config.ThreadCount, "thread", "t", 50, "Number of threads")
 	flags.StringVarP(&config.CoreType, "core", "z", "auto", "Core type (auto, singbox, xray)")
 	flags.StringVarP(&config.DestURL, "url", "u", "https://cloudflare.com/cdn-cgi/trace", "The url to test config")
 	flags.StringVarP(&config.HTTPMethod, "method", "m", "GET", "Http method")
 	flags.BoolVarP(&config.ShowBody, "body", "b", false, "Show response body")
-	flags.Uint16VarP(&config.MaximumAllowedDelay, "mdelay", "d", 10000, "Maximum allowed delay (ms)")
+	flags.Uint16VarP(&config.MaximumAllowedDelay, "mdelay", "d", 5000, "Maximum allowed delay (ms)")
 	flags.BoolVarP(&config.InsecureTLS, "insecure", "e", false, "Insecure tls connection (fake SNI)")
+
+	// Speedtest flags
 	flags.BoolVarP(&config.Speedtest, "speedtest", "p", false, "Speed test with speed.cloudflare.com")
-	flags.BoolVarP(&config.GetIPInfo, "rip", "r", false, "Send request to XXXX/cdn-cgi/trace to receive config's IP details")
-	flags.Uint32VarP(&config.SpeedtestAmount, "amount", "a", 10000, "Download and upload amount (KB)")
+	flags.Uint32VarP(&config.SpeedtestAmount, "amount", "a", 10000, "Download and upload amount (Kbps)")
+
+	flags.BoolVarP(&config.GetIPInfo, "rip", "r", true, "Receive real IP (csv)")
 	flags.BoolVarP(&config.Verbose, "verbose", "v", false, "Verbose")
-	flags.StringVarP(&config.OutputType, "type", "x", "txt", "Output type (csv, txt)")
-	flags.StringVarP(&config.OutputFile, "out", "o", "valid.txt", "Output file for valid config links")
-	flags.BoolVarP(&config.SortedByRealDelay, "sort", "s", true, "Sort config links by their delay (fast to slow)")
+
 	flags.BoolVar(&config.Ping, "ping", false, "Enable continuous HTTP ping mode for a single config")
 	flags.Uint16Var(&config.PingInterval, "interval", 1000, "Interval between pings in milliseconds (ms)")
-	cmd.MarkFlagsMutuallyExclusive("file", "config")
+
+	// DB flags
+	flags.BoolVar(&config.FromDB, "from-db", false, "Test configs from the database")
+	flags.IntVar(&config.Limit, "limit", 0, "Limit the number of configs to test from the DB (0 for all)")
+	flags.Int64Var(&config.SubscriptionID, "sub-id", 0, "Filter configs by subscription ID from the DB")
+	flags.StringVar(&config.Protocol, "protocol", "", "Filter configs by protocol (vmess, vless, etc.) from the DB")
+
+	// Output Flags
+	flags.StringVarP(&config.OutputFile, "out", "o", "valid.txt", "Output file for valid/all config links")
+	flags.StringVarP(&config.OutputType, "type", "x", "txt", "Output type for file (csv, txt)")
+	flags.BoolVarP(&config.SortedByRealDelay, "sort", "s", true, "Sort config links by their delay (fast to slow) in file output")
+
+	cmd.MarkFlagsMutuallyExclusive("file", "config", "from-db")
 }

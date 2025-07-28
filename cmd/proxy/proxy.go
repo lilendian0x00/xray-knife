@@ -3,11 +3,14 @@ package proxy
 import (
 	"bufio"
 	"context"
+	"fmt" // Import fmt
 	"os"
 	"os/signal"
+	"strings" // Import strings
 	"syscall"
 
 	pkgproxy "github.com/lilendian0x00/xray-knife/v6/pkg/proxy"
+	"github.com/lilendian0x00/xray-knife/v6/utils"
 	"github.com/lilendian0x00/xray-knife/v6/utils/customlog"
 
 	"github.com/spf13/cobra"
@@ -42,18 +45,31 @@ func newProxyCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "proxy",
 		Short: "Run a local inbound proxy that tunnels traffic through a remote configuration. Supports automatic rotation.",
+		Long: `Runs a local proxy service using configurations from the database by default.
+Use --file, --config, or --stdin to provide configs for a single session without using the database.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// 1. Get config links from specified source
-			links, err := pkgproxy.GetConfigLinks(cfg.configLinksFile, cfg.configLink, cfg.readConfigFromSTDIN)
-			if err != nil {
-				// If no links, show help, unless user intended to pipe from stdin
-				if !cfg.readConfigFromSTDIN {
-					cmd.Help()
+			// Get config links if provided via flags, otherwise leave empty.
+			var links []string
+			var err error
+			if cfg.configLinksFile != "" {
+				links = utils.ParseFileByNewline(cfg.configLinksFile)
+			} else if cfg.configLink != "" {
+				links = []string{cfg.configLink}
+			} else if cfg.readConfigFromSTDIN {
+				scanner := bufio.NewScanner(os.Stdin)
+				fmt.Println("Reading config links from STDIN (press CTRL+D when done):")
+				for scanner.Scan() {
+					if trimmed := strings.TrimSpace(scanner.Text()); trimmed != "" {
+						links = append(links, trimmed)
+					}
 				}
-				return err
+				if err := scanner.Err(); err != nil {
+					return fmt.Errorf("error reading from stdin: %w", err)
+				}
 			}
+			// If links slice is empty, the service will automatically fetch from the DB.
 
-			// 2. Create the service configuration from flags
+			// Create the service configuration from flags
 			serviceConfig := pkgproxy.Config{
 				CoreType:            cfg.CoreType,
 				InboundProtocol:     cfg.inboundProtocol,
@@ -70,13 +86,13 @@ func newProxyCommand() *cobra.Command {
 				ConfigLinks:         links,
 			}
 
-			// 3. Create the new proxy service, passing nil for the logger in CLI mode.
+			// Create the new proxy service
 			service, err := pkgproxy.New(serviceConfig, nil)
 			if err != nil {
 				return err
 			}
 
-			// 4. Set up context for graceful shutdown
+			// Set up context for graceful shutdown
 			ctx, cancel := context.WithCancel(context.Background())
 			signalChan := make(chan os.Signal, 1)
 			signal.Notify(signalChan, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
@@ -93,9 +109,10 @@ func newProxyCommand() *cobra.Command {
 				}
 			}()
 
-			// 5. Set up channel for manual rotation (CLI-specific feature)
+			// Set up channel for manual rotation
 			forceRotateChan := make(chan struct{})
-			if len(links) > 1 { // Only listen for Enter if in rotation mode
+			// Only listen for Enter if in rotation mode (more than 1 config, either from flags or DB)
+			if len(serviceConfig.ConfigLinks) > 1 {
 				go func() {
 					reader := bufio.NewReader(os.Stdin)
 					for {
@@ -109,12 +126,11 @@ func newProxyCommand() *cobra.Command {
 				}()
 			}
 
-			// 6. Run the service
+			// Run the service
 			return service.Run(ctx, forceRotateChan)
 		},
 	}
 
-	// Add flags to the command
 	addFlags(cmd, cfg)
 	return cmd
 }
@@ -125,6 +141,7 @@ func addFlags(cmd *cobra.Command, cfg *proxyCmdConfig) {
 	flags.BoolVarP(&cfg.readConfigFromSTDIN, "stdin", "i", false, "Read config link(s) from STDIN")
 	flags.StringVarP(&cfg.configLinksFile, "file", "f", "", "Read config links from a file")
 	flags.StringVarP(&cfg.configLink, "config", "c", "", "The single xray/sing-box config link to use")
+
 	flags.Uint32VarP(&cfg.rotationInterval, "rotate", "t", 300, "How often to rotate outbounds (seconds)")
 	flags.Uint16VarP(&cfg.maximumAllowedDelay, "mdelay", "d", 3000, "Maximum allowed delay (ms) for testing configs during rotation")
 

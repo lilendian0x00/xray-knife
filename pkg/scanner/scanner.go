@@ -3,7 +3,7 @@ package scanner
 import (
 	"bufio"
 	"context"
-	"encoding/csv"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +20,7 @@ import (
 
 	"github.com/alitto/pond/v2"
 	"github.com/gocarina/gocsv"
+	"github.com/lilendian0x00/xray-knife/v6/database"
 	"github.com/lilendian0x00/xray-knife/v6/pkg/core"
 	"github.com/lilendian0x00/xray-knife/v6/pkg/core/protocol"
 	"github.com/lilendian0x00/xray-knife/v6/utils"
@@ -104,21 +105,27 @@ func NewScannerService(config ScannerConfig, logger *log.Logger) (*ScannerServic
 	}
 
 	if s.config.Resume {
-		resumedResults, err := LoadResultsFromCSV(s.config.OutputFile)
+		dbResults, err := database.GetCfScanResults()
 		if err != nil {
-			s.logger.Printf("Could not resume from %s: %v. Starting fresh.", s.config.OutputFile, err)
-		} else if len(resumedResults) > 0 {
-			s.initialResults = resumedResults
-			for _, r := range resumedResults {
-				s.scannedIPs[r.IP] = true
+			s.logger.Printf("Could not resume from database: %v. Starting fresh.", err)
+		} else if len(dbResults) > 0 {
+			s.initialResults = make([]*ScanResult, 0, len(dbResults))
+			for ip, dbRes := range dbResults {
+				s.scannedIPs[ip] = true
+				res := &ScanResult{
+					IP:        dbRes.IP,
+					Latency:   time.Duration(dbRes.LatencyMs.Int64) * time.Millisecond,
+					LatencyMS: dbRes.LatencyMs.Int64,
+					DownSpeed: dbRes.DownloadMbps.Float64,
+					UpSpeed:   dbRes.UploadMbps.Float64,
+				}
+				if dbRes.Error.Valid && dbRes.Error.String != "" {
+					res.Error = errors.New(dbRes.Error.String)
+					res.ErrorStr = dbRes.Error.String
+				}
+				s.initialResults = append(s.initialResults, res)
 			}
-			s.logger.Printf("Resumed %d results from %s", len(s.initialResults), s.config.OutputFile)
-		}
-	} else {
-		// If not resuming, we clear the file.
-		err := os.Remove(s.config.OutputFile)
-		if err != nil && !os.IsNotExist(err) {
-			return nil, fmt.Errorf("failed to clear previous results file %s: %w", s.config.OutputFile, err)
+			s.logger.Printf("Resumed %d results from the database.", len(s.initialResults))
 		}
 	}
 
@@ -142,27 +149,43 @@ func (s *ScannerService) Run(ctx context.Context, progressChan chan<- *ScanResul
 
 	workerResultsChan := make(chan *ScanResult, s.config.ThreadCount*2)
 
-	var allResults []*ScanResult
-	var resultsMu sync.Mutex
+	runResultsMap := make(map[string]*ScanResult)
+	var mapMu sync.Mutex
 	var writerWg sync.WaitGroup
 	writerWg.Add(1)
 
-	// This goroutine consumes results from workers, saves them, and forwards them to the UI.
+	// This goroutine consumes results from workers, saves them to DB, and forwards them to the UI.
 	go func() {
 		defer writerWg.Done()
 		batch := make([]*ScanResult, 0, saveBatchSize)
 		ticker := time.NewTicker(saveInterval)
 		defer ticker.Stop()
 
-		save := func() {
+		saveToDB := func() {
 			if len(batch) == 0 {
 				return
 			}
+			dbBatch := make([]database.CfScanResult, 0, len(batch))
 			for _, res := range batch {
 				res.PrepareForMarshal()
+				dbRes := database.CfScanResult{
+					IP:    res.IP,
+					Error: sql.NullString{String: res.ErrorStr, Valid: res.ErrorStr != ""},
+				}
+				if res.Error == nil {
+					dbRes.LatencyMs = sql.NullInt64{Int64: res.LatencyMS, Valid: true}
+					if res.DownSpeed > 0 {
+						dbRes.DownloadMbps = sql.NullFloat64{Float64: res.DownSpeed, Valid: true}
+					}
+					if res.UpSpeed > 0 {
+						dbRes.UploadMbps = sql.NullFloat64{Float64: res.UpSpeed, Valid: true}
+					}
+				}
+				dbBatch = append(dbBatch, dbRes)
 			}
-			if err := appendResultsToCSV(s.config.OutputFile, batch); err != nil {
-				s.logger.Printf("Real-time save failed: %v", err)
+
+			if err := database.UpsertCfScanResultsBatch(dbBatch); err != nil {
+				s.logger.Printf("Real-time DB save failed: %v", err)
 			}
 			batch = make([]*ScanResult, 0, saveBatchSize)
 		}
@@ -170,19 +193,19 @@ func (s *ScannerService) Run(ctx context.Context, progressChan chan<- *ScanResul
 		for {
 			select {
 			case <-ctx.Done():
-				save() // Final save on cancellation
+				saveToDB()
 				return
 			case result, ok := <-workerResultsChan:
 				if !ok {
-					save() // Final save when channel is closed
+					saveToDB()
 					return
 				}
-				resultsMu.Lock()
-				allResults = append(allResults, result)
-				resultsMu.Unlock()
+				mapMu.Lock()
+				runResultsMap[result.IP] = result
+				mapMu.Unlock()
 				batch = append(batch, result)
 
-				// Forward progress to the UI channel (non-blocking)
+				// Forward progress to the UI/CLI channel
 				select {
 				case progressChan <- result:
 				case <-ctx.Done():
@@ -191,15 +214,15 @@ func (s *ScannerService) Run(ctx context.Context, progressChan chan<- *ScanResul
 				}
 
 				if len(batch) >= saveBatchSize {
-					save()
+					saveToDB()
 				}
 			case <-ticker.C:
-				save()
+				saveToDB()
 			}
 		}
 	}()
 
-	// --- Latency Scan Phase ---
+	// Latency Scan Phase
 	if err := s.runLatencyScan(ctx, workerResultsChan); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			s.logger.Printf("Latency scan failed: %v", err)
@@ -209,12 +232,16 @@ func (s *ScannerService) Run(ctx context.Context, progressChan chan<- *ScanResul
 		s.logger.Println("Latency scan phase finished.")
 	}
 
-	// --- Speed Test Phase ---
+	// Speed Test Phase
 	if s.config.DoSpeedtest && ctx.Err() == nil {
-		resultsMu.Lock()
-		resultsCopy := make([]*ScanResult, len(allResults))
-		copy(resultsCopy, allResults)
-		resultsMu.Unlock()
+		mapMu.Lock()
+		resultsCopy := make([]*ScanResult, len(runResultsMap))
+		i := 0
+		for _, r := range runResultsMap {
+			resultsCopy[i] = r
+			i++
+		}
+		mapMu.Unlock()
 
 		if err := s.runSpeedTest(ctx, resultsCopy, workerResultsChan); err != nil {
 			if !errors.Is(err, context.Canceled) {
@@ -227,6 +254,48 @@ func (s *ScannerService) Run(ctx context.Context, progressChan chan<- *ScanResul
 
 	close(workerResultsChan)
 	writerWg.Wait()
+
+	// Final Result Processing and Saving
+	finalCombinedResults := runResultsMap
+	if s.config.Resume {
+		for _, initialResult := range s.initialResults {
+			if _, exists := finalCombinedResults[initialResult.IP]; !exists {
+				finalCombinedResults[initialResult.IP] = initialResult
+			}
+		}
+	}
+
+	var finalResultsSlice []*ScanResult
+	for _, result := range finalCombinedResults {
+		result.PrepareForMarshal()
+		finalResultsSlice = append(finalResultsSlice, result)
+	}
+
+	sort.Slice(finalResultsSlice, func(i, j int) bool {
+		r_i, r_j := finalResultsSlice[i], finalResultsSlice[j]
+		if r_i.Error != nil && r_j.Error == nil {
+			return false
+		}
+		if r_i.Error == nil && r_j.Error != nil {
+			return true
+		}
+		if r_i.Error != nil && r_j.Error != nil {
+			return r_i.IP < r_j.IP
+		}
+		if s.config.DoSpeedtest {
+			if r_i.Latency != r_j.Latency {
+				return r_i.Latency < r_j.Latency
+			}
+			return r_i.DownSpeed > r_j.DownSpeed
+		}
+		return r_i.Latency < r_j.Latency
+	})
+
+	if err := saveResultsToCSV(s.config.OutputFile, finalResultsSlice); err != nil {
+		s.logger.Printf("Error saving final results to CSV: %v", err)
+		return err
+	}
+
 	s.logger.Println("Scan process completed.")
 	return nil
 }
@@ -616,40 +685,21 @@ func LoadResultsFromCSV(filePath string) ([]*ScanResult, error) {
 	return results, nil
 }
 
-// appendResultsToCSV appends a batch of results to the CSV file.
-func appendResultsToCSV(filePath string, batch []*ScanResult) error {
-	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+// saveResultsToCSV overwrites a file with the given results.
+func saveResultsToCSV(filePath string, results []*ScanResult) error {
+	if len(results) == 0 {
+		return nil // Don't create an empty file
+	}
+	for _, r := range results {
+		r.PrepareForMarshal()
+	}
+	file, err := os.Create(filePath)
 	if err != nil {
-		return fmt.Errorf("failed to open file for appending: %w", err)
+		return fmt.Errorf("failed to create/truncate file for saving: %w", err)
 	}
 	defer file.Close()
 
-	info, err := file.Stat()
-	if err != nil {
-		return fmt.Errorf("failed to stat file: %w", err)
-	}
-
-	// Create a buffered writer for efficiency
-	bufWriter := bufio.NewWriter(file)
-
-	// Create the standard csv.Writer
-	csvWriter := csv.NewWriter(bufWriter)
-
-	if info.Size() == 0 {
-		// If the file is new, marshal the batch with headers
-		err = gocsv.MarshalCSV(batch, csvWriter)
-	} else {
-		// If the file exists, marshal without headers to append
-		err = gocsv.MarshalCSVWithoutHeaders(batch, csvWriter)
-	}
-
-	if err != nil {
-		return fmt.Errorf("failed to marshal and append results to CSV: %w", err)
-	}
-
-	// Flush the CSV writer (to the buffer) and then the buffered writer (to the file)
-	csvWriter.Flush()
-	return bufWriter.Flush()
+	return gocsv.MarshalFile(&results, file)
 }
 
 type BypassJA3Transport struct {

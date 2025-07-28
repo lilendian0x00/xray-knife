@@ -13,7 +13,7 @@ import { Sheet, SheetClose, SheetContent, SheetTrigger } from "@/components/ui/s
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Server, Globe, TerminalSquare, Menu, Package2, PanelLeft, Search, Scroll, Ban } from 'lucide-react';
+import { Server, Globe, TerminalSquare, Menu, Package2, PanelLeft, Search, Scroll, Ban, LogOut } from 'lucide-react';
 import { useAppStore } from "@/stores/appStore";
 import { webSocketService } from "@/services/websocket";
 import { ProxyTab } from "./dashboard/ProxyTab";
@@ -39,7 +39,8 @@ export default function Dashboard() {
         proxyStatus, setProxyStatus,
         proxyDetails, setProxyDetails,
         setScanStatus, setScanResults,
-        setHttpResults, setHttpTestStatus
+        setHttpResults, setHttpTestStatus,
+        logout,
     } = useAppStore();
 
     const { theme } = useTheme();
@@ -236,6 +237,7 @@ export default function Dashboard() {
                         </Sheet>
                         <div className="w-full flex-1"><Breadcrumb><BreadcrumbList><BreadcrumbItem><BreadcrumbLink href="/">Home</BreadcrumbLink></BreadcrumbItem><BreadcrumbSeparator /><BreadcrumbItem><BreadcrumbPage>{currentPageInfo?.label}</BreadcrumbPage></BreadcrumbItem></BreadcrumbList></Breadcrumb></div>
                         <Badge className={cn("capitalize", getProxyStatusColor(proxyStatus))}>Proxy: {proxyStatus}</Badge>
+                        <Button variant="ghost" size="icon" onClick={logout} title="Logout"><LogOut className="h-5 w-5" /></Button>
                     </header>
                     <main className="flex-1 overflow-auto p-4 lg:p-6 min-w-0">
                         <div className="mx-auto h-full w-full max-w-screen-2xl">
