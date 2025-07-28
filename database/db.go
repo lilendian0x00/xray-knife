@@ -76,7 +76,7 @@ func runMigrations(db *sql.DB) error {
 	if err != nil {
 		// The only acceptable error is "no change". Anything else is a real problem.
 		if errors.Is(err, migrate.ErrNoChange) {
-			log.Println("Database schema is up-to-date.")
+			//log.Println("Database schema is up-to-date.")
 		} else {
 			// This will now catch any other migration error and report it,
 			// causing the application to exit correctly.
