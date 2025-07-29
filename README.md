@@ -4,7 +4,7 @@
 
 **The Ultimate Swiss Army Knife for Xray and Sing-box**
 
-A powerful command-line utility and web UI designed for testing, managing, and utilizing proxy configurations with dual-core support for both `xray-core` and `sing-box`.
+A powerful command-line utility and secure web UI designed for managing, testing, and utilizing proxy configurations with dual-core support for both `xray-core` and `sing-box`.
 
 </div>
 
@@ -17,25 +17,25 @@ A powerful command-line utility and web UI designed for testing, managing, and u
 
 ---
 
-`xray-knife` is a versatile multi-tool that streamlines the process of working with proxy configurations. Whether you need to test a list of servers for latency and speed, run a local proxy that automatically rotates to the fastest outbound, or scan for optimal edge IPs, `xray-knife` provides a robust and efficient solution.
+`xray-knife` is a versatile multi-tool that streamlines the process of working with proxy configurations. With its persistent database, it serves as a central hub for all your proxy needs, from managing subscription links to finding the fastest and most reliable connections.
 
 ## ✨ Key Features
 
-- **🖥️ Modern Web UI**: Manage all features—proxy, testing, and scanning—through an intuitive, browser-based graphical interface with real-time logs and results.
+- **🛡️ Secure Web UI**: Manage all features through an intuitive, browser-based interface protected by secure JWT authentication. On first run, it automatically generates a `root` user with a secure random password.
+
+- **🗄️ Centralized Database**: All data, including subscription links, configurations, and scan results, is now stored in a persistent SQLite database (`~/.xray-knife/xray-knife.db`).
+
+- **📚 Full Subscription Management**: A new `subs` command allows you to add, fetch, list, and remove subscription links, populating your central configuration library.
 
 - **🚀 Dual-Core Engine**: Seamlessly works with both `xray-core` and `sing-box`, automatically selecting the right core for each configuration type (VLESS, VMess, Trojan, Shadowsocks, Hysteria2, WireGuard, etc.).
 
-- **🔬 Advanced Proxy Tester**: Concurrently test thousands of configs for real latency, download/upload speed, and real IP information. Output results in clean `txt` or `csv` formats.
+- **🔬 Advanced Proxy Tester**: Concurrently test hundreds of configs for real latency, speed, and IP location. Test from a file or pull directly from your database using powerful filters.
 
-- **🔄 Auto-Rotating Proxy**: Run a local SOCKS/HTTP proxy that automatically finds the fastest, working outbound from your list and rotates it on a schedule or on-demand.
+- **🔄 Auto-Rotating Proxy**: Run a local SOCKS/HTTP proxy that automatically finds the fastest, working outbound from your database and rotates it on a schedule or on-demand.
 
-- **🌐 Powerful IP Scanner**: Discover optimal Cloudflare edge IPs (or other providers) by scanning entire CIDR ranges for latency and speed, helping you find the best connection points.
+- **🌐 Powerful IP Scanner**: Discover optimal Cloudflare edge IPs by scanning entire CIDR ranges for latency and speed. Results are saved to the database for future use.
 
-- **🔎 Universal Config Parser**: Decode any configuration link into a human-readable breakdown or generate a full, clean `xray-core` compatible JSON file for debugging or manual use.
-
-- **📚 Subscription Manager**: Add, fetch, list, and remove subscription links, storing all configurations in a central database.
-
-- **💻 Cross-Platform**: A single, dependency-free binary available for Linux, Windows, macOS, and Android.
+- **🔎 Universal Config Parser**: Decode any configuration link into a human-readable breakdown or generate a full, clean `xray-core` compatible JSON file.
 
 ## 📦 Installation
 
@@ -54,7 +54,7 @@ chmod +x xray-knife
 
 ### Using `go install`
 
-If you have Go installed, you can build and install `xray-knife` with a single command:
+If you have Go (1.21+) installed, you can build and install `xray-knife` with a single command:
 ```bash
 go install github.com/lilendian0x00/xray-knife/v7@latest
 ```
@@ -70,37 +70,79 @@ Here are some practical examples for the main commands.
 
 ### 🖥️ Using the Web UI (`webui`)
 
-Launch a local web server to access all of `xray-knife`'s features through a modern, graphical user interface.
+Launch a local web server to access all of `xray-knife`'s features through a modern, secure graphical user interface.
 
-**1. Start the Web UI Server**
-Run the following command to start the server. By default, it will be accessible at `http://127.0.0.1:8080`.
+**1. Start the Web UI Server (First Run)**
+On its first run, `xray-knife` will automatically generate secure credentials and save them to `~/.xray-knife/webui.conf`. The password will be printed to the console.
+
 ```bash
 xray-knife webui
 ```
-You can then open the URL in your browser to manage the proxy, run tests, and view results in real-time.
+*Console Output on first run:*
+```
+...
+[ℹ️] Generating new credentials for Web UI...
+[✅] Credentials saved to /home/user/.xray-knife/webui.conf
+[+] Starting Web UI server on http://127.0.0.1:8080
 
-**2. Run on a different address or port**
-Use flags to change the listen address and port, for example, to make it accessible on your local network.
+--- Please use the following credentials to log in ---
+Username: root
+Password: a_very_secure_random_password
+-----------------------------------------------------
+
+[i] Press CTRL+C to stop the server.
+```
+Open `http://127.0.0.1:8080` in your browser and log in with the generated credentials.
+
+**2. Run with Custom Credentials**
+You can override the config file using flags or environment variables. This is useful for server deployments.
 ```bash
-xray-knife webui --addr 0.0.0.0 --port 9090
+xray-knife webui --auth.user myadmin --auth.password 's3cur3p@ss' --auth.secret 'a_very_long_and_random_string'
+```
+> For more details on credential priority, see the `xray-knife webui --help` command.
+
+---
+
+### 📚 Managing Subscriptions (`subs`)
+
+Build your central configuration library using subscription links.
+
+**1. Add and Fetch Subscriptions**
+```bash
+# Add a subscription with a custom name
+xray-knife subs add --url "YOUR_SUBSCRIPTION_URL" --remark "My Subs"
+
+# List all your subscriptions
+xray-knife subs show
+
+# Fetch all configs from the subscription with ID 1
+xray-knife subs fetch --id 1
 ```
 
 ---
 
 ### 🧪 Testing Configs (`http`)
 
-Test a list of proxy configurations for latency, speed, and more.
+Test proxy configurations for latency, speed, and more.
 
-**1. Basic Latency Test**
-Test all configs from a file, using 50 concurrent threads, and save the working ones to `valid.txt`.
+**1. Test**
+This is the new, powerful way to test configs. It pulls directly from the library you built with the `subs` command.
+
 ```bash
-xray-knife http -f configs.txt -t 50 -o valid.txt
+# Test configs from a file, with a speed test
+xray-knife http -f ./configs.txt --speedtest
+
+# Test up to 100 'vless' configs from your database, with a speed test
+xray-knife http --from-db --limit 100 --protocol vless --speedtest
+
+# Test all configs belonging to subscription ID 1
+xray-knife http --from-db --sub-id 1
 ```
 
-**2. Speed Test and CSV Output**
-Perform a speed test, sort results by the fastest latency, and save a detailed report to a CSV file.
+**2. List Results**
+View a summary of the results from the most recent test run.
 ```bash
-xray-knife http -f configs.txt --speedtest --sort --type csv -o results.csv
+xray-knife http list-results --limit 20
 ```
 
 ---
@@ -109,35 +151,37 @@ xray-knife http -f configs.txt --speedtest --sort --type csv -o results.csv
 
 Run a local proxy that intelligently manages and rotates your outbound connections.
 
-**1. Run a Rotating SOCKS5 Proxy**
-Start a local SOCKS5 proxy on port `9999`. It will test configs from `configs.txt` and automatically rotate to the best-performing one every 5 minutes (300 seconds).
+**1. Run a Rotating SOCKS5 Proxy from the Database**
+Start a local SOCKS5 proxy on port `9999`. It will load all enabled configs from your database and automatically rotate to the best-performing one every 5 minutes (300 seconds).
+
 ```bash
-xray-knife proxy -f configs.txt --port 9999 --rotate 300
+# Proxy to configs from a file
+xray-knife proxy --inbound socks -f ./configs.txt --port 9999 --rotate 300
+
+# Proxy to configs from your database
+xray-knife proxy --inbound socks --port 9999 --rotate 300
 ```
 > **Pro Tip:** While the proxy is running, simply press `Enter` in the terminal to force an immediate rotation to the next available fast configuration.
 
-**2. Use a Single, Static Config**
-Run the proxy using just one configuration link without rotation.
-```bash
-xray-knife proxy -c "vless://..." --port 9999
-```
-
 ---
 
-### 🌐 Scanning for Cloudflare IPs (`scanner cfscanner`)
+### 🌐 Scanning for Cloudflare IPs (`cfscanner`)
 
-Find the fastest Cloudflare edge IPs for your location.
+Find the fastest Cloudflare edge IPs for your location. Results are automatically saved to the database.
 
-**1. Scan a Subnet with Speed Test**
-Scan a CIDR subnet with 100 threads, including a speed test for each IP, and save the sorted results.
+**1. Scan Subnets with a Speed Test**
+Scan subnets from a file, perform a speed test on the top 10 fastest IPs, and save results.
 ```bash
-xray-knife scanner cfscanner -s "104.16.0.0/16" -t 100 -p -o cf_results.txt
+xray-knife cfscanner -s subnets.txt --speedtest --speedtest-top 10
 ```
 
-**2. Scan from a File with Live Output**
-Scan multiple subnets from a file (`subnets.txt`) and save results to `live_results.txt` as they are found (unsorted), in addition to the final sorted file.
+**2. Resume and View Results**
 ```bash
-xray-knife scanner cfscanner -s subnets.txt -t 200 -l live_results.txt -o final_results.txt
+# Continue a previous scan, skipping already tested IPs
+xray-knife cfscanner -s subnets.txt --resume
+
+# View the best IPs from all previous scans, sorted by performance
+xray-knife cfscanner list-results --limit 25
 ```
 
 ---
@@ -147,29 +191,22 @@ xray-knife scanner cfscanner -s subnets.txt -t 200 -l live_results.txt -o final_
 Decode and inspect any configuration link.
 
 **1. Get a Human-Readable Breakdown**
-Display a detailed, easy-to-read summary of a configuration link.
+Display a detailed summary of a configuration link.
 ```bash
 xray-knife parse -c "trojan://..."
 ```
 
 **2. Generate Full JSON Config**
-Generate a complete, clean, and ready-to-use `xray-core` compatible JSON configuration. This is perfect for debugging or use with other tools.
+Generate a complete, clean, and ready-to-use `xray-core` compatible JSON configuration.
 ```bash
 xray-knife parse -c "vless://..." --json > my_config.json
 ```
 
 ---
 
-### 📚 Fetching Subscriptions (`subs fetch`)
-
-Download and save all configurations from a subscription link.
-```bash
-xray-knife subs fetch -u "https://example.com/sub/link" -o my_configs.txt
-```
-
 ## 🏗️ Build from Source
 
-To build `xray-knife` from the source code, clone the repository and use the provided build script.
+To build `xray-knife` from the source code, clone the repository and build the main package.
 
 ```bash
 git clone https://github.com/lilendian0x00/xray-knife.git
@@ -179,9 +216,9 @@ cd xray-knife
 ./build.sh all
 
 # Or build for your current platform
-go build -o xray-knife main.go
+go build -o xray-knife .
 ```
-The compiled binaries will be placed in the `build` directory.
+The compiled binary will be placed in `build` or the current directory based on your choice.
 
 ## 🤝 Contributing
 
