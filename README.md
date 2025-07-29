@@ -55,9 +55,6 @@ chmod +x xray-knife
 ### Using `go install`
 
 If you have Go (1.21+) installed, you can build and install `xray-knife` with a single command:
-```bash
-go install github.com/lilendian0x00/xray-knife/v7@latest
-```
 
 ### Arch linux aur
 you can find package in [AUR](https://aur.archlinux.org/packages/xray-knife-bin) or use command bellow te get the latest version on Arch linux
@@ -93,30 +90,6 @@ xray-knife webui
 [✅] Credentials saved to /home/user/.xray-knife/webui.conf
 [+] Starting Web UI server on http://127.0.0.1:8080
 
---- Please use the following credentials to log in ---
-Username: root
-Password: a_very_secure_random_password
------------------------------------------------------
-
-[i] Press CTRL+C to stop the server.
-```
-Open `http://127.0.0.1:8080` in your browser and log in with the generated credentials.
-
-**2. Run with Custom Credentials**
-You can override the config file using flags or environment variables. This is useful for server deployments.
-```bash
-xray-knife webui --auth.user myadmin --auth.password 's3cur3p@ss' --auth.secret 'a_very_long_and_random_string'
-```
-> For more details on credential priority, see the `xray-knife webui --help` command.
-
----
-
-### 📚 Managing Subscriptions (`subs`)
-
-Build your central configuration library using subscription links.
-
-**1. Add and Fetch Subscriptions**
-```bash
 # Add a subscription with a custom name
 xray-knife subs add --url "YOUR_SUBSCRIPTION_URL" --remark "My Subs"
 

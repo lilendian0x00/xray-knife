@@ -42,16 +42,23 @@ class WebSocketService {
         }
     }
 
-    // --- Connection Management ---
+    // Connection Management
     connect() {
-        // No longer accepts a terminal object
         if (this.ws && this.ws.readyState < 2) return;
 
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
         this.ws = new WebSocket(wsUrl);
 
-        this.ws.onopen = () => this.emit('log', "\x1b[32m[WebSocket] Connection established.\x1b[0m");
+        this.ws.onopen = () => {
+            this.emit('log', "\x1b[32m[WebSocket] Connection established.\x1b[0m");
+            // Send auth token immediately after connection
+            const token = useAppStore.getState().token;
+            if (token) {
+                const authMsg = JSON.stringify({ type: 'auth', token });
+                this.ws?.send(authMsg);
+            }
+        };
         this.ws.onmessage = this.handleMessage.bind(this);
         this.ws.onclose = () => {
             this.emit('log', "\x1b[31m[WebSocket] Connection closed. Retrying in 3 seconds...\x1b[0m");

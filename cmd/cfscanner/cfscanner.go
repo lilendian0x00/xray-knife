@@ -1,4 +1,4 @@
-package scanner
+package cfscanner
 
 import (
 	"context"
@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	pkgscanner "github.com/lilendian0x00/xray-knife/v6/pkg/scanner"
-	"github.com/lilendian0x00/xray-knife/v6/utils"
-	"github.com/lilendian0x00/xray-knife/v6/utils/customlog"
+	pkgscanner "github.com/lilendian0x00/xray-knife/v7/pkg/scanner"
+	"github.com/lilendian0x00/xray-knife/v7/utils"
+	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
 	"github.com/spf13/cobra"
 )
 

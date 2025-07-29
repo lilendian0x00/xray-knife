@@ -12,9 +12,9 @@ import (
 	"sync"
 
 	"github.com/gocarina/gocsv"
-	pkghttp "github.com/lilendian0x00/xray-knife/v6/pkg/http"
-	"github.com/lilendian0x00/xray-knife/v6/pkg/proxy"
-	"github.com/lilendian0x00/xray-knife/v6/pkg/scanner"
+	pkghttp "github.com/lilendian0x00/xray-knife/v7/pkg/http"
+	"github.com/lilendian0x00/xray-knife/v7/pkg/proxy"
+	"github.com/lilendian0x00/xray-knife/v7/pkg/scanner"
 )
 
 // appendResultsToCSV appends a batch of results to a CSV file.

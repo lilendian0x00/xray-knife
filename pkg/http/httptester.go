@@ -2,15 +2,16 @@ package http
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"github.com/gocarina/gocsv"
+	"github.com/lilendian0x00/xray-knife/v7/database"
+	"github.com/lilendian0x00/xray-knife/v7/utils"
+	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
 	"log"
 	"sort"
 	"strings"
 	"sync"
-
-	"github.com/gocarina/gocsv"
-	"github.com/lilendian0x00/xray-knife/v6/utils"
-	"github.com/lilendian0x00/xray-knife/v6/utils/customlog"
 )
 
 // HttpTestRequest encapsulates all parameters for an HTTP test job.
@@ -25,14 +26,14 @@ type ConfigResults []*Result
 
 // ResultProcessor handles the processing and storage of test results
 type ResultProcessor struct {
-	validConfigs   []string
-	validConfigsMu sync.Mutex
-	outputFile     string
-	outputType     string
-	sorted         bool
+	runID      int64
+	outputFile string
+	outputType string
+	sorted     bool
 }
 
 type ResultProcessorOptions struct {
+	RunID      int64
 	OutputFile string
 	OutputType string
 	Sorted     bool
@@ -41,10 +42,10 @@ type ResultProcessorOptions struct {
 // NewResultProcessor creates a new ResultProcessor instance
 func NewResultProcessor(opts ResultProcessorOptions) *ResultProcessor {
 	return &ResultProcessor{
-		validConfigs: make([]string, 0),
-		outputFile:   opts.OutputFile,
-		outputType:   opts.OutputType,
-		sorted:       opts.Sorted,
+		runID:      opts.RunID,
+		outputFile: opts.OutputFile,
+		outputType: opts.OutputType,
+		sorted:     opts.Sorted,
 	}
 }
 
@@ -131,65 +132,92 @@ func (tm *TestManager) RunTests(ctx context.Context, links []string, resultsChan
 	wg.Wait()
 }
 
-// SaveResults saves the test results to a file
+// SaveResults saves results first to the DB, then optionally to a file.
 func (rp *ResultProcessor) SaveResults(results ConfigResults) error {
-	if rp.sorted {
-		sort.Sort(results)
+	// Step 1: Always save to the database first.
+	dbResults := make([]database.HttpTestResult, 0, len(results))
+	passedCount := 0
+
+	for _, res := range results {
+		dbRes := database.HttpTestResult{
+			RunID:        rp.runID,
+			ConfigLink:   res.ConfigLink,
+			Status:       res.Status,
+			Reason:       sql.NullString{String: res.Reason, Valid: res.Reason != ""},
+			DelayMs:      -1, // Default for non-passed tests
+			DownloadMbps: 0,
+			UploadMbps:   0,
+		}
+
+		if res.Status == "passed" {
+			passedCount++
+			dbRes.DelayMs = res.Delay
+			dbRes.DownloadMbps = float64(res.DownloadSpeed)
+			dbRes.UploadMbps = float64(res.UploadSpeed)
+			dbRes.IPAddress = sql.NullString{String: res.RealIPAddr, Valid: res.RealIPAddr != "" && res.RealIPAddr != "null"}
+			dbRes.IPLocation = sql.NullString{String: res.IpAddrLoc, Valid: res.IpAddrLoc != "" && res.IpAddrLoc != "null"}
+		}
+		dbResults = append(dbResults, dbRes)
 	}
 
-	switch rp.outputType {
-	case "txt":
-		return rp.saveTxtResults(results)
-	case "csv":
-		return rp.saveCSVResults(results)
-	default:
-		return fmt.Errorf("unsupported output type: %s", rp.outputType)
-	}
-}
-
-// saveTxtResults saves results in text format
-func (rp *ResultProcessor) saveTxtResults(results ConfigResults) error {
-	for _, v := range results {
-		if v.Status == "passed" {
-			rp.validConfigs = append(rp.validConfigs, v.ConfigLink)
+	if len(dbResults) > 0 {
+		if err := database.InsertHttpTestResultsBatch(rp.runID, dbResults); err != nil {
+			return fmt.Errorf("failed to save results to database: %w", err)
 		}
 	}
 
-	content := strings.Join(rp.validConfigs, "\n\n")
-	if err := utils.WriteIntoFile(rp.outputFile, []byte(content)); err != nil {
-		return fmt.Errorf("failed to save configs: %v", err)
+	customlog.Printf(customlog.Finished, "Test run finished. A total of %d working configs (out of %d) saved to the database.\n",
+		passedCount, len(dbResults))
+
+	// Step 2: If an output file is specified, save to it as well.
+	if rp.outputFile != "" {
+		if rp.sorted {
+			sort.Sort(results)
+		}
+		switch rp.outputType {
+		case "txt":
+			return rp.saveTxtResults(results)
+		case "csv":
+			return rp.saveCSVResults(results)
+		default:
+			return fmt.Errorf("unsupported output type: %s", rp.outputType)
+		}
 	}
 
-	customlog.Printf(customlog.Finished, "A total of %d working configurations have been saved to %s\n",
-		len(rp.validConfigs), rp.outputFile)
 	return nil
 }
 
-// saveCSVResults saves results in CSV format
-func (rp *ResultProcessor) saveCSVResults(results ConfigResults) error {
-	// Ensure the file has a .csv extension. gocsv does not add it automatically.
-	csvFile := rp.outputFile
-	if !strings.HasSuffix(csvFile, ".csv") {
-		csvFile += ".csv"
-	}
-
-	out, err := gocsv.MarshalString(&results)
-	if err != nil {
-		return fmt.Errorf("failed to marshal CSV: %v", err)
-	}
-
-	if err := utils.WriteIntoFile(csvFile, []byte(out)); err != nil {
-		return fmt.Errorf("failed to save configs: %v", err)
-	}
-
-	passedCount := 0
+// saveTxtResults saves results in text format (private helper method)
+func (rp *ResultProcessor) saveTxtResults(results ConfigResults) error {
+	var validConfigs []string
 	for _, v := range results {
 		if v.Status == "passed" {
-			passedCount++
+			validConfigs = append(validConfigs, v.ConfigLink)
 		}
 	}
 
-	customlog.Printf(customlog.Finished, "A total of %d configurations (with %d working) have been saved to %s\n",
-		len(results), passedCount, csvFile)
+	content := strings.Join(validConfigs, "\n\n")
+	if err := utils.WriteIntoFile(rp.outputFile, []byte(content)); err != nil {
+		return fmt.Errorf("failed to save TXT results: %w", err)
+	}
+
+	customlog.Printf(customlog.Finished, "%d working configurations have also been saved to %s\n",
+		len(validConfigs), rp.outputFile)
+	return nil
+}
+
+// saveCSVResults saves results in CSV format (private helper method)
+func (rp *ResultProcessor) saveCSVResults(results ConfigResults) error {
+	out, err := gocsv.MarshalString(&results)
+	if err != nil {
+		return fmt.Errorf("failed to marshal CSV: %w", err)
+	}
+
+	if err := utils.WriteIntoFile(rp.outputFile, []byte(out)); err != nil {
+		return fmt.Errorf("failed to save CSV results: %w", err)
+	}
+
+	customlog.Printf(customlog.Finished, "Full test results for %d configurations have also been saved to %s\n",
+		len(results), rp.outputFile)
 	return nil
 }

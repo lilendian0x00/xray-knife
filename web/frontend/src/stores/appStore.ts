@@ -3,7 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { type ProxySettings, type HttpTesterSettings, type CfScannerSettings } from '@/types/settings';
 import { type HttpResult, type ProxyStatus, type ProxyDetails, type ScanResult } from '@/types/dashboard';
 
-// --- Default States ---
+// Default States
 const defaultProxySettings: ProxySettings = {
     coreType: 'xray', listenAddr: '127.0.0.1', listenPort: '9999', inboundProtocol: 'socks',
     inboundTransport: 'tcp', inboundUUID: 'random', rotationInterval: 300, maximumAllowedDelay: 3000,
@@ -39,6 +39,8 @@ interface AppState {
     proxyDetails: ProxyDetails | null;
     httpTestProgress: ProgressState;
     scanProgress: ProgressState;
+    token: string | null;
+    isAuthenticated: boolean;
 }
 
 interface AppActions {
@@ -60,6 +62,8 @@ interface AppActions {
     setProxyDetails: (details: ProxyDetails | null) => void;
     setHttpTestProgress: (progress: ProgressState) => void;
     setScanProgress: (progress: ProgressState) => void;
+    setToken: (token: string | null) => void;
+    logout: () => void;
 }
 
 export const useAppStore = create<AppState & AppActions>()(
@@ -76,6 +80,9 @@ export const useAppStore = create<AppState & AppActions>()(
             proxyDetails: null,
             httpTestProgress: initialProgress,
             scanProgress: initialProgress,
+            token: null,
+            isAuthenticated: false,
+
             updateProxySettings: (newSettings) => set(state => ({ proxySettings: { ...state.proxySettings, ...newSettings } })),
             updateHttpSettings: (newSettings) => set(state => ({ httpSettings: { ...state.httpSettings, ...newSettings } })),
             updateCfScannerSettings: (newSettings) => set(state => ({ cfScannerSettings: { ...state.cfScannerSettings, ...newSettings } })),
@@ -100,6 +107,8 @@ export const useAppStore = create<AppState & AppActions>()(
             setProxyDetails: (details) => set({ proxyDetails: details }),
             setHttpTestProgress: (progress) => set({ httpTestProgress: progress }),
             setScanProgress: (progress) => set({ scanProgress: progress }),
+            setToken: (token) => set({ token, isAuthenticated: !!token }),
+            logout: () => set({ token: null, isAuthenticated: false }),
         }),
         {
             name: 'xray-knife-app-storage',
@@ -107,8 +116,14 @@ export const useAppStore = create<AppState & AppActions>()(
             partialize: (state) => ({ 
                 proxySettings: state.proxySettings,
                 httpSettings: state.httpSettings,
-                cfScannerSettings: state.cfScannerSettings
+                cfScannerSettings: state.cfScannerSettings,
+                token: state.token,
             }),
+            onRehydrateStorage: () => (state) => {
+                if (state) {
+                    state.isAuthenticated = !!state.token;
+                }
+            },
         }
     )
 );
