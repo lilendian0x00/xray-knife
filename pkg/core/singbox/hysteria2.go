@@ -3,7 +3,7 @@ package singbox
 import (
 	"context"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/v6/pkg/core/protocol"
+	"github.com/lilendian0x00/xray-knife/v7/pkg/core/protocol"
 	"net"
 	"net/url"
 	"strconv"

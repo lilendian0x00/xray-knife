@@ -33,7 +33,7 @@ A powerful command-line utility and web UI designed for testing, managing, and u
 
 - **🔎 Universal Config Parser**: Decode any configuration link into a human-readable breakdown or generate a full, clean `xray-core` compatible JSON file for debugging or manual use.
 
-- **📚 Subscription Manager**: Fetch, update, and manage configurations from remote subscription links with a single command.
+- **📚 Subscription Manager**: Add, fetch, list, and remove subscription links, storing all configurations in a central database.
 
 - **💻 Cross-Platform**: A single, dependency-free binary available for Linux, Windows, macOS, and Android.
 
@@ -56,7 +56,7 @@ chmod +x xray-knife
 
 If you have Go installed, you can build and install `xray-knife` with a single command:
 ```bash
-go install github.com/lilendian0x00/xray-knife/v6@latest
+go install github.com/lilendian0x00/xray-knife/v7@latest
 ```
 
 ## 🛠️ Usage

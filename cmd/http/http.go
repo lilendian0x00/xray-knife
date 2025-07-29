@@ -13,10 +13,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/lilendian0x00/xray-knife/v6/database"
-	pkghttp "github.com/lilendian0x00/xray-knife/v6/pkg/http"
-	"github.com/lilendian0x00/xray-knife/v6/utils"
-	"github.com/lilendian0x00/xray-knife/v6/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v7/database"
+	pkghttp "github.com/lilendian0x00/xray-knife/v7/pkg/http"
+	"github.com/lilendian0x00/xray-knife/v7/utils"
+	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"

@@ -1,11 +1,11 @@
-module github.com/lilendian0x00/xray-knife/v6
+module github.com/lilendian0x00/xray-knife/v7
 
 go 1.24
 
 toolchain go1.24.2
 
 require (
-	github.com/alitto/pond/v2 v2.4.0
+	github.com/alitto/pond/v2 v2.5.0
 	github.com/fatih/color v1.18.0
 	github.com/gocarina/gocsv v0.0.0-20240520201108-78e41c74b4b1
 	github.com/golang-jwt/jwt/v5 v5.2.3

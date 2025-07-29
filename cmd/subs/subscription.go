@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/lilendian0x00/xray-knife/v6/utils"
-	"github.com/lilendian0x00/xray-knife/v6/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v7/utils"
+	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
 
 	"github.com/imroc/req/v3"
 )

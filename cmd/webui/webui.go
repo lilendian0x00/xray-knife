@@ -5,13 +5,13 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/v6/utils"
-	"github.com/lilendian0x00/xray-knife/v6/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v7/utils"
+	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/lilendian0x00/xray-knife/v6/web"
+	"github.com/lilendian0x00/xray-knife/v7/web"
 	"github.com/spf13/cobra"
 )
 

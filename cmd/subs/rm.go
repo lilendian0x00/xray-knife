@@ -2,8 +2,8 @@ package subs
 
 import (
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/v6/database"
-	"github.com/lilendian0x00/xray-knife/v6/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v7/database"
+	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
 	"github.com/spf13/cobra"
 	"strconv"
 )
