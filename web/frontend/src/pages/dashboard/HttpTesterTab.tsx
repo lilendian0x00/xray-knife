@@ -110,7 +110,7 @@ export function HttpTesterTab() {
                         <fieldset disabled={isBusy} className="space-y-6">
                             <div>
                                 <Label htmlFor="http-test-configs" className="mb-2 block">Configuration Links</Label>
-                                <Textarea id="http-test-configs" placeholder="Enter config links, one per line..." className="h-40 font-mono text-sm resize-y min-h-[100px]" value={httpTestConfigs} onChange={(e) => setHttpTestConfigs(e.target.value)} />
+                                <Textarea id="http-test-configs" placeholder="Enter config links, one per line..." className="h-40 font-mono text-sm resize-y" value={httpTestConfigs} onChange={(e) => setHttpTestConfigs(e.target.value)} />
                             </div>
                             <div className="space-y-4">
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

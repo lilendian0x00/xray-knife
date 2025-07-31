@@ -120,7 +120,7 @@ export function CfScannerTab() {
                         <fieldset disabled={isBusy} className="space-y-4">
                             <div>
                                 <div className="flex items-center justify-between mb-1"><Label htmlFor="subnets" className="text-xs text-muted-foreground">Subnets / IP Ranges</Label><Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={handleLoadRanges} disabled={isLoadingRanges}>{isLoadingRanges ? <Loader2 className="mr-1.5 size-3 animate-spin" /> : <CloudDownload className="mr-1.5 size-3" />} Load CF Ranges</Button></div>
-                                <Textarea id="subnets" placeholder="Paste IP ranges here, one per line." className="font-mono" value={subnets} onChange={(e) => setSubnets(e.target.value)} />
+                                <Textarea id="subnets" placeholder="Paste IP ranges here, one per line." className="h-40 font-mono resize-y" value={subnets} onChange={(e) => setSubnets(e.target.value)} />
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="flex flex-col gap-2"><Label>Threads</Label><InputNumber min={1} max={1000} value={cfScannerSettings.threadCount} onChange={(v) => updateCfScannerSettings({ threadCount: v })} /></div>
