@@ -392,7 +392,7 @@ func (s *CfScannerRunner) Start(config interface{}) error {
 	}
 
 	cfg.OutputFile = cfScannerHistoryFile
-	cfg.Verbose = true
+	cfg.Verbose = false
 
 	service, err := scanner.NewScannerService(cfg, s.logger)
 	if err != nil {
