@@ -33,6 +33,7 @@ type Result struct {
 	TLS           string            `csv:"tls" json:"tls"`           // none, tls, reality
 	RealIPAddr    string            `csv:"ip" json:"ip"`             // Real ip address (req to cloudflare.com/cdn-cgi/trace)
 	Delay         int64             `csv:"delay" json:"delay"`       // millisecond
+	HTTPCode      int               `csv:"code" json:"code"`         // HTTP status code of the tested URL
 	DownloadSpeed float32           `csv:"download" json:"download"` // mbps
 	UploadSpeed   float32           `csv:"upload" json:"upload"`     // mbps
 	IpAddrLoc     string            `csv:"location" json:"location"` // IP address location
@@ -149,6 +150,7 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 		ConfigLink: link,
 		Status:     "passed",
 		Delay:      failedDelay,
+        HTTPCode:   -1,
 		RealIPAddr: "null",
 		IpAddrLoc:  "null",
 	}
@@ -196,13 +198,14 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 	}
 	defer instance.Close()
 
-	delay, _, body, err := MeasureDelay(ctx, client, e.ShowBody, e.TestEndpoint, e.TestEndpointHttpMethod)
+    delay, code, body, err := MeasureDelay(ctx, client, e.ShowBody, e.TestEndpoint, e.TestEndpointHttpMethod)
 	if err != nil {
 		r.Status = "failed"
 		r.Reason = err.Error()
 		return r, err
 	}
 	r.Delay = delay
+    r.HTTPCode = code
 
 	if uint16(delay) > e.MaxDelay {
 		r.Status = "timeout"
