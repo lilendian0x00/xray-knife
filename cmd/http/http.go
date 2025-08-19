@@ -48,6 +48,7 @@ type Config struct {
 	OutputType        string
 	SortedByRealDelay bool
 
+	SaveToDB            bool
 	Speedtest           bool
 	GetIPInfo           bool
 	SpeedtestAmount     uint32
@@ -270,11 +271,14 @@ func handleMultipleConfigs(examiner *pkghttp.Examiner, config *Config, links []s
 		return fmt.Errorf("failed to marshal test options to JSON: %w", err)
 	}
 
-	runID, err := database.CreateHttpTestRun(string(optsJson), len(links))
-	if err != nil {
-		return fmt.Errorf("failed to create database entry for test run: %w", err)
+	var runID int64
+	if config.SaveToDB {
+		runID, err = database.CreateHttpTestRun(string(optsJson), len(links))
+		if err != nil {
+			return fmt.Errorf("failed to create database entry for test run: %w", err)
+		}
+		customlog.Printf(customlog.Info, "Created test run with ID: %d. Results will be saved to the database.\n", runID)
 	}
-	customlog.Printf(customlog.Info, "Created test run with ID: %d. Results will be saved to the database.\n", runID)
 
 	// Setup the result processor with the new runID and file options
 	processor := pkghttp.NewResultProcessor(
@@ -397,6 +401,7 @@ func addFlags(cmd *cobra.Command, config *Config) {
 	flags.StringVarP(&config.OutputFile, "out", "o", "valid.txt", "Output file for valid/all config links")
 	flags.StringVarP(&config.OutputType, "type", "x", "txt", "Output type for file (csv, txt)")
 	flags.BoolVarP(&config.SortedByRealDelay, "sort", "s", true, "Sort config links by their delay (fast to slow) in file output")
+	flags.BoolVar(&config.SaveToDB, "save-db", false, "Save test results to the database")
 
 	cmd.MarkFlagsMutuallyExclusive("file", "config", "from-db")
 }

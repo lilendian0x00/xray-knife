@@ -122,7 +122,8 @@ func init() {
 	CFscannerCmd.Flags().IntVarP(&cliConfig.UploadMB, "upload-mb", "m", 10, "Custom amount of data to upload for speedtest (in MB)")
 	CFscannerCmd.Flags().StringVarP(&cliConfig.ConfigLink, "config", "C", "", "Use a config link as a proxy to test IPs")
 	CFscannerCmd.Flags().BoolVarP(&cliConfig.InsecureTLS, "insecure", "E", false, "Allow insecure TLS connections for the proxy config")
-	CFscannerCmd.Flags().BoolVar(&cliConfig.Resume, "resume", false, "Resume scan from output file")
+	CFscannerCmd.Flags().BoolVar(&cliConfig.Resume, "resume", false, "Resume scan from previous results (file or DB)")
+	CFscannerCmd.Flags().BoolVar(&cliConfig.SaveToDB, "save-db", false, "Save scan results to the database")
 
 	_ = CFscannerCmd.MarkFlagRequired("subnets")
 }

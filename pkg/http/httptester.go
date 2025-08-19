@@ -134,42 +134,48 @@ func (tm *TestManager) RunTests(ctx context.Context, links []string, resultsChan
 
 // SaveResults saves results first to the DB, then optionally to a file.
 func (rp *ResultProcessor) SaveResults(results ConfigResults) error {
-	// Step 1: Always save to the database first.
-	dbResults := make([]database.HttpTestResult, 0, len(results))
 	passedCount := 0
-
 	for _, res := range results {
-		dbRes := database.HttpTestResult{
-			RunID:        rp.runID,
-			ConfigLink:   res.ConfigLink,
-			Status:       res.Status,
-			Reason:       sql.NullString{String: res.Reason, Valid: res.Reason != ""},
-			DelayMs:      -1, // Default for non-passed tests
-			DownloadMbps: 0,
-			UploadMbps:   0,
-		}
-
 		if res.Status == "passed" {
 			passedCount++
-			dbRes.DelayMs = res.Delay
-			dbRes.DownloadMbps = float64(res.DownloadSpeed)
-			dbRes.UploadMbps = float64(res.UploadSpeed)
-			dbRes.IPAddress = sql.NullString{String: res.RealIPAddr, Valid: res.RealIPAddr != "" && res.RealIPAddr != "null"}
-			dbRes.IPLocation = sql.NullString{String: res.IpAddrLoc, Valid: res.IpAddrLoc != "" && res.IpAddrLoc != "null"}
-		}
-		dbResults = append(dbResults, dbRes)
-	}
-
-	if len(dbResults) > 0 {
-		if err := database.InsertHttpTestResultsBatch(rp.runID, dbResults); err != nil {
-			return fmt.Errorf("failed to save results to database: %w", err)
 		}
 	}
 
-	customlog.Printf(customlog.Finished, "Test run finished. A total of %d working configs (out of %d) saved to the database.\n",
-		passedCount, len(dbResults))
+	// Save to the database if a runID is available.
+	if rp.runID > 0 {
+		dbResults := make([]database.HttpTestResult, 0, len(results))
+		for _, res := range results {
+			dbRes := database.HttpTestResult{
+				RunID:        rp.runID,
+				ConfigLink:   res.ConfigLink,
+				Status:       res.Status,
+				Reason:       sql.NullString{String: res.Reason, Valid: res.Reason != ""},
+				DelayMs:      -1, // Default for non-passed tests
+				DownloadMbps: 0,
+				UploadMbps:   0,
+			}
 
-	// Step 2: If an output file is specified, save to it as well.
+			if res.Status == "passed" {
+				dbRes.DelayMs = res.Delay
+				dbRes.DownloadMbps = float64(res.DownloadSpeed)
+				dbRes.UploadMbps = float64(res.UploadSpeed)
+				dbRes.IPAddress = sql.NullString{String: res.RealIPAddr, Valid: res.RealIPAddr != "" && res.RealIPAddr != "null"}
+				dbRes.IPLocation = sql.NullString{String: res.IpAddrLoc, Valid: res.IpAddrLoc != "" && res.IpAddrLoc != "null"}
+			}
+			dbResults = append(dbResults, dbRes)
+		}
+
+		if len(dbResults) > 0 {
+			if err := database.InsertHttpTestResultsBatch(rp.runID, dbResults); err != nil {
+				return fmt.Errorf("failed to save results to database: %w", err)
+			}
+		}
+		customlog.Printf(customlog.Finished, "Test run finished. A total of %d working configs (out of %d) saved to the database.\n", passedCount, len(results))
+	} else {
+		customlog.Printf(customlog.Finished, "Test run finished. Found %d working configs (out of %d).\n", passedCount, len(results))
+	}
+
+	// If an output file is specified, save to it as well.
 	if rp.outputFile != "" {
 		if rp.sorted {
 			sort.Sort(results)

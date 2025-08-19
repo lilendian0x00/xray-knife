@@ -59,6 +59,7 @@ type ScannerConfig struct {
 	ConfigLink           string   `json:"configLink"`
 	InsecureTLS          bool     `json:"insecureTLS"`
 	Resume               bool     `json:"resume"`
+	SaveToDB             bool     `json:"saveToDB"`
 }
 
 // ScannerService is the main engine for scanning.
@@ -105,27 +106,40 @@ func NewScannerService(config ScannerConfig, logger *log.Logger) (*ScannerServic
 	}
 
 	if s.config.Resume {
-		dbResults, err := database.GetCfScanResults()
-		if err != nil {
-			s.logger.Printf("Could not resume from database: %v. Starting fresh.", err)
-		} else if len(dbResults) > 0 {
-			s.initialResults = make([]*ScanResult, 0, len(dbResults))
-			for ip, dbRes := range dbResults {
-				s.scannedIPs[ip] = true
-				res := &ScanResult{
-					IP:        dbRes.IP,
-					Latency:   time.Duration(dbRes.LatencyMs.Int64) * time.Millisecond,
-					LatencyMS: dbRes.LatencyMs.Int64,
-					DownSpeed: dbRes.DownloadMbps.Float64,
-					UpSpeed:   dbRes.UploadMbps.Float64,
+		if s.config.SaveToDB {
+			dbResults, err := database.GetCfScanResults()
+			if err != nil {
+				s.logger.Printf("Could not resume from database: %v. Starting fresh.", err)
+			} else if len(dbResults) > 0 {
+				s.initialResults = make([]*ScanResult, 0, len(dbResults))
+				for ip, dbRes := range dbResults {
+					s.scannedIPs[ip] = true
+					res := &ScanResult{
+						IP:        dbRes.IP,
+						Latency:   time.Duration(dbRes.LatencyMs.Int64) * time.Millisecond,
+						LatencyMS: dbRes.LatencyMs.Int64,
+						DownSpeed: dbRes.DownloadMbps.Float64,
+						UpSpeed:   dbRes.UploadMbps.Float64,
+					}
+					if dbRes.Error.Valid && dbRes.Error.String != "" {
+						res.Error = errors.New(dbRes.Error.String)
+						res.ErrorStr = dbRes.Error.String
+					}
+					s.initialResults = append(s.initialResults, res)
 				}
-				if dbRes.Error.Valid && dbRes.Error.String != "" {
-					res.Error = errors.New(dbRes.Error.String)
-					res.ErrorStr = dbRes.Error.String
-				}
-				s.initialResults = append(s.initialResults, res)
+				s.logger.Printf("Resumed %d results from the database.", len(s.initialResults))
 			}
-			s.logger.Printf("Resumed %d results from the database.", len(s.initialResults))
+		} else {
+			csvResults, err := LoadResultsFromCSV(s.config.OutputFile)
+			if err != nil {
+				s.logger.Printf("Could not resume from file %s: %v. Starting fresh.", s.config.OutputFile, err)
+			} else if len(csvResults) > 0 {
+				s.initialResults = csvResults
+				for _, res := range csvResults {
+					s.scannedIPs[res.IP] = true
+				}
+				s.logger.Printf("Resumed %d results from %s.", len(s.initialResults), s.config.OutputFile)
+			}
 		}
 	}
 
@@ -162,7 +176,7 @@ func (s *ScannerService) Run(ctx context.Context, progressChan chan<- *ScanResul
 		defer ticker.Stop()
 
 		saveToDB := func() {
-			if len(batch) == 0 {
+			if !s.config.SaveToDB || len(batch) == 0 {
 				return
 			}
 			dbBatch := make([]database.CfScanResult, 0, len(batch))
