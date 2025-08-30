@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	net2 "github.com/xtls/xray-core/common/net"
+	net2 "github.com/GFW-knocker/Xray-core/common/net"
 	"net"
 	"net/url"
 	"strconv"
@@ -14,8 +14,8 @@ import (
 	"github.com/lilendian0x00/xray-knife/v7/pkg/core/protocol"
 	"github.com/lilendian0x00/xray-knife/v7/utils"
 
+	"github.com/GFW-knocker/Xray-core/infra/conf"
 	"github.com/fatih/color"
-	"github.com/xtls/xray-core/infra/conf"
 )
 
 func NewShadowsocks(link string) Protocol {
