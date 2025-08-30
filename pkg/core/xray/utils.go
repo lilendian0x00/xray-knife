@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"time"
 
-	xraynet "github.com/xtls/xray-core/common/net"
-	"github.com/xtls/xray-core/core"
+	xraynet "github.com/GFW-knocker/Xray-core/common/net"
+	"github.com/GFW-knocker/Xray-core/core"
 )
 
 func MeasureDelay(inst *core.Instance, timeout time.Duration, showBody bool, dest string, httpMethod string) (int64, int, error) {

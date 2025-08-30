@@ -13,12 +13,12 @@ import (
 	"github.com/lilendian0x00/xray-knife/v7/pkg/core/protocol"
 	"github.com/lilendian0x00/xray-knife/v7/utils"
 
+	"github.com/GFW-knocker/Xray-core/infra/conf"
 	"github.com/fatih/color"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/outbound"
 	"github.com/sagernet/sing/common/logger"
-	"github.com/xtls/xray-core/infra/conf"
 )
 
 func NewTrojan(link string) Protocol {
