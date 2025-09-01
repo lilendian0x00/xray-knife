@@ -246,6 +246,11 @@ func newParseCommand() *cobra.Command {
 					return fmt.Errorf("failed to create protocol for link %d ('%s'): %w", i+1, trimmedLink, err)
 				}
 
+				err = p.Parse()
+				if err != nil {
+					return fmt.Errorf("failed to parse for link %d ('%s'): %w", i+1, trimmedLink, err)
+				}
+
 				fmt.Println(p.DetailsStr())
 
 				time.Sleep(time.Duration(25) * time.Millisecond)

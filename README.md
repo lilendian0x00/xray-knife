@@ -54,7 +54,7 @@ chmod +x xray-knife
 
 ### Using `go install`
 
-If you have Go (1.21+) installed, you can build and install `xray-knife` with a single command:
+If you have Go (1.25) installed, you can build and install `xray-knife` with a single command:
 ```bash
 go install github.com/lilendian0x00/xray-knife/v7@latest
 ```
