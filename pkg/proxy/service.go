@@ -15,7 +15,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/GFW-knocker/Xray-core/common/uuid"
 	"github.com/lilendian0x00/xray-knife/v7/pkg/core"
 	"github.com/lilendian0x00/xray-knife/v7/pkg/core/protocol"
 	pkgsingbox "github.com/lilendian0x00/xray-knife/v7/pkg/core/singbox"
@@ -23,6 +22,7 @@ import (
 	pkghttp "github.com/lilendian0x00/xray-knife/v7/pkg/http"
 	"github.com/lilendian0x00/xray-knife/v7/utils"
 	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
+	"github.com/xtls/xray-core/common/uuid"
 
 	"github.com/fatih/color"
 )

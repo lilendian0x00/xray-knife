@@ -4,10 +4,10 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"github.com/GFW-knocker/Xray-core/infra/conf"
 	"github.com/lilendian0x00/xray-knife/v7/pkg/core"
 	"github.com/lilendian0x00/xray-knife/v7/pkg/core/xray"
 	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
+	"github.com/xtls/xray-core/infra/conf"
 	"os"
 	"reflect"
 	"strings"
@@ -244,11 +244,6 @@ func newParseCommand() *cobra.Command {
 				p, err := c.CreateProtocol(trimmedLink)
 				if err != nil {
 					return fmt.Errorf("failed to create protocol for link %d ('%s'): %w", i+1, trimmedLink, err)
-				}
-
-				err = p.Parse()
-				if err != nil {
-					return fmt.Errorf("failed to parse for link %d ('%s'): %w", i+1, trimmedLink, err)
 				}
 
 				fmt.Println(p.DetailsStr())

@@ -9,18 +9,18 @@ import (
 
 	"github.com/lilendian0x00/xray-knife/v7/pkg/core/protocol"
 
-	"github.com/GFW-knocker/Xray-core/app/dispatcher"
-	applog "github.com/GFW-knocker/Xray-core/app/log"
-	"github.com/GFW-knocker/Xray-core/app/proxyman"
-	commlog "github.com/GFW-knocker/Xray-core/common/log"
-	xraynet "github.com/GFW-knocker/Xray-core/common/net"
-	"github.com/GFW-knocker/Xray-core/common/serial"
-	"github.com/GFW-knocker/Xray-core/core"
+	"github.com/xtls/xray-core/app/dispatcher"
+	applog "github.com/xtls/xray-core/app/log"
+	"github.com/xtls/xray-core/app/proxyman"
+	commlog "github.com/xtls/xray-core/common/log"
+	xraynet "github.com/xtls/xray-core/common/net"
+	"github.com/xtls/xray-core/common/serial"
+	"github.com/xtls/xray-core/core"
 
 	// The following deps are necessary as they register handlers in their init functions.
-	_ "github.com/GFW-knocker/Xray-core/app/dispatcher"
-	_ "github.com/GFW-knocker/Xray-core/app/proxyman/inbound"
-	_ "github.com/GFW-knocker/Xray-core/app/proxyman/outbound"
+	_ "github.com/xtls/xray-core/app/dispatcher"
+	_ "github.com/xtls/xray-core/app/proxyman/inbound"
+	_ "github.com/xtls/xray-core/app/proxyman/outbound"
 )
 
 type Core struct {
