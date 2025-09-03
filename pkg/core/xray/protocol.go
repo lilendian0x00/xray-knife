@@ -23,6 +23,8 @@ func (c *Core) CreateProtocol(configLink string) (protocol.Protocol, error) {
 		return NewVmess(configLink), nil
 	case protocol.VlessIdentifier:
 		return NewVless(configLink), nil
+	case protocol.MVlessIdentifier:
+		return NewMVless(configLink), nil
 	case protocol.ShadowsocksIdentifier:
 		return NewShadowsocks(configLink), nil
 	case protocol.TrojanIdentifier:

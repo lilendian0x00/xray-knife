@@ -336,6 +336,13 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 
 		t.Flow = ""
 		break
+	case "quic":
+		s.QUICSettings = &conf.QUICConfig{
+			Header:   nil,
+			Security: t.QuicSecurity,
+			Key:      t.Key,
+		}
+		break
 		//case "quic":
 		//	tp := "none"
 		//	if t.HeaderType != "" {

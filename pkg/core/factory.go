@@ -64,6 +64,7 @@ func NewAutomaticCore(verbose bool, allowInsecure bool) Core {
 var cproto = map[string]Core{
 	protocol.VmessIdentifier:       xray.NewXrayService(false, false),
 	protocol.VlessIdentifier:       xray.NewXrayService(false, false),
+	protocol.MVlessIdentifier:      xray.NewXrayService(false, false),
 	protocol.ShadowsocksIdentifier: xray.NewXrayService(false, false),
 	protocol.TrojanIdentifier:      xray.NewXrayService(false, false),
 	protocol.SocksIdentifier:       xray.NewXrayService(false, false),
@@ -83,7 +84,7 @@ func (c *AutomaticCore) CreateProtocol(configLink string) (protocol.Protocol, er
 	switch uri.Scheme {
 	case protocol.Hysteria2Identifier, "hy2":
 		selectedCore = c.singboxCore
-	case protocol.VmessIdentifier, protocol.VlessIdentifier, protocol.TrojanIdentifier, protocol.ShadowsocksIdentifier, protocol.SocksIdentifier, protocol.WireguardIdentifier:
+	case protocol.VmessIdentifier, protocol.VlessIdentifier, protocol.MVlessIdentifier, protocol.TrojanIdentifier, protocol.ShadowsocksIdentifier, protocol.SocksIdentifier, protocol.WireguardIdentifier:
 		selectedCore = c.xrayCore
 	default:
 		return nil, fmt.Errorf("unsupported protocol for automatic core: %s", uri.Scheme)

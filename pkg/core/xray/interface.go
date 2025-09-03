@@ -74,6 +74,37 @@ type Vless struct {
 	OrigLink       string `json:"-"` // Original link
 }
 
+type MVless struct {
+	LinkVersion    string `json:"-"`
+	ID             string `json:"id"`  // UUID
+	Address        string `json:"add"` // HOST:PORT
+	Encryption     string `json:"encryption"`
+	Flow           string `json:"flow"`
+	QuicSecurity   string `json:"quicSecurity"`
+	Key            string `json:"key"`      // Quic key
+	Security       string `json:"security"` // reality or tls
+	PublicKey      string `json:"pbk"`
+	ShortIds       string `json:"sid"`        // Mandatory, the shortId list available to the client, which can be used to distinguish different clients
+	SpiderX        string `json:"spx"`        // Reality path
+	HeaderType     string `json:"headerType"` // TCP HTTP Obfuscation
+	Host           string `json:"host"`       // HTTP, WS
+	Path           string `json:"path"`
+	Port           string `json:"port"`
+	SNI            string `json:"sni"`           // Server name indication
+	ALPN           string `json:"alpn"`          // Application-Layer Protocol Negotiation
+	TlsFingerprint string `json:"fp"`            // TLS fingerprint
+	AllowInsecure  string `json:"allowInsecure"` // Insecure TLS
+	Type           string `json:"type"`          // Network (XHTTP, ...)
+	Remark         string `json:"ps"`            // Config's name
+	Authority      string `json:"authority"`     // GRPC
+	ServiceName    string `json:"serviceName"`   // GRPC
+	Mode           string `json:"mode"`          // XHTTP - GRPC
+	Extra          string `json:"extra"`         // XHTTP - EXTRA
+	CertFile       string `json:"-"`
+	KeyFile        string `json:"-"`
+	OrigLink       string `json:"-"` // Original link
+}
+
 type Shadowsocks struct {
 	Address    string
 	Port       string

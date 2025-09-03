@@ -16,29 +16,29 @@ import (
 	"github.com/fatih/color"
 )
 
-func NewVless(link string) Protocol {
-	return &Vless{OrigLink: link}
+func NewMVless(link string) Protocol {
+	return &MVless{OrigLink: link}
 }
 
-func (v *Vless) Name() string {
-	return "vless"
+func (v *MVless) Name() string {
+	return "mvless"
 }
 
-func (v *Vless) Parse() error {
-	if !strings.HasPrefix(v.OrigLink, protocol.VlessIdentifier) {
-		return fmt.Errorf("vless unreconized: %s", v.OrigLink)
+func (v *MVless) Parse() error {
+	if !strings.HasPrefix(v.OrigLink, protocol.MVlessIdentifier) {
+		return fmt.Errorf("mvless unreconized: %s", v.OrigLink)
 	}
 
 	uri, err := url.Parse(v.OrigLink)
 	if err != nil {
-		return fmt.Errorf("failed to parse VLESS link: %w", err)
+		return fmt.Errorf("failed to parse MVLESS link: %w", err)
 	}
 
 	v.ID = uri.User.String()
 
 	v.Address, v.Port, err = net.SplitHostPort(uri.Host)
 	if err != nil {
-		return fmt.Errorf("failed to split host and port for VLESS link: %w", err)
+		return fmt.Errorf("failed to split host and port for MVLESS link: %w", err)
 	}
 
 	if utils.IsIPv6(v.Address) {
@@ -106,7 +106,7 @@ func (v *Vless) Parse() error {
 	return nil
 }
 
-func (v *Vless) DetailsStr() string {
+func (v *MVless) DetailsStr() string {
 	copyV := *v
 	if copyV.Flow == "" || copyV.Type == "grpc" {
 		copyV.Flow = "none"
@@ -182,12 +182,12 @@ func (v *Vless) DetailsStr() string {
 	return info
 }
 
-func (v *Vless) GetLink() string {
+func (v *MVless) GetLink() string {
 	if v.OrigLink != "" {
 		return v.OrigLink
 	} else {
 		baseURL := url.URL{
-			Scheme: "vless",
+			Scheme: "mvless",
 			User:   url.User(v.ID),
 			Host:   net.JoinHostPort(v.Address, v.Port),
 		}
@@ -230,7 +230,7 @@ func (v *Vless) GetLink() string {
 	}
 }
 
-func (v *Vless) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
+func (v *MVless) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Protocol = v.Name()
 	g.Address = v.Address
 	g.Host = v.Host
@@ -255,7 +255,7 @@ func (v *Vless) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	return g
 }
 
-func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
+func (v *MVless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
 	out := &conf.OutboundDetourConfig{}
 	out.Tag = "proxy"
 	out.Protocol = v.Name()
@@ -442,7 +442,7 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 	return out, nil
 }
 
-func (v *Vless) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
+func (v *MVless) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
 	p := conf.TransportProtocol(v.Type)
 	streamConfig := &conf.StreamConfig{
 		Network:  &p,
