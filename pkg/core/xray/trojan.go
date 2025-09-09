@@ -3,11 +3,12 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
-	net2 "github.com/GFW-knocker/Xray-core/common/net"
 	"net"
 	"net/url"
 	"strconv"
 	"strings"
+
+	net2 "github.com/GFW-knocker/Xray-core/common/net"
 
 	"github.com/lilendian0x00/xray-knife/v7/pkg/core/protocol"
 	"github.com/lilendian0x00/xray-knife/v7/utils"
@@ -338,7 +339,7 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 		break
 	case "quic":
 		s.QUICSettings = &conf.QUICConfig{
-			Header:   nil,
+			Header:   json.RawMessage(fmt.Sprintf(`{ "type": "%s" }`, t.HeaderType)),
 			Security: t.QuicSecurity,
 			Key:      t.Key,
 		}
