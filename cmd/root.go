@@ -1,6 +1,10 @@
 package cmd
 
 import (
+	"log"
+	"os"
+	"path/filepath"
+
 	"github.com/lilendian0x00/xray-knife/v7/cmd/cfscanner"
 	"github.com/lilendian0x00/xray-knife/v7/cmd/http"
 	"github.com/lilendian0x00/xray-knife/v7/cmd/net"
@@ -11,16 +15,13 @@ import (
 	"github.com/lilendian0x00/xray-knife/v7/database"
 	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
 	"github.com/spf13/cobra"
-	"log"
-	"os"
-	"path/filepath"
 )
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:     "xray-knife",
 	Short:   "Swiss Army Knife for xray-core & sing-box",
-	Version: "7.3.2",
+	Version: "7.3.3",
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
