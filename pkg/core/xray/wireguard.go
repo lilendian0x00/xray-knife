@@ -132,6 +132,7 @@ func (w *Wireguard) GetLink() string {
 func (w *Wireguard) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Protocol = w.Name()
 	g.Address = w.Endpoint
+	g.OrigLink = w.GetLink()
 
 	return g
 }
