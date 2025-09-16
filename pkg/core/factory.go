@@ -60,63 +60,48 @@ func NewAutomaticCore(verbose bool, allowInsecure bool) Core {
 	}
 }
 
-// Defined Core for each protocol
-var cproto = map[string]Core{
-	protocol.VmessIdentifier:       xray.NewXrayService(false, false),
-	protocol.VlessIdentifier:       xray.NewXrayService(false, false),
-	protocol.ShadowsocksIdentifier: xray.NewXrayService(false, false),
-	protocol.TrojanIdentifier:      xray.NewXrayService(false, false),
-	protocol.SocksIdentifier:       xray.NewXrayService(false, false),
-	protocol.WireguardIdentifier:   xray.NewXrayService(false, false),
-	protocol.Hysteria2Identifier:   singbox.NewSingboxService(false, false),
-	"hy2":                          singbox.NewSingboxService(false, false),
-}
-
-// CreateProtocol for AutomaticCore dispatches to the correct underlying core.
-func (c *AutomaticCore) CreateProtocol(configLink string) (protocol.Protocol, error) {
+// selectCoreForLink is a helper to determine which core to use based on the protocol scheme.
+func (c *AutomaticCore) selectCoreForLink(configLink string) (Core, error) {
 	uri, err := url.Parse(configLink)
 	if err != nil {
 		return nil, err
 	}
 
-	var selectedCore Core
 	switch uri.Scheme {
 	case protocol.Hysteria2Identifier, "hy2":
-		selectedCore = c.singboxCore
+		return c.singboxCore, nil
 	case protocol.VmessIdentifier, protocol.VlessIdentifier, protocol.TrojanIdentifier, protocol.ShadowsocksIdentifier, protocol.SocksIdentifier, protocol.WireguardIdentifier:
-		selectedCore = c.xrayCore
+		return c.xrayCore, nil
 	default:
 		return nil, fmt.Errorf("unsupported protocol for automatic core: %s", uri.Scheme)
 	}
+}
 
+// CreateProtocol for AutomaticCore dispatches to the correct underlying core.
+func (c *AutomaticCore) CreateProtocol(configLink string) (protocol.Protocol, error) {
+	selectedCore, err := c.selectCoreForLink(configLink)
+	if err != nil {
+		return nil, err
+	}
 	return selectedCore.CreateProtocol(configLink)
 }
 
 // MakeHttpClient dispatches to the correct underlying core.
 func (c *AutomaticCore) MakeHttpClient(ctx context.Context, outbound protocol.Protocol, maxDelay time.Duration) (*http.Client, protocol.Instance, error) {
 	generalConfig := outbound.ConvertToGeneralConfig()
-	uri, err := url.Parse(generalConfig.OrigLink)
+	selectedCore, err := c.selectCoreForLink(generalConfig.OrigLink)
 	if err != nil {
 		return nil, nil, err
 	}
-	selectedCore, ok := cproto[uri.Scheme]
-	if !ok {
-		return nil, nil, fmt.Errorf("unsupported protocol for automatic core: %s", uri.Scheme)
-	}
-
 	return selectedCore.MakeHttpClient(ctx, outbound, maxDelay)
 }
 
 // MakeInstance dispatches to the correct underlying core.
 func (c *AutomaticCore) MakeInstance(ctx context.Context, outbound protocol.Protocol) (protocol.Instance, error) {
 	generalConfig := outbound.ConvertToGeneralConfig()
-	uri, err := url.Parse(generalConfig.OrigLink)
+	selectedCore, err := c.selectCoreForLink(generalConfig.OrigLink)
 	if err != nil {
 		return nil, err
-	}
-	selectedCore, ok := cproto[uri.Scheme]
-	if !ok {
-		return nil, fmt.Errorf("unsupported protocol for automatic core: %s", uri.Scheme)
 	}
 	return selectedCore.MakeInstance(ctx, outbound)
 }
