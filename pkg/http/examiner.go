@@ -5,12 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/fatih/color"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/fatih/color"
 
 	"github.com/lilendian0x00/xray-knife/v7/pkg/core"
 	"github.com/lilendian0x00/xray-knife/v7/pkg/core/protocol"
@@ -102,7 +103,7 @@ func NewExaminer(opts Options) (*Examiner, error) {
 	case "auto":
 		fallthrough
 	default:
-		e.Core = core.NewAutomaticCore(e.InsecureTLS, e.Verbose)
+		e.Core = core.NewAutomaticCore(e.Verbose, e.InsecureTLS)
 	}
 
 	if e.Core == nil {
@@ -150,7 +151,7 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 		ConfigLink: link,
 		Status:     "passed",
 		Delay:      failedDelay,
-        HTTPCode:   -1,
+		HTTPCode:   -1,
 		RealIPAddr: "null",
 		IpAddrLoc:  "null",
 	}
@@ -198,14 +199,14 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 	}
 	defer instance.Close()
 
-    delay, code, body, err := MeasureDelay(ctx, client, e.ShowBody, e.TestEndpoint, e.TestEndpointHttpMethod)
+	delay, code, body, err := MeasureDelay(ctx, client, e.ShowBody, e.TestEndpoint, e.TestEndpointHttpMethod)
 	if err != nil {
 		r.Status = "failed"
 		r.Reason = err.Error()
 		return r, err
 	}
 	r.Delay = delay
-    r.HTTPCode = code
+	r.HTTPCode = code
 
 	if uint16(delay) > e.MaxDelay {
 		r.Status = "timeout"
