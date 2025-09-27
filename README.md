@@ -46,7 +46,7 @@ You can download the latest pre-compiled binary for your operating system from t
 **Example for Linux:**
 ```bash
 wget https://github.com/lilendian0x00/xray-knife/releases/latest/download/Xray-knife-linux-64.zip
-unzip Xray-knife-linux.zip
+unzip Xray-knife*.zip
 cd Xray-knife-linux
 chmod +x xray-knife
 ./xray-knife --help
