@@ -140,6 +140,9 @@ This is the new, powerful way to test configs. It pulls directly from the librar
 # Test configs from a file, with a speed test
 xray-knife http -f ./configs.txt --speedtest
 
+# setting test url & output file
+xray-knife http -f ./configs.txt --speedtest --url https://google.com -o results.txt
+
 # Test up to 100 'vless' configs from your database, with a speed test
 xray-knife http --from-db --limit 100 --protocol vless --speedtest
 
