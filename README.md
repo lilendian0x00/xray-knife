@@ -126,11 +126,6 @@ xray-knife subs show
 # Fetch all configs from the subscription with ID 1
 xray-knife subs fetch --id 1
 ```
-
-## Free subs links to use :
-- [all configs](https://skillfulelectro.github.io/V2RayCollector/Config/all_configs.txt)
-- [configs tested by xray-knife](https://skillfulelectro.github.io/V2RayCollector/Config/tested_configs.txt)
-
 ---
 
 ### 🧪 Testing Configs (`http`)
