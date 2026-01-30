@@ -8,6 +8,7 @@ const (
 	WireguardIdentifier   = "wireguard"
 	SocksIdentifier       = "socks"
 	Hysteria2Identifier   = "hysteria2"
+	TunIdentifier         = "tun"
 )
 const (
 	VmessPattern       = `vmess:\/\/[a-zA-Z0-9+/=]+`

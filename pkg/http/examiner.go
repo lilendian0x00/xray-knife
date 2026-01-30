@@ -208,7 +208,7 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 	r.Delay = delay
 	r.HTTPCode = code
 
-	if uint16(delay) > e.MaxDelay {
+	if delay > int64(e.MaxDelay) {
 		r.Status = "timeout"
 		r.Reason = "config delay is more than the maximum allowed delay"
 		return r, errors.New(r.Reason)
