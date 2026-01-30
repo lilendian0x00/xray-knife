@@ -16,8 +16,10 @@ import (
 	"github.com/fatih/color"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing-box/outbound"
+	sing_wireguard "github.com/sagernet/sing-box/protocol/wireguard"
+	"github.com/sagernet/sing/common/json/badoption"
 	"github.com/sagernet/sing/common/logger"
+	"github.com/sagernet/sing/service"
 )
 
 func NewWireguard(link string) Protocol {
@@ -140,13 +142,13 @@ func (w *Wireguard) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, 
 		}
 	}
 
-	opts := option.WireGuardOutboundOptions{
+	opts := option.LegacyWireGuardOutboundOptions{
 		DialerOptions: option.DialerOptions{},
 		ServerOptions: option.ServerOptions{
 			Server:     Address,
 			ServerPort: uint16(port),
 		},
-		LocalAddress: option.Listable[netip.Prefix]{},
+		LocalAddress: badoption.Listable[netip.Prefix]{},
 		//Peers: []option.WireGuardPeer{
 		//	{
 		//		ServerOptions: option.ServerOptions{
@@ -180,8 +182,8 @@ func (w *Wireguard) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, 
 	}
 
 	return &option.Outbound{
-		Type:             w.Name(),
-		WireGuardOptions: opts,
+		Type:    w.Name(),
+		Options: &opts,
 	}, nil
 }
 
@@ -192,9 +194,10 @@ func (w *Wireguard) CraftOutbound(ctx context.Context, l logger.ContextLogger, a
 		return nil, err
 	}
 
-	router := adapter.RouterFromContext(ctx)
+	router := service.FromContext[adapter.Router](ctx)
 
-	out, err := outbound.New(ctx, router, l, "out_wireguard", *options)
+	wgOptions, _ := options.Options.(option.LegacyWireGuardOutboundOptions)
+	out, err := sing_wireguard.NewOutbound(ctx, router, l, "out_wireguard", wgOptions)
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("failed creating wireguard outbound: %v", err))
 	}

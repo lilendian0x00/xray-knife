@@ -19,7 +19,7 @@ BUILD_DIR="build"
 SOURCE_FILE="main.go"
 
 # Common build configuration
-BUILD_TAGS="with_gvisor,with_quic,with_wireguard,with_ech,with_utls,with_clash_api,with_grpc"
+BUILD_TAGS="with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc"
 LDFLAGS="-s -w"
 # GOARCH_DEFAULT is set in build_app based on argument or default
 

@@ -16,8 +16,10 @@ import (
 	"github.com/fatih/color"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing-box/outbound"
+	sing_trojan "github.com/sagernet/sing-box/protocol/trojan"
+	"github.com/sagernet/sing/common/json/badoption"
 	"github.com/sagernet/sing/common/logger"
+	"github.com/sagernet/sing/service"
 	"github.com/xtls/xray-core/infra/conf"
 )
 
@@ -232,9 +234,10 @@ func (t *Trojan) CraftInboundOptions() *option.Inbound {
 		}
 	}
 
+	tapAddr := badoption.Addr(addr)
 	opts := option.TrojanInboundOptions{
 		ListenOptions: option.ListenOptions{
-			Listen:     option.NewListenAddress(addr),
+			Listen:     &tapAddr,
 			ListenPort: uint16(port),
 		},
 		Users: []option.TrojanUser{
@@ -247,9 +250,9 @@ func (t *Trojan) CraftInboundOptions() *option.Inbound {
 	}
 
 	return &option.Inbound{
-		Type:          t.Name(),
-		Tag:           "trojan-in",
-		TrojanOptions: opts,
+		Type:    t.Name(),
+		Tag:     "trojan-in",
+		Options: opts,
 	}
 }
 
@@ -291,12 +294,12 @@ func (t *Trojan) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, err
 	case "ws":
 		transport.WebsocketOptions = option.V2RayWebsocketOptions{
 			Path:                t.Path,
-			Headers:             option.HTTPHeader{},
+			Headers:             badoption.HTTPHeader{},
 			MaxEarlyData:        0,
 			EarlyDataHeaderName: "",
 		}
-		transport.WebsocketOptions.Headers["host"] = option.Listable[string]{t.Host}
-		transport.WebsocketOptions.Headers["User-Agent"] = option.Listable[string]{"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"}
+		transport.WebsocketOptions.Headers["host"] = badoption.Listable[string]{t.Host}
+		transport.WebsocketOptions.Headers["User-Agent"] = badoption.Listable[string]{"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"}
 
 		break
 	case "http":
@@ -310,7 +313,7 @@ func (t *Trojan) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, err
 		}
 		if t.Host != "" {
 			h := conf.StringList(strings.Split(t.Host, ","))
-			transport.HTTPOptions.Host = option.Listable[string](h)
+			transport.HTTPOptions.Host = badoption.Listable[string](h)
 		}
 		break
 	case "httpupgrade":
@@ -366,8 +369,8 @@ func (t *Trojan) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, err
 	}
 
 	return &option.Outbound{
-		Type:          t.Name(),
-		TrojanOptions: opts,
+		Type:    t.Name(),
+		Options: &opts,
 	}, nil
 }
 
@@ -378,7 +381,8 @@ func (t *Trojan) CraftOutbound(ctx context.Context, l logger.ContextLogger, allo
 		return nil, err
 	}
 
-	out, err := outbound.New(ctx, adapter.RouterFromContext(ctx), l, "out_trojan", *options)
+	trojanOptions, _ := options.Options.(option.TrojanOutboundOptions)
+	out, err := sing_trojan.NewOutbound(ctx, service.FromContext[adapter.Router](ctx), l, "out_trojan", trojanOptions)
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("failed creating trojan outbound: %v", err))
 	}

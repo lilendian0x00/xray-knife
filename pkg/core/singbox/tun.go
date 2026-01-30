@@ -75,9 +75,9 @@ func (t *Tun) CraftInboundOptions() *option.Inbound {
 	}
 
 	return &option.Inbound{
-		Type:       t.Name(),
-		Tag:        "TUN_INBOUND",
-		TunOptions: opts,
+		Type:    t.Name(),
+		Tag:     "TUN_INBOUND",
+		Options: &opts,
 	}
 }
 

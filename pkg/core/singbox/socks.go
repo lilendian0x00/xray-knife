@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/sagernet/sing/common/auth"
 	"net"
 	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/sagernet/sing/common/auth"
 
 	"github.com/lilendian0x00/xray-knife/v7/pkg/core/protocol"
 	"github.com/lilendian0x00/xray-knife/v7/utils"
@@ -17,8 +18,10 @@ import (
 	"github.com/fatih/color"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing-box/outbound"
+	sing_socks "github.com/sagernet/sing-box/protocol/socks"
+	"github.com/sagernet/sing/common/json/badoption"
 	"github.com/sagernet/sing/common/logger"
+	"github.com/sagernet/sing/service"
 	"github.com/xtls/xray-core/infra/conf"
 )
 
@@ -129,9 +132,10 @@ func (s *Socks) CraftInboundOptions() *option.Inbound {
 	port, _ := strconv.Atoi(s.Port)
 	addr, _ := netip.ParseAddr(s.Address)
 
+	tapAddr := badoption.Addr(addr)
 	opts := option.SocksInboundOptions{
 		ListenOptions: option.ListenOptions{
-			Listen:                      option.NewListenAddress(addr),
+			Listen:                      &tapAddr,
 			ListenPort:                  uint16(port),
 			TCPFastOpen:                 false,
 			TCPMultiPath:                false,
@@ -140,8 +144,9 @@ func (s *Socks) CraftInboundOptions() *option.Inbound {
 			UDPTimeout:                  0,
 			ProxyProtocol:               false,
 			ProxyProtocolAcceptNoHeader: false,
-			Detour:                      "",
-			InboundOptions:              option.InboundOptions{},
+			InboundOptions: option.InboundOptions{
+				Detour: "",
+			},
 		},
 		Users: nil,
 	}
@@ -156,8 +161,8 @@ func (s *Socks) CraftInboundOptions() *option.Inbound {
 	}
 
 	return &option.Inbound{
-		Type:         s.Name(),
-		SocksOptions: opts,
+		Type:    s.Name(),
+		Options: opts,
 	}
 }
 
@@ -165,7 +170,7 @@ func (s *Socks) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, erro
 	// Port type checker
 	var port, _ = strconv.Atoi(s.Port)
 
-	opts := option.SocksOutboundOptions{
+	opts := option.SOCKSOutboundOptions{
 		DialerOptions: option.DialerOptions{},
 		ServerOptions: option.ServerOptions{
 			Server:     s.Address,
@@ -176,8 +181,8 @@ func (s *Socks) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, erro
 	}
 
 	return &option.Outbound{
-		Type:         s.Name(),
-		SocksOptions: opts,
+		Type:    s.Name(),
+		Options: &opts,
 	}, nil
 }
 
@@ -187,7 +192,8 @@ func (s *Socks) CraftOutbound(ctx context.Context, l logger.ContextLogger, allow
 		return nil, err
 	}
 
-	out, err := outbound.New(ctx, adapter.RouterFromContext(ctx), l, "out_socks", *options)
+	socksOptions, _ := options.Options.(option.SOCKSOutboundOptions)
+	out, err := sing_socks.NewOutbound(ctx, service.FromContext[adapter.Router](ctx), l, "out_socks", socksOptions)
 	if err != nil {
 		return nil, err
 	}

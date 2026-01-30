@@ -17,8 +17,10 @@ import (
 	"github.com/fatih/color"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing-box/outbound"
+	sing_vless "github.com/sagernet/sing-box/protocol/vless"
+	"github.com/sagernet/sing/common/json/badoption"
 	"github.com/sagernet/sing/common/logger"
+	"github.com/sagernet/sing/service"
 	"github.com/xtls/xray-core/infra/conf"
 )
 
@@ -221,9 +223,10 @@ func (v *Vless) CraftInboundOptions() *option.Inbound {
 		}
 	}
 
+	tapAddr := badoption.Addr(addr)
 	opts := option.VLESSInboundOptions{
 		ListenOptions: option.ListenOptions{
-			Listen:     option.NewListenAddress(addr),
+			Listen:     &tapAddr,
 			ListenPort: uint16(port),
 		},
 		Users: []option.VLESSUser{
@@ -237,9 +240,9 @@ func (v *Vless) CraftInboundOptions() *option.Inbound {
 	}
 
 	return &option.Inbound{
-		Type:         v.Name(),
-		Tag:          "vless-in",
-		VLESSOptions: opts,
+		Type:    v.Name(),
+		Tag:     "vless-in",
+		Options: opts,
 	}
 }
 
@@ -281,12 +284,12 @@ func (v *Vless) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, erro
 	case "ws":
 		transport.WebsocketOptions = option.V2RayWebsocketOptions{
 			Path:                v.Path,
-			Headers:             option.HTTPHeader{},
+			Headers:             badoption.HTTPHeader{},
 			MaxEarlyData:        0,
 			EarlyDataHeaderName: "",
 		}
-		transport.WebsocketOptions.Headers["host"] = option.Listable[string]{v.Host}
-		transport.WebsocketOptions.Headers["User-Agent"] = option.Listable[string]{"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"}
+		transport.WebsocketOptions.Headers["host"] = badoption.Listable[string]{v.Host}
+		transport.WebsocketOptions.Headers["User-Agent"] = badoption.Listable[string]{"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"}
 
 		break
 	case "http":
@@ -300,7 +303,7 @@ func (v *Vless) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, erro
 		}
 		if v.Host != "" {
 			h := conf.StringList(strings.Split(v.Host, ","))
-			transport.HTTPOptions.Host = option.Listable[string](h)
+			transport.HTTPOptions.Host = badoption.Listable[string](h)
 		}
 		break
 	case "httpupgrade":
@@ -356,8 +359,8 @@ func (v *Vless) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, erro
 	}
 
 	return &option.Outbound{
-		Type:         v.Name(),
-		VLESSOptions: opts,
+		Type:    v.Name(),
+		Options: &opts,
 	}, nil
 }
 
@@ -368,7 +371,8 @@ func (v *Vless) CraftOutbound(ctx context.Context, l logger.ContextLogger, allow
 		return nil, err
 	}
 
-	out, err := outbound.New(ctx, adapter.RouterFromContext(ctx), l, "out_vless", *options)
+	vlessOptions, _ := options.Options.(option.VLESSOutboundOptions)
+	out, err := sing_vless.NewOutbound(ctx, service.FromContext[adapter.Router](ctx), l, "out_vless", vlessOptions)
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("failed creating vless outbound: %v", err))
 	}

@@ -15,8 +15,9 @@ import (
 	"github.com/fatih/color"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing-box/outbound"
+	sing_shadowsocks "github.com/sagernet/sing-box/protocol/shadowsocks"
 	"github.com/sagernet/sing/common/logger"
+	"github.com/sagernet/sing/service"
 )
 
 func NewShadowsocks(link string) Protocol {
@@ -140,8 +141,8 @@ func (s *Shadowsocks) CraftOutboundOptions(allowInsecure bool) (*option.Outbound
 	}
 
 	return &option.Outbound{
-		Type:               "shadowsocks",
-		ShadowsocksOptions: opts,
+		Type:    "shadowsocks",
+		Options: &opts,
 	}, nil
 }
 
@@ -152,7 +153,8 @@ func (s *Shadowsocks) CraftOutbound(ctx context.Context, l logger.ContextLogger,
 		return nil, err
 	}
 
-	out, err := outbound.New(ctx, adapter.RouterFromContext(ctx), l, "out_shadowsocks", *options)
+	ssOptions, _ := options.Options.(option.ShadowsocksOutboundOptions)
+	out, err := sing_shadowsocks.NewOutbound(ctx, service.FromContext[adapter.Router](ctx), l, "out_shadowsocks", ssOptions)
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("failed creating shadowsocks outbound: %v", err))
 	}

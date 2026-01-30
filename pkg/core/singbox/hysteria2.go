@@ -3,16 +3,18 @@ package singbox
 import (
 	"context"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/v7/pkg/core/protocol"
 	"net"
 	"net/url"
 	"strconv"
 
+	"github.com/lilendian0x00/xray-knife/v7/pkg/core/protocol"
+
 	"github.com/fatih/color"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing-box/outbound"
+	sing_hysteria2 "github.com/sagernet/sing-box/protocol/hysteria2"
 	"github.com/sagernet/sing/common/logger"
+	"github.com/sagernet/sing/service"
 )
 
 func NewHysteria2(link string) Protocol {
@@ -136,8 +138,8 @@ func (h *Hysteria2) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, 
 	}
 
 	return &option.Outbound{
-		Type:             h.Name(),
-		Hysteria2Options: opts,
+		Type:    h.Name(),
+		Options: &opts,
 	}, nil
 }
 
@@ -153,7 +155,8 @@ func (h *Hysteria2) CraftOutbound(ctx context.Context, l logger.ContextLogger, a
 		return nil, err
 	}
 
-	out, err := outbound.New(ctx, adapter.RouterFromContext(ctx), l, "out_hysteria2", *options)
+	hy2Options, _ := options.Options.(option.Hysteria2OutboundOptions)
+	out, err := sing_hysteria2.NewOutbound(ctx, service.FromContext[adapter.Router](ctx), l, "out_hysteria2", hy2Options)
 	if err != nil {
 		return nil, err
 	}

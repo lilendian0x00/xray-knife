@@ -17,8 +17,10 @@ import (
 	"github.com/fatih/color"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing-box/outbound"
+	sing_vmess "github.com/sagernet/sing-box/protocol/vmess"
+	"github.com/sagernet/sing/common/json/badoption"
 	"github.com/sagernet/sing/common/logger"
+	"github.com/sagernet/sing/service"
 	"github.com/xtls/xray-core/infra/conf"
 )
 
@@ -279,9 +281,10 @@ func (v *Vmess) CraftInboundOptions() *option.Inbound {
 		}
 	}
 
+	tapAddr := badoption.Addr(addr)
 	opts := option.VMessInboundOptions{
 		ListenOptions: option.ListenOptions{
-			Listen:     option.NewListenAddress(addr),
+			Listen:     &tapAddr,
 			ListenPort: uint16(port),
 		},
 		Users: []option.VMessUser{
@@ -295,9 +298,9 @@ func (v *Vmess) CraftInboundOptions() *option.Inbound {
 	}
 
 	return &option.Inbound{
-		Type:         v.Name(),
-		Tag:          "vmess-in",
-		VMessOptions: opts,
+		Type:    v.Name(),
+		Tag:     "vmess-in",
+		Options: opts,
 	}
 }
 
@@ -368,10 +371,10 @@ func (v *Vmess) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, erro
 	case "ws":
 		transport.WebsocketOptions = option.V2RayWebsocketOptions{
 			Path:    v.Path,
-			Headers: option.HTTPHeader{},
+			Headers: badoption.HTTPHeader{},
 		}
-		transport.WebsocketOptions.Headers["Host"] = option.Listable[string]{v.Host}
-		transport.WebsocketOptions.Headers["User-Agent"] = option.Listable[string]{"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"}
+		transport.WebsocketOptions.Headers["Host"] = badoption.Listable[string]{v.Host}
+		transport.WebsocketOptions.Headers["User-Agent"] = badoption.Listable[string]{"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"}
 		break
 	case "http":
 		transport.HTTPOptions = option.V2RayHTTPOptions{
@@ -384,7 +387,7 @@ func (v *Vmess) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, erro
 		}
 		if v.Host != "" {
 			h := conf.StringList(strings.Split(v.Host, ","))
-			transport.HTTPOptions.Host = option.Listable[string](h)
+			transport.HTTPOptions.Host = badoption.Listable[string](h)
 		}
 		break
 	case "httpupgrade":
@@ -436,8 +439,8 @@ func (v *Vmess) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, erro
 	}
 
 	return &option.Outbound{
-		Type:         v.Name(),
-		VMessOptions: opts,
+		Type:    v.Name(),
+		Options: &opts,
 	}, nil
 }
 
@@ -448,7 +451,8 @@ func (v *Vmess) CraftOutbound(ctx context.Context, l logger.ContextLogger, allow
 		return nil, err
 	}
 
-	out, err := outbound.New(ctx, adapter.RouterFromContext(ctx), l, "out_vmess", *options)
+	vmessOptions, _ := options.Options.(option.VMessOutboundOptions)
+	out, err := sing_vmess.NewOutbound(ctx, service.FromContext[adapter.Router](ctx), l, "out_vmess", vmessOptions)
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("failed creating vmess outbound: %v", err))
 	}

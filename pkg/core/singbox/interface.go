@@ -18,6 +18,7 @@ type Protocol interface {
 	CraftOutboundOptions(allowInsecure bool) (*option.Outbound, error)
 	CraftInboundOptions() *option.Inbound
 	CraftOutbound(ctx context.Context, l logger.ContextLogger, allowInsecure bool) (adapter.Outbound, error)
+	Name() string
 }
 
 type Vmess struct {

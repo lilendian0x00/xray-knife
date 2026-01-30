@@ -2,6 +2,7 @@ package singbox
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"time"
@@ -9,10 +10,23 @@ import (
 	"github.com/lilendian0x00/xray-knife/v7/pkg/core/protocol"
 
 	box "github.com/sagernet/sing-box"
+	"github.com/sagernet/sing-box/adapter/endpoint"
+	"github.com/sagernet/sing-box/adapter/inbound"
+	boxOutbound "github.com/sagernet/sing-box/adapter/outbound"
+	boxService "github.com/sagernet/sing-box/adapter/service"
+	"github.com/sagernet/sing-box/dns"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/protocol/hysteria2"
+	"github.com/sagernet/sing-box/protocol/shadowsocks"
+	"github.com/sagernet/sing-box/protocol/socks"
+	"github.com/sagernet/sing-box/protocol/trojan"
+	"github.com/sagernet/sing-box/protocol/vless"
+	"github.com/sagernet/sing-box/protocol/vmess"
+	"github.com/sagernet/sing-box/protocol/wireguard"
 	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
+	"github.com/sagernet/sing/service"
 )
 
 type Core struct {
@@ -139,16 +153,69 @@ func (c *Core) MakeInstance(ctx context.Context, outbound protocol.Protocol) (pr
 func (c *Core) MakeHttpClient(ctx context.Context, outbound protocol.Protocol, maxDelay time.Duration) (*http.Client, protocol.Instance, error) {
 	out := outbound.(Protocol)
 
-	craftOutbound, err := out.CraftOutbound(ctx, c.Log, c.AllowInsecure)
+	outOpts, err := out.CraftOutboundOptions(c.AllowInsecure)
+	if err != nil {
+		return nil, nil, err
+	}
+	outboundTag := "http_client_outbound"
+	outOpts.Tag = outboundTag
+
+	opts := option.Options{
+		Inbounds: []option.Inbound{},
+		Outbounds: []option.Outbound{
+			*outOpts,
+		},
+		Log: &option.LogOptions{
+			Disabled: true,
+		},
+	}
+	if c.Verbose {
+		opts.Log = &option.LogOptions{
+			Disabled: false,
+			Level:    "trace",
+		}
+	}
+
+	ctx = service.ContextWithDefaultRegistry(ctx)
+	outboundRegistry := boxOutbound.NewRegistry()
+	hysteria2.RegisterOutbound(outboundRegistry)
+	shadowsocks.RegisterOutbound(outboundRegistry)
+	socks.RegisterOutbound(outboundRegistry)
+	trojan.RegisterOutbound(outboundRegistry)
+	vless.RegisterOutbound(outboundRegistry)
+	vmess.RegisterOutbound(outboundRegistry)
+	wireguard.RegisterOutbound(outboundRegistry)
+
+	ctx = box.Context(ctx, inbound.NewRegistry(), outboundRegistry, endpoint.NewRegistry(), dns.NewTransportRegistry(), boxService.NewRegistry())
+
+	instance, err := box.New(box.Options{
+		Options: opts,
+		Context: ctx,
+	})
 	if err != nil {
 		return nil, nil, err
 	}
 
-	dialFunc := func(ctx context.Context, network, addr string) (net.Conn, error) {
-		return craftOutbound.DialContext(ctx, network, M.ParseSocksaddr(addr))
+	if err := instance.Start(); err != nil {
+		return nil, nil, err
 	}
 
-	if craftOutbound.Type() == protocol.WireguardIdentifier {
+	// Retrieve the outbound adapter from the router
+	outboundAdapter, ok := instance.Outbound().Outbound(outboundTag)
+	if !ok {
+		var available []string
+		for _, o := range instance.Outbound().Outbounds() {
+			available = append(available, fmt.Sprintf("%s(%s)", o.Tag(), o.Type()))
+		}
+		instance.Close()
+		return nil, nil, fmt.Errorf("outbound adapter not found for tag: %s. Available: %v", outboundTag, available)
+	}
+
+	dialFunc := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return outboundAdapter.DialContext(ctx, network, M.ParseSocksaddr(addr))
+	}
+
+	if out.Name() == protocol.WireguardIdentifier {
 		dialFunc = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(addr)
 			if err != nil {
@@ -158,7 +225,7 @@ func (c *Core) MakeHttpClient(ctx context.Context, outbound protocol.Protocol, m
 			if lookupErr != nil {
 				return nil, lookupErr
 			}
-			return craftOutbound.DialContext(ctx, network, M.ParseSocksaddr(ips[0].To4().String()+":"+port))
+			return outboundAdapter.DialContext(ctx, network, M.ParseSocksaddr(ips[0].To4().String()+":"+port))
 		}
 	}
 
@@ -170,7 +237,7 @@ func (c *Core) MakeHttpClient(ctx context.Context, outbound protocol.Protocol, m
 	return &http.Client{
 		Transport: tr,
 		Timeout:   maxDelay,
-	}, &FakeInstance{}, nil
+	}, instance, nil
 }
 
 //
