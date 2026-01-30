@@ -66,8 +66,7 @@ func (v *Vless) Parse() error {
 	}
 
 	v.SNI = sni
-	v.Host = host
-	v.Host = query.Get("host")   // for ws, http
+	v.Host = host                // for ws, http
 	v.Path = query.Get("path")   // for ws, http path, or kcp seed
 	v.Extra = query.Get("extra") // XHTTP extra
 	v.Flow = query.Get("flow")
@@ -120,9 +119,7 @@ func (v *Vless) DetailsStr() string {
 		color.RedString("Port"), v.Port,
 		color.RedString("UUID"), v.ID,
 		color.RedString("Flow"), copyV.Flow)
-	if copyV.Type == "" {
-
-	} else if copyV.Type == "xhttp" || copyV.HeaderType == "http" || copyV.Type == "httpupgrade" || copyV.Type == "ws" || copyV.Type == "h2" || copyV.Type == "splithttp" {
+	if copyV.Type == "xhttp" || copyV.HeaderType == "http" || copyV.Type == "httpupgrade" || copyV.Type == "ws" || copyV.Type == "h2" || copyV.Type == "splithttp" {
 		info += fmt.Sprintf("%s: %s\n%s: %s\n",
 			color.RedString("Host"), copyV.Host,
 			color.RedString("Path"), copyV.Path)
@@ -308,11 +305,13 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 			}
 			`, string(pathb), string(hostb)))
 		}
-		break
 	case "kcp":
 		s.KCPSettings = &conf.KCPConfig{}
-		s.KCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, v.Type)))
-		break
+		headerType := v.HeaderType
+		if headerType == "" {
+			headerType = "none"
+		}
+		s.KCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, headerType)))
 	case "ws":
 		s.WSSettings = &conf.WebSocketConfig{}
 		s.WSSettings.Path = v.Path
@@ -344,23 +343,19 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 			Host: v.Host,
 			Path: v.Path,
 		}
-		break
 	case "splithttp":
 		s.SplitHTTPSettings = &conf.SplitHTTPConfig{
 			Host: v.Host,
 			Path: v.Path,
 		}
-		break
 	case "grpc":
 		if len(v.ServiceName) > 0 {
 			if v.ServiceName[0] == '/' {
 				v.ServiceName = v.ServiceName[1:]
 			}
 		}
-		multiMode := false
-		if v.Mode != "gun" {
-			multiMode = true
-		}
+		// multiMode is true only when explicitly set to "multi"
+		multiMode := v.Mode == "multi"
 
 		s.GRPCSettings = &conf.GRPCConfig{
 			Authority:           v.Authority,
@@ -373,7 +368,6 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 			UserAgent:           "",
 		}
 		v.Flow = ""
-		break
 	}
 
 	if v.Security == "tls" {
@@ -465,7 +459,11 @@ func (v *Vless) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
 		}
 	case "kcp":
 		streamConfig.KCPSettings = &conf.KCPConfig{}
-		streamConfig.KCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, v.Type)))
+		headerType := v.HeaderType
+		if headerType == "" {
+			headerType = "none"
+		}
+		streamConfig.KCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, headerType)))
 	case "ws":
 		streamConfig.WSSettings = &conf.WebSocketConfig{}
 		streamConfig.WSSettings.Path = v.Path
@@ -497,10 +495,8 @@ func (v *Vless) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
 				v.ServiceName = v.ServiceName[1:]
 			}
 		}
-		multiMode := false
-		if v.Mode != "gun" {
-			multiMode = true
-		}
+		// multiMode is true only when explicitly set to "multi"
+		multiMode := v.Mode == "multi"
 
 		streamConfig.GRPCSettings = &conf.GRPCConfig{
 			Authority:           v.Authority,
