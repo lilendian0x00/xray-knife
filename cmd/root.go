@@ -21,7 +21,7 @@ import (
 var rootCmd = &cobra.Command{
 	Use:     "xray-knife",
 	Short:   "Swiss Army Knife for xray-core & sing-box",
-	Version: "7.3.10",
+	Version: "8.0.0",
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
