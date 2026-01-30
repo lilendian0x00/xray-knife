@@ -49,7 +49,7 @@ jobs:
       - name: Build the application
         run: |
           mkdir -p build_assets
-          go build -v -o build_assets/xray-knife -tags="with_gvisor,with_quic,with_wireguard,with_ech,with_utls,with_clash_api,with_grpc" -ldflags "-s -w -buildid="
+          go build -v -o build_assets/xray-knife -tags="with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc" -ldflags "-s -w -buildid="
 
       - name: Rename Windows binary
         if: matrix.goos == 'windows'
