@@ -163,7 +163,11 @@ func (s *Socks) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
 	uint32Result := uint32(uint32Value)
 
 	// Parse addr
-	in.ListenOn.Address = net2.ParseAddress(s.Address)
+	listenAddr := s.Address
+	if net.ParseIP(listenAddr) == nil {
+		listenAddr = "0.0.0.0"
+	}
+	in.ListenOn.Address = net2.ParseAddress(listenAddr)
 	in.PortList = &conf.PortList{Range: []conf.PortRange{
 		{From: uint32Result, To: uint32Result},
 	}}

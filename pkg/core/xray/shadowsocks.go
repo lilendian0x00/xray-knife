@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	net2 "github.com/xtls/xray-core/common/net"
 	"net"
 	"net/url"
 	"strconv"
 	"strings"
+
+	net2 "github.com/xtls/xray-core/common/net"
 
 	"github.com/lilendian0x00/xray-knife/v7/pkg/core/protocol"
 	"github.com/lilendian0x00/xray-knife/v7/utils"
@@ -109,7 +110,7 @@ func (s *Shadowsocks) GetLink() string {
 		return s.OrigLink
 	} else {
 		creds := fmt.Sprintf("%s:%s", s.Encryption, s.Password)
-		encodedCreds := base64.StdEncoding.EncodeToString([]byte(creds))
+		encodedCreds := base64.RawURLEncoding.EncodeToString([]byte(creds))
 
 		// The Userinfo part in ss links is the base64 encoded string
 		// We construct the final URL string manually as url.URL doesn't handle this specific format directly
@@ -171,10 +172,15 @@ func (s *Shadowsocks) BuildInboundDetourConfig() (*conf.InboundDetourConfig, err
 
 	settings := json.RawMessage(settingsJSON)
 
+	listenAddr := s.Address
+	if net.ParseIP(listenAddr) == nil {
+		listenAddr = "0.0.0.0"
+	}
+
 	in := &conf.InboundDetourConfig{
 		Protocol: s.Name(),
 		Tag:      s.Name(),
-		ListenOn: &conf.Address{Address: net2.ParseAddress(s.Address)},
+		ListenOn: &conf.Address{Address: net2.ParseAddress(listenAddr)},
 		PortList: &conf.PortList{Range: []conf.PortRange{
 			{From: uint32Port, To: uint32Port},
 		}},

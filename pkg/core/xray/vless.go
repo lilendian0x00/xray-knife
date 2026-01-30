@@ -3,11 +3,12 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
-	net2 "github.com/xtls/xray-core/common/net"
 	"net"
 	"net/url"
 	"strconv"
 	"strings"
+
+	net2 "github.com/xtls/xray-core/common/net"
 
 	"github.com/lilendian0x00/xray-knife/v7/pkg/core/protocol"
 	"github.com/lilendian0x00/xray-knife/v7/utils"
@@ -548,12 +549,16 @@ func (v *Vless) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
 	}
 	uint32Result := uint32(uint32Value)
 
+	listenAddr := v.Address
+	if net.ParseIP(listenAddr) == nil {
+		listenAddr = "0.0.0.0"
+	}
 	in := &conf.InboundDetourConfig{
 		Protocol:      v.Name(),
 		Tag:           v.Name(),
 		Settings:      &settings,
 		StreamSetting: streamConfig,
-		ListenOn:      &conf.Address{Address: net2.ParseAddress(v.Address)},
+		ListenOn:      &conf.Address{Address: net2.ParseAddress(listenAddr)},
 		PortList: &conf.PortList{Range: []conf.PortRange{
 			{From: uint32Result, To: uint32Result},
 		}},

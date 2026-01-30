@@ -1,6 +1,7 @@
 package xray
 
 import (
+	"context"
 	"net/url"
 	"reflect"
 	"testing"
@@ -195,7 +196,7 @@ func TestCore_MakeHttpClient(t *testing.T) {
 		t.Fatalf("Parse() error = %v", err)
 	}
 
-	client, instance, err := x.MakeHttpClient(protocol, 10*time.Second)
+	client, instance, err := x.MakeHttpClient(context.Background(), protocol, 10*time.Second)
 	if err != nil {
 		t.Fatalf("MakeHttpClient() error = %v", err)
 	}

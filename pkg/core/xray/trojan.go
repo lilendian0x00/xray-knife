@@ -3,11 +3,12 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
-	net2 "github.com/xtls/xray-core/common/net"
 	"net"
 	"net/url"
 	"strconv"
 	"strings"
+
+	net2 "github.com/xtls/xray-core/common/net"
 
 	"github.com/lilendian0x00/xray-knife/v7/pkg/core/protocol"
 	"github.com/lilendian0x00/xray-knife/v7/utils"
@@ -514,10 +515,14 @@ func (t *Trojan) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
 		streamConfig.Security = "none"
 	}
 
+	listenAddr := t.Address
+	if net.ParseIP(listenAddr) == nil {
+		listenAddr = "0.0.0.0"
+	}
 	in := &conf.InboundDetourConfig{
 		Protocol: t.Name(),
 		Tag:      t.Name(),
-		ListenOn: &conf.Address{Address: net2.ParseAddress(t.Address)},
+		ListenOn: &conf.Address{Address: net2.ParseAddress(listenAddr)},
 		PortList: &conf.PortList{Range: []conf.PortRange{
 			{From: uint32Port, To: uint32Port},
 		}},
