@@ -119,9 +119,7 @@ func (t *Trojan) DetailsStr() string {
 		color.RedString("Flow"), copyV.Flow,
 	)
 
-	if copyV.Type == "" {
-
-	} else if copyV.Type == "xhttp" || copyV.Type == "http" || copyV.Type == "httpupgrade" || copyV.Type == "ws" || copyV.Type == "h2" || copyV.Type == "splithttp" {
+	if copyV.Type == "xhttp" || copyV.Type == "http" || copyV.Type == "httpupgrade" || copyV.Type == "ws" || copyV.Type == "h2" || copyV.Type == "splithttp" {
 		info += fmt.Sprintf("%s: %s\n%s: %s\n",
 			color.RedString("Host"), copyV.Host,
 			color.RedString("Path"), copyV.Path)
@@ -278,11 +276,13 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 			}
 			`, string(pathb), string(hostb))))
 		}
-		break
 	case "kcp":
 		s.KCPSettings = &conf.KCPConfig{}
-		s.KCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, t.Type)))
-		break
+		headerType := t.HeaderType
+		if headerType == "" {
+			headerType = "none"
+		}
+		s.KCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, headerType)))
 	case "ws":
 		s.WSSettings = &conf.WebSocketConfig{}
 		s.WSSettings.Path = t.Path
@@ -305,7 +305,6 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 		if t.Mode == "" {
 			s.XHTTPSettings.Mode = "auto"
 		}
-		break
 	case "httpupgrade":
 		s.HTTPUPGRADESettings = &conf.HttpUpgradeConfig{
 			Host: t.Host,
@@ -322,10 +321,8 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 				t.ServiceName = t.ServiceName[1:]
 			}
 		}
-		multiMode := false
-		if t.Mode != "gun" {
-			multiMode = true
-		}
+		// multiMode is true only when explicitly set to "multi"
+		multiMode := t.Mode == "multi"
 		s.GRPCSettings = &conf.GRPCConfig{
 			Authority:          t.Authority,
 			InitialWindowsSize: 65536,
@@ -336,7 +333,6 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 		}
 
 		t.Flow = ""
-		break
 		//case "quic":
 		//	tp := "none"
 		//	if t.HeaderType != "" {
@@ -365,9 +361,6 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 		s.TLSSettings = &conf.TLSConfig{
 			Fingerprint: t.TlsFingerprint,
 			Insecure:    insecure,
-		}
-		if t.AllowInsecure == "1" {
-			s.TLSSettings.Insecure = true
 		}
 
 		if t.SNI != "" {
@@ -467,7 +460,11 @@ func (t *Trojan) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
 		}
 	case "kcp":
 		streamConfig.KCPSettings = &conf.KCPConfig{}
-		streamConfig.KCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, t.Type)))
+		headerType := t.HeaderType
+		if headerType == "" {
+			headerType = "none"
+		}
+		streamConfig.KCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`{ "type": "%s" }`, headerType)))
 	case "ws":
 		streamConfig.WSSettings = &conf.WebSocketConfig{}
 		streamConfig.WSSettings.Path = t.Path
@@ -499,10 +496,8 @@ func (t *Trojan) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
 				t.ServiceName = t.ServiceName[1:]
 			}
 		}
-		multiMode := false
-		if t.Mode != "gun" {
-			multiMode = true
-		}
+		// multiMode is true only when explicitly set to "multi"
+		multiMode := t.Mode == "multi"
 		streamConfig.GRPCSettings = &conf.GRPCConfig{
 			Authority:   t.Authority,
 			ServiceName: t.ServiceName,
