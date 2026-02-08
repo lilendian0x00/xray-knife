@@ -105,6 +105,7 @@ Password: a_very_secure_random_password
 Open `http://127.0.0.1:8080` in your browser and log in with the generated credentials.
 
 **2. Run with Custom Credentials**
+
 You can override the config file using flags or environment variables. This is useful for server deployments.
 ```bash
 xray-knife webui --auth.user myadmin --auth.password 's3cur3p@ss' --auth.secret 'a_very_long_and_random_string'
@@ -136,6 +137,7 @@ xray-knife subs fetch --id 1
 Test proxy configurations for latency, speed, and more.
 
 **1. Test**
+
 This is the new, powerful way to test configs. It pulls directly from the library you built with the `subs` command.
 
 ```bash
@@ -181,6 +183,7 @@ xray-knife proxy --inbound socks --port 9999 --rotate 300
 Find the fastest Cloudflare edge IPs for your location. Results are automatically saved to the database.
 
 **1. Scan Subnets with a Speed Test**
+
 Scan subnets from a file, perform a speed test on the top 10 fastest IPs, and save results.
 ```bash
 xray-knife cfscanner -s subnets.txt --speedtest --speedtest-top 10
@@ -208,6 +211,7 @@ xray-knife parse -c "trojan://..."
 ```
 
 **2. Generate Full JSON Config**
+
 Generate a complete, clean, and ready-to-use `xray-core` compatible JSON configuration.
 ```bash
 xray-knife parse -c "vless://..." --json > my_config.json
