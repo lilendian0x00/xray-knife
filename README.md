@@ -17,7 +17,7 @@ A powerful command-line utility and secure web UI designed for managing, testing
 
 ---
 
-[**English**](https://github.com/lilendian0x00/xray-knife/blob/master/README.md) [**简体中文**](https://github.com/lilendian0x00/xray-knife/blob/master/docs/zh_README.md)
+[**English**](https://github.com/lilendian0x00/xray-knife/blob/master/README.md) [简体中文](https://github.com/lilendian0x00/xray-knife/blob/master/docs/zh_README.md)
 
 `xray-knife` is a versatile multi-tool that streamlines the process of working with proxy configurations. With its persistent database, it serves as a central hub for all your proxy needs, from managing subscription links to finding the fastest and most reliable connections.
 
