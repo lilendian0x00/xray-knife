@@ -15,9 +15,9 @@
   <img src="https://img.shields.io/github/license/lilendian0x00/xray-knife?style=for-the-badge" alt="License">
 </p>
 
-[English](https://github.com/lilendian0x00/xray-knife/blob/master/README.md) [**简体中文**](https://github.com/lilendian0x00/xray-knife/blob/master/docs/zh_README.md)
-
 ---
+
+[English](https://github.com/lilendian0x00/xray-knife/blob/master/README.md) [**简体中文**](https://github.com/lilendian0x00/xray-knife/blob/master/docs/zh_README.md)
 
 `xray-knife` 是一款功能强大的多功能工具，可以简化代理配置流程。凭借其持久性数据库，它可以成为您所有代理需求的中心枢纽，从管理订阅链接到查找最快速、最可靠的连接，都能轻松搞定。
 
