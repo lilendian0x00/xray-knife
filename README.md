@@ -160,6 +160,7 @@ xray-knife http list-results --limit 20
 Run a local proxy that intelligently manages and rotates your outbound connections.
 
 **1. Run a Rotating SOCKS5 Proxy from the Database**
+
 Start a local SOCKS5 proxy on port `9999`. It will load all enabled configs from your database and automatically rotate to the best-performing one every 5 minutes (300 seconds).
 
 ```bash
