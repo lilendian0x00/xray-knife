@@ -153,81 +153,72 @@ xray-knife http list-results --limit 20
 
 ### 🔄 自动轮换代理 (`proxy`)
 
-监听一个 HTTP 或 SOCKS5 代理，出口会自动轮换至表现最好的代理。
-
-**1. Run a Rotating SOCKS5 Proxy from the Database**
-Start a local SOCKS5 proxy on port `9999`. It will load all enabled configs from your database and automatically rotate to the best-performing one every 5 minutes (300 seconds).
+**1. 监听一个 HTTP 或 SOCKS5 代理，自动轮换出口至表现最好的代理。**
+监听一个 `9999` SOCKS 5 端口，从代理库中加载所有已启用的代理，并每 5 分钟（300 秒）自动切换到最佳的代理。 
 
 ```bash
-# Proxy to configs from a file
+# 从文件导入
 xray-knife proxy --inbound socks -f ./configs.txt --port 9999 --rotate 300
 
-# Proxy to configs from your database
+# 从程序自带的 SQLite 数据库中导入
 xray-knife proxy --inbound socks --port 9999 --rotate 300
 ```
-> **Pro Tip:** While the proxy is running, simply press `Enter` in the terminal to force an immediate rotation to the next available fast configuration.
+> **提醒:** 其运行时如果你在 SSH / Console 中 `Enter` 将强制立即切换到当前最快的出口。
 
 ---
 
-### 🌐 Scanning for Cloudflare IPs (`cfscanner`)
+### 🌐 CF (Cloudflare) 优选 (`cfscanner`)
 
-Find the fastest Cloudflare edge IPs for your location. Results are automatically saved to the database.
+**1. 扫描 CIDR(s) 并测速**
 
-**1. Scan Subnets with a Speed Test**
-Scan subnets from a file, perform a speed test on the top 10 fastest IPs, and save results.
+从文件中导入 CIDR(s) 并测速，然后导出前十最快的 IP。
 ```bash
 xray-knife cfscanner -s subnets.txt --speedtest --speedtest-top 10
 ```
 
-**2. Resume and View Results**
+**2. 恢复进度**
 ```bash
-# Continue a previous scan, skipping already tested IPs
+# 继续上次中断的扫描
 xray-knife cfscanner -s subnets.txt --resume
 
-# View the best IPs from all previous scans, sorted by performance
+# 列出以往所有扫描结果并筛选出前 25 个表现最好的 IP
 xray-knife cfscanner list-results --limit 25
 ```
 
 ---
 
-### 🔎 Parsing a Config Link (`parse`)
+### 🔎 解析一个分享链接 (`parse`)
 
-Decode and inspect any configuration link.
-
-**1. Get a Human-Readable Breakdown**
-Display a detailed summary of a configuration link.
+**1. 解析分享链接并给出概要**
 ```bash
 xray-knife parse -c "trojan://..."
 ```
 
-**2. Generate Full JSON Config**
-Generate a complete, clean, and ready-to-use `xray-core` compatible JSON configuration.
+**2. 解析分享链接并生成 json 格式的出口配置**
 ```bash
 xray-knife parse -c "vless://..." --json > my_config.json
 ```
 
 ---
 
-## 🏗️ Build from Source
-
-To build `xray-knife` from the source code, clone the repository and build the main package.
+## 🏗️ 从源码编译
 
 ```bash
 git clone https://github.com/lilendian0x00/xray-knife.git
 cd xray-knife
 
-# Build for all supported platforms (Linux, Windows, macOS)
+# 编译所有支持的平台和架构 (Linux, Windows, macOS)
 ./build.sh all
 
-# Or build for your current platform
+# 只编译当前平台
 go build -o xray-knife .
 ```
-The compiled binary will be placed in `build` or the current directory based on your choice.
+编译出来的二进制文件将会默认保存至 `build` 目录。
 
-## 🤝 Contributing
+## 🤝 贡献
 
-Contributions are welcome! If you find a bug or have a feature request, please open an issue. If you'd like to contribute code, please open a pull request.
+欢迎对此项目开 PR 做出贡献，如果有任何问题或建议请创建 issue 。
 
-## 📄 License
+## 📄 开源许可
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+这个项目使用 [MIT LICENSE](LICENSE) 。
