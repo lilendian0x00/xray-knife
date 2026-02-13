@@ -56,15 +56,22 @@ func (v *Vless) Parse() error {
 	v.Type = query.Get("type")         // network type: "tcp", "ws", "grpc", "quic", etc.
 
 	// Validate host and sni parameters before assigning them
-	sni := query.Get("sni")
-	if !utils.IsValidHostOrSNI(sni) {
-		return fmt.Errorf("invalid characters in 'sni' parameter: %s", sni)
-	}
-	host := query.Get("host")
-	if !utils.IsValidHostOrSNI(host) {
-		return fmt.Errorf("invalid characters in 'host' parameter: %s", host)
-	}
+    sni := strings.TrimSpace(query.Get("sni"))
+    if strings.Contains(sni, " ") {
+        return fmt.Errorf("sni contains space: %s", sni)
+    }
+    if !utils.IsValidHostOrSNI(sni) {
+        return fmt.Errorf("invalid characters in 'sni' parameter: %s", sni)
+    }
 
+    host := strings.TrimSpace(query.Get("host"))
+    if strings.Contains(host, " ") {
+        return fmt.Errorf("host contains space: %s", host)
+    }
+    if !utils.IsValidHostOrSNI(host) {
+        return fmt.Errorf("invalid characters in 'host' parameter: %s", host)
+    }
+	
 	v.SNI = sni
 	v.Host = host                // for ws, http
 	v.Path = query.Get("path")   // for ws, http path, or kcp seed
