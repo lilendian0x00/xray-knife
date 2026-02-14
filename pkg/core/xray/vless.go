@@ -56,7 +56,23 @@ func (v *Vless) Parse() error {
 	v.Type = query.Get("type")         // network type: "tcp", "ws", "grpc", "quic", etc.
 
 	// Validate host and sni parameters before assigning them
+
+    isValidHostName := func(s string) bool {
+        if s == "" {
+            return true
+        }
+        for _, r := range s {
+            if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '-') {
+                return false
+            }
+        }
+        return true
+    }
+
     sni := strings.TrimSpace(query.Get("sni"))
+    if !isValidHostName(sni) {
+        return fmt.Errorf("sni contains invalid characters (only letters, digits, dot, hyphen allowed): %s", sni)
+    }
     if strings.Contains(sni, " ") {
         return fmt.Errorf("sni contains space: %s", sni)
     }
@@ -65,6 +81,9 @@ func (v *Vless) Parse() error {
     }
 
     host := strings.TrimSpace(query.Get("host"))
+    if !isValidHostName(host) {
+        return fmt.Errorf("host contains invalid characters (only letters, digits, dot, hyphen allowed): %s", host)
+    }
     if strings.Contains(host, " ") {
         return fmt.Errorf("host contains space: %s", host)
     }
