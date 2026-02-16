@@ -287,6 +287,10 @@ func (h *APIHandler) handleCfScannerHistory(w http.ResponseWriter, r *http.Reque
 	}
 	var results []*scanner.ScanResult
 	if err := loadResultsFromCSV(cfScannerHistoryFile, &results); err != nil {
+		writeJSONError(w, fmt.Sprintf("failed to load scanner history: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if results == nil {
 		results = []*scanner.ScanResult{}
 	}
 	writeJSONResponse(w, http.StatusOK, results)
