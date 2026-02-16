@@ -60,6 +60,7 @@ type ScannerConfig struct {
 	InsecureTLS          bool     `json:"insecureTLS"`
 	Resume               bool     `json:"resume"`
 	SaveToDB             bool     `json:"saveToDB"`
+	OnIPScannedCallback  func()  `json:"-"` // Instance-scoped callback for progress reporting
 }
 
 // ScannerService is the main engine for scanning.
@@ -71,6 +72,15 @@ type ScannerService struct {
 	selectedCoreMap map[string]core.Core
 	initialResults  []*ScanResult
 	scannedIPs      map[string]bool
+}
+
+// notifyIPScanned calls the instance callback if set, otherwise falls back to the global.
+func (s *ScannerService) notifyIPScanned() {
+	if s.config.OnIPScannedCallback != nil {
+		s.config.OnIPScannedCallback()
+	} else if OnIPScanned != nil {
+		OnIPScanned()
+	}
 }
 
 // ScanResult represents the outcome of scanning a single IP.
@@ -314,7 +324,8 @@ func (s *ScannerService) Run(ctx context.Context, progressChan chan<- *ScanResul
 	return nil
 }
 
-// OnIPScanned is a global hook for progress reporting. TODO: Not ideal, but avoids a large refactor.
+// OnIPScanned is a deprecated global hook for progress reporting.
+// Prefer using ScannerConfig.OnIPScannedCallback instead.
 var OnIPScanned func()
 
 func (s *ScannerService) runLatencyScan(ctx context.Context, workerResultsChan chan<- *ScanResult) error {
@@ -351,18 +362,12 @@ func (s *ScannerService) runLatencyScan(ctx context.Context, workerResultsChan c
 			r.Shuffle(len(listIP), func(i, j int) { listIP[i], listIP[j] = listIP[j], listIP[i] })
 			for _, ip := range listIP {
 				if _, exists := s.scannedIPs[ip]; exists {
-					if OnIPScanned != nil {
-						OnIPScanned()
-					}
+					s.notifyIPScanned()
 					continue
 				}
 				ipToScan := ip
 				group.Submit(func() {
-					defer func() {
-						if OnIPScanned != nil {
-							OnIPScanned() // Increment after scan
-						}
-					}()
+					defer s.notifyIPScanned()
 					res := s.scanIPForLatency(group.Context(), ipToScan)
 					select {
 					case workerResultsChan <- res:
@@ -390,11 +395,7 @@ func (s *ScannerService) runLatencyScan(ctx context.Context, workerResultsChan c
 					continue
 				}
 				group.Submit(func() {
-					defer func() {
-						if OnIPScanned != nil {
-							OnIPScanned() // Increment after scan
-						}
-					}()
+					defer s.notifyIPScanned()
 					res := s.scanIPForLatency(group.Context(), ipStr)
 					select {
 					case workerResultsChan <- res:
