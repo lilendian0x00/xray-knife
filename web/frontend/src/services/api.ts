@@ -6,7 +6,7 @@ import { useAppStore } from '@/stores/appStore';
 
 export const api = {
     // Auth Endpoint
-    login(username: String, password: String) {
+    login(username: string, password: string) {
         return axios.post('/api/v1/login', { username, password });
     },
 
