@@ -3,6 +3,9 @@ import { useAppStore, type TaskStatus } from "@/stores/appStore";
 import { type HttpResult, type ProxyDetails, type ProxyStatus } from "@/types/dashboard";
 
 const BATCH_INTERVAL = 250; // ms
+const BASE_RECONNECT_DELAY = 1000; // 1 second
+const MAX_RECONNECT_DELAY = 30000; // 30 seconds
+const MAX_RECONNECT_ATTEMPTS = 50;
 
 // Define the types for our event listeners
 type EventCallback = (data: any) => void;
@@ -15,6 +18,8 @@ class WebSocketService {
     private listeners: Listeners = {}; // Event emitter store
     private httpResultBuffer: HttpResult[] = [];
     private httpResultTimer: number | null = null;
+    private reconnectAttempts = 0;
+    private reconnectTimer: number | null = null;
 
     // --- Event Emitter Methods ---
     on(event: string, callback: EventCallback) {
@@ -51,6 +56,8 @@ class WebSocketService {
         this.ws = new WebSocket(wsUrl);
 
         this.ws.onopen = () => {
+            this.reconnectAttempts = 0; // Reset on successful connection
+            useAppStore.getState().setWsConnected(true);
             this.emit('log', "\x1b[32m[WebSocket] Connection established.\x1b[0m");
             // Send auth token immediately after connection
             const token = useAppStore.getState().token;
@@ -61,15 +68,28 @@ class WebSocketService {
         };
         this.ws.onmessage = this.handleMessage.bind(this);
         this.ws.onclose = () => {
-            this.emit('log', "\x1b[31m[WebSocket] Connection closed. Retrying in 3 seconds...\x1b[0m");
+            useAppStore.getState().setWsConnected(false);
             this.stopHttpResultBatching();
-            setTimeout(() => this.connect(), 3000);
+            this.scheduleReconnect();
         };
         this.ws.onerror = (error) => {
             console.error("WebSocket error:", error);
             this.emit('log', `\x1b[31m[WebSocket] Error: ${(error as Event).type}\x1b[0m`);
             this.ws?.close();
         };
+    }
+
+    private scheduleReconnect() {
+        if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+            this.emit('log', "\x1b[31m[WebSocket] Max reconnection attempts reached. Please refresh the page.\x1b[0m");
+            return;
+        }
+
+        const delay = Math.min(BASE_RECONNECT_DELAY * Math.pow(2, this.reconnectAttempts), MAX_RECONNECT_DELAY);
+        this.reconnectAttempts++;
+        this.emit('log', `\x1b[31m[WebSocket] Connection closed. Reconnecting in ${(delay / 1000).toFixed(1)}s (attempt ${this.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...\x1b[0m`);
+
+        this.reconnectTimer = window.setTimeout(() => this.connect(), delay);
     }
 
     private flushHttpResultBuffer() {
@@ -179,6 +199,11 @@ class WebSocketService {
 
     disconnect() {
         this.stopHttpResultBatching();
+        if (this.reconnectTimer !== null) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+        }
+        this.reconnectAttempts = MAX_RECONNECT_ATTEMPTS; // Prevent reconnecting after manual disconnect
         this.ws?.close();
     }
 }
