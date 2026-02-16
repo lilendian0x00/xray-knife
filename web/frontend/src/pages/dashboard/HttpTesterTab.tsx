@@ -14,7 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Globe, ClipboardCopy, Settings, RotateCcw, StopCircle, Trash2, Download, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Loader2, Globe, ClipboardCopy, ClipboardList, Settings, RotateCcw, StopCircle, Trash2, Download, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { useAppStore } from "@/stores/appStore";
 import { api } from "@/services/api";
 import { type HttpResult } from "@/types/dashboard";
@@ -130,6 +130,13 @@ export function HttpTesterTab() {
 
     const handleCopyLink = (link: string) => {
         navigator.clipboard.writeText(link).then(() => toast.success("Link copied!"), () => toast.error("Failed to copy link."));
+    };
+
+    const passedLinks = useMemo(() => httpResults.filter(r => r.status === 'passed').map(r => r.link), [httpResults]);
+
+    const handleCopyAllWorking = () => {
+        navigator.clipboard.writeText(passedLinks.join('\n'))
+            .then(() => toast.success(`Copied ${passedLinks.length} working config(s)!`), () => toast.error("Failed to copy links."));
     };
 
     const getStatusBadgeVariant = (status: HttpResult['status']): "default" | "secondary" | "destructive" => {
@@ -272,6 +279,9 @@ export function HttpTesterTab() {
                         <div className="flex flex-wrap items-center justify-between gap-4">
                             <div className="flex flex-col gap-1.5"><CardTitle>Test Results</CardTitle><CardDescription>Showing {httpResults.length} results.</CardDescription></div>
                             <div className="flex items-center gap-2">
+                                <Button variant="outline" size="sm" disabled={passedLinks.length === 0} onClick={handleCopyAllWorking}>
+                                    <ClipboardList className="mr-2 h-4 w-4" />Copy Working
+                                </Button>
                                 <Button variant="outline" size="sm" disabled={httpResults.length === 0} onClick={handleExportCSV}>
                                     <Download className="mr-2 h-4 w-4" />Export CSV
                                 </Button>

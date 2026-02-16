@@ -96,7 +96,8 @@ export default function Dashboard() {
     // Update terminal theme without re-creating the instance
     useEffect(() => {
         if (term.current) {
-            term.current.options.theme = theme === 'dark'
+            const isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+            term.current.options.theme = isDark
                 ? { background: '#18181b', foreground: '#e4e4e7' }
                 : { background: '#FFFFFF', foreground: '#09090b' };
         }
@@ -107,16 +108,18 @@ export default function Dashboard() {
         setTimeout(() => fitAddon.current?.fit(), 50);
     }, [activePage, isSidebarCollapsed, isTerminalCollapsed]);
 
+    // Connect WebSocket once on mount
     useEffect(() => {
-        // This effect manages the WebSocket connection and the SINGLE log listener.
-        // It prevents duplicate logs.
         webSocketService.connect();
+    }, []);
 
+    // Log listener — re-attaches only when filter/scroll settings change
+    useEffect(() => {
         const logListener = (text: string) => {
             if (logSearchTerm && !text.toLowerCase().includes(logSearchTerm.toLowerCase())) {
                 return;
             }
-            if (term.current) { // Check if terminal instance exists before writing
+            if (term.current) {
                 term.current.writeln(text);
                 if (isAutoScroll) {
                     term.current.scrollToBottom();
@@ -129,7 +132,7 @@ export default function Dashboard() {
         return () => {
             webSocketService.off('log', logListener);
         };
-    }, [logSearchTerm, isAutoScroll]); // Re-attach listener only when filter/scroll settings change
+    }, [logSearchTerm, isAutoScroll]);
 
 
     // --- Initial State Fetching ---
@@ -210,21 +213,18 @@ export default function Dashboard() {
                     </div>
                 </div>
             </CardHeader>
-            <AnimatePresence initial={false}>
-                {!isTerminalCollapsed && (
-                    <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.2 }}
-                        className="overflow-hidden flex-1 min-h-0"
-                    >
-                        <CardContent className="h-full max-w-screen pb-6">
-                            <div ref={terminalRef} className="h-full w-full min-h-[200px] rounded-md border bg-muted/20 overflow-hidden" />
-                        </CardContent>
-                    </motion.div>
-                )}
-            </AnimatePresence>
+            <motion.div
+                animate={isTerminalCollapsed
+                    ? { height: 0, opacity: 0 }
+                    : { height: 'auto', opacity: 1 }}
+                initial={false}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden flex-1 min-h-0"
+            >
+                <CardContent className="h-full max-w-screen pb-6">
+                    <div ref={terminalRef} className="h-full w-full min-h-[200px] rounded-md border bg-muted/20 overflow-hidden" />
+                </CardContent>
+            </motion.div>
         </Card>
     );
 
