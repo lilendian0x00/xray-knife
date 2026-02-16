@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Server, Globe, Menu, Package2, PanelLeft, Search, LogOut, Trash2, ArrowDownToLine, Pause, Sun, Moon, Monitor, ChevronDown, ChevronUp } from 'lucide-react';
 import { useAppStore } from "@/stores/appStore";
-import { webSocketService } from "@/services/websocket";
+import { sseService } from "@/services/sse";
 import { ProxyTab } from "./dashboard/ProxyTab";
 import { HttpTesterTab } from "./dashboard/HttpTesterTab";
 import { CfScannerTab } from "./dashboard/CFScannerTab";
@@ -45,7 +45,7 @@ export default function Dashboard() {
         setScanStatus, setScanResults,
         setHttpResults, setHttpTestStatus,
         logout,
-        wsConnected,
+        sseConnected,
     } = useAppStore();
 
     const { theme, setTheme } = useTheme();
@@ -54,6 +54,12 @@ export default function Dashboard() {
     const fitAddon = useRef<FitAddon | null>(null);
     const [logSearchTerm, setLogSearchTerm] = useState('');
     const [isAutoScroll, setIsAutoScroll] = useState(true);
+
+    const handleLogout = () => {
+        sseService.disconnect();
+        api.logout().catch(() => {});
+        logout();
+    };
 
     const cycleTheme = () => {
         const next = theme === 'system' ? 'light' : theme === 'light' ? 'dark' : 'system';
@@ -110,7 +116,7 @@ export default function Dashboard() {
 
     // Connect WebSocket once on mount
     useEffect(() => {
-        webSocketService.connect();
+        sseService.connect();
     }, []);
 
     // Log listener — re-attaches only when filter/scroll settings change
@@ -127,10 +133,10 @@ export default function Dashboard() {
             }
         };
 
-        webSocketService.on('log', logListener);
+        sseService.on('log', logListener);
 
         return () => {
-            webSocketService.off('log', logListener);
+            sseService.off('log', logListener);
         };
     }, [logSearchTerm, isAutoScroll]);
 
@@ -290,14 +296,14 @@ export default function Dashboard() {
                             </SheetContent>
                         </Sheet>
                         <div className="w-full flex-1"><Breadcrumb><BreadcrumbList><BreadcrumbItem><BreadcrumbLink href="/">Home</BreadcrumbLink></BreadcrumbItem><BreadcrumbSeparator /><BreadcrumbItem><BreadcrumbPage>{currentPageInfo?.label}</BreadcrumbPage></BreadcrumbItem></BreadcrumbList></Breadcrumb></div>
-                        <div className="flex items-center gap-1" title={wsConnected ? "WebSocket Connected" : "WebSocket Disconnected"}>
-                            <span className={cn("size-2 rounded-full", wsConnected ? "bg-green-500" : "bg-red-500")} />
+                        <div className="flex items-center gap-1" title={sseConnected ? "Connected" : "Disconnected"}>
+                            <span className={cn("size-2 rounded-full", sseConnected ? "bg-green-500" : "bg-red-500")} />
                         </div>
                         <Badge className={cn("capitalize", getProxyStatusColor(proxyStatus))}>Proxy: {proxyStatus}</Badge>
                         <Button variant="ghost" size="icon" onClick={cycleTheme} title={`Theme: ${theme}`}>
                             <ThemeIcon className="h-5 w-5" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={logout} title="Logout"><LogOut className="h-5 w-5" /></Button>
+                        <Button variant="ghost" size="icon" onClick={handleLogout} title="Logout"><LogOut className="h-5 w-5" /></Button>
                     </header>
                     <main className="flex-1 overflow-auto p-4 lg:p-6 min-w-0">
                         <div className="mx-auto h-full w-full max-w-screen-2xl">

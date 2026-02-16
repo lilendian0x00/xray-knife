@@ -42,7 +42,7 @@ interface AppState {
     token: string | null;
     isAuthenticated: boolean;
     authRequired: boolean | null; // null = not yet checked
-    wsConnected: boolean;
+    sseConnected: boolean;
 }
 
 interface AppActions {
@@ -67,7 +67,7 @@ interface AppActions {
     setToken: (token: string | null) => void;
     setAuthRequired: (required: boolean) => void;
     logout: () => void;
-    setWsConnected: (connected: boolean) => void;
+    setSseConnected: (connected: boolean) => void;
 }
 
 export const useAppStore = create<AppState & AppActions>()(
@@ -87,7 +87,7 @@ export const useAppStore = create<AppState & AppActions>()(
             token: null,
             isAuthenticated: false,
             authRequired: null,
-            wsConnected: false,
+            sseConnected: false,
 
             updateProxySettings: (newSettings) => set(state => ({ proxySettings: { ...state.proxySettings, ...newSettings } })),
             updateHttpSettings: (newSettings) => set(state => ({ httpSettings: { ...state.httpSettings, ...newSettings } })),
@@ -116,7 +116,7 @@ export const useAppStore = create<AppState & AppActions>()(
             setToken: (token) => set({ token, isAuthenticated: !!token }),
             setAuthRequired: (required) => set({ authRequired: required }),
             logout: () => set({ token: null, isAuthenticated: false }),
-            setWsConnected: (connected) => set({ wsConnected: connected }),
+            setSseConnected: (connected) => set({ sseConnected: connected }),
         }),
         {
             name: 'xray-knife-app-storage',

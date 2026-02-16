@@ -20,10 +20,10 @@ export default defineConfig({
         target: 'http://127.0.0.1:8080', // The address of your Go backend.
         changeOrigin: true, // Recommended for virtual hosts and proper proxying.
       },
-      // Any WebSocket connection attempt to '/ws' will be forwarded.
-      '/ws': {
-        target: 'ws://127.0.0.1:8080', // The WebSocket endpoint of your Go backend.
-        ws: true, // This enables WebSocket proxying.
+      // SSE endpoint for real-time events.
+      '/events': {
+        target: 'http://127.0.0.1:8080',
+        changeOrigin: true,
       },
     },
   },

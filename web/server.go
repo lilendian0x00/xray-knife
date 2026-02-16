@@ -14,20 +14,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
 )
 
 //go:embed dist
 var embeddedFiles embed.FS
-
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for the WebSocket
-	},
-}
 
 // Server represents the web application server.
 type Server struct {
@@ -44,7 +35,7 @@ func NewServer(listenAddr, user, pass, secret string) (*Server, error) {
 	hub := newHub()
 	go hub.run()
 
-	// Redirect the global custom logger to the WebSocket hub.
+	// Redirect the global custom logger to the hub.
 	customlog.SetOutput(hub)
 
 	// The internal server logger will also write to the hub.
@@ -128,7 +119,8 @@ func (s *Server) setupRoutes() {
 	// Public Routes
 	s.router.HandleFunc("/api/v1/login", s.handleLogin)
 	s.router.HandleFunc("/api/v1/auth/check", s.handleAuthCheck)
-	s.router.HandleFunc("/ws", s.handleWebSocket)
+	s.router.HandleFunc("/api/v1/logout", s.handleLogout)
+	s.router.HandleFunc("/events", s.handleSSE)
 
 	// Protected API Routes
 	s.router.Handle("/api/v1/", s.JWTMiddleware(protectedMux))
@@ -187,6 +179,16 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	http.SetCookie(w, &http.Cookie{
+		Name:     "auth_token",
+		Value:    tokenString,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   r.TLS != nil,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   86400, // 24h, matches JWT expiry
+	})
+
 	writeJSONResponse(w, http.StatusOK, map[string]string{"token": tokenString})
 }
 
@@ -200,44 +202,82 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, http.StatusOK, map[string]bool{"auth_required": authRequired})
 }
 
-// handleWebSocket upgrades HTTP connections to WebSocket connections.
-func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		s.logger.Printf("Failed to upgrade websocket: %v\n", err)
+// handleLogout clears the auth cookie.
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "auth_token",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   r.TLS != nil,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1,
+	})
+	writeJSONResponse(w, http.StatusOK, map[string]string{"message": "logged out"})
+}
+
+// handleSSE handles Server-Sent Events connections.
+func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
+	// Validate auth cookie if auth is enabled
+	if s.authDetails != nil && s.authDetails.Username != "" {
+		cookie, err := r.Cookie("auth_token")
+		if err != nil {
+			writeJSONError(w, "Authentication required", http.StatusUnauthorized)
+			return
+		}
+		if _, err := ValidateJWT(cookie.Value); err != nil {
+			writeJSONError(w, "Invalid or expired token", http.StatusUnauthorized)
+			return
+		}
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
 		return
 	}
 
-	// If auth is enabled, perform authentication handshake
-	if s.authDetails != nil && s.authDetails.Username != "" {
-		conn.SetReadDeadline(time.Now().Add(5 * time.Second)) // Timeout for auth
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			s.logger.Printf("WebSocket auth failed: could not read auth message: %v", err)
-			conn.Close()
-			return
-		}
+	// Set SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
 
-		var authMsg struct {
-			Type  string `json:"type"`
-			Token string `json:"token"`
-		}
-		if err := json.Unmarshal(msg, &authMsg); err != nil || authMsg.Type != "auth" {
-			s.logger.Println("WebSocket auth failed: invalid auth message format")
-			conn.Close()
-			return
-		}
-
-		if _, err := ValidateJWT(authMsg.Token); err != nil {
-			s.logger.Printf("WebSocket auth failed: invalid token: %v", err)
-			conn.Close()
-			return
-		}
-		conn.SetReadDeadline(time.Time{}) // Clear the read deadline after successful auth
-	}
-
-	client := &Client{hub: s.hub, conn: conn, send: make(chan []byte, 256)}
+	client := &Client{hub: s.hub, send: make(chan []byte, 256), done: make(chan struct{})}
 	s.hub.register <- client
-	go client.writePump()
-	go client.readPump()
+	defer func() {
+		s.hub.unregister <- client
+		close(client.done)
+	}()
+
+	keepalive := time.NewTicker(30 * time.Second)
+	defer keepalive.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case msg, ok := <-client.send:
+			if !ok {
+				return
+			}
+			// Extract "type" field for the SSE event name
+			var envelope struct {
+				Type string `json:"type"`
+			}
+			eventName := "message"
+			if json.Unmarshal(msg, &envelope) == nil && envelope.Type != "" {
+				eventName = envelope.Type
+			}
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventName, msg)
+			flusher.Flush()
+		case <-keepalive.C:
+			fmt.Fprintf(w, ": keepalive\n\n")
+			flusher.Flush()
+		}
+	}
 }

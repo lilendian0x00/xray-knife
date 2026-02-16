@@ -12,6 +12,9 @@ export const api = {
     login(username: string, password: string) {
         return axios.post('/api/v1/login', { username, password });
     },
+    logout() {
+        return axios.post('/api/v1/logout');
+    },
 
     // Proxy Endpoints
     startProxy(settings: ProxySettings, links: string[]) {
