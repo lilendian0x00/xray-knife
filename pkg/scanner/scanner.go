@@ -32,10 +32,19 @@ import (
 type zeroReader struct{}
 
 func (z zeroReader) Read(p []byte) (n int, err error) {
-	for i := range p {
-		p[i] = 0
-	}
 	return len(p), nil
+}
+
+// countingReader wraps an io.Reader and counts the total bytes read.
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (n int, err error) {
+	n, err = c.r.Read(p)
+	c.n += int64(n)
+	return
 }
 
 // ScannerConfig holds all configuration for a scan.
@@ -336,9 +345,8 @@ func (s *ScannerService) runLatencyScan(ctx context.Context, workerResultsChan c
 	group := pool.NewGroupContext(ctx)
 
 	var hasIPs bool
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	if s.config.ShuffleSubnets {
-		r.Shuffle(len(s.config.Subnets), func(i, j int) {
+		rand.Shuffle(len(s.config.Subnets), func(i, j int) {
 			s.config.Subnets[i], s.config.Subnets[j] = s.config.Subnets[j], s.config.Subnets[i]
 		})
 	}
@@ -359,7 +367,7 @@ func (s *ScannerService) runLatencyScan(ctx context.Context, workerResultsChan c
 			if len(listIP) > 0 {
 				hasIPs = true
 			}
-			r.Shuffle(len(listIP), func(i, j int) { listIP[i], listIP[j] = listIP[j], listIP[i] })
+			rand.Shuffle(len(listIP), func(i, j int) { listIP[i], listIP[j] = listIP[j], listIP[i] })
 			for _, ip := range listIP {
 				if _, exists := s.scannedIPs[ip]; exists {
 					s.notifyIPScanned()
@@ -389,9 +397,7 @@ func (s *ScannerService) runLatencyScan(ctx context.Context, workerResultsChan c
 				copy(ipToScan, currentIP)
 				ipStr := ipToScan.String()
 				if _, exists := s.scannedIPs[ipStr]; exists {
-					if OnIPScanned != nil {
-						OnIPScanned()
-					} // Also count skipped IPs
+					s.notifyIPScanned()
 					continue
 				}
 				group.Submit(func() {
@@ -442,7 +448,10 @@ func (s *ScannerService) runSpeedTest(ctx context.Context, allResults []*ScanRes
 	group := speedTestPool.NewGroupContext(ctx)
 
 	for _, result := range topResults {
-		if result.DownSpeed > 0 || result.UpSpeed > 0 {
+		result.mu.Lock()
+		alreadyTested := result.DownSpeed > 0 || result.UpSpeed > 0
+		result.mu.Unlock()
+		if alreadyTested {
 			continue // Already tested
 		}
 		resToTest := result
@@ -605,9 +614,9 @@ func (s *ScannerService) measureSpeed(ctx context.Context, ip string) (downSpeed
 	// Upload
 	upURL := fmt.Sprintf("https://%s/__up", cloudflareSpeedTestURL)
 
-	// Use a memory-efficient reader instead of a massive byte slice
-	bodyReader := io.LimitReader(zeroReader{}, uploadBytesTotal)
-	reqUp, err := http.NewRequestWithContext(ctx, "POST", upURL, bodyReader)
+	// Use a memory-efficient counting reader instead of a massive byte slice
+	upCounter := &countingReader{r: io.LimitReader(zeroReader{}, uploadBytesTotal)}
+	reqUp, err := http.NewRequestWithContext(ctx, "POST", upURL, upCounter)
 	if err != nil {
 		return downSpeed, 0, fmt.Errorf("failed to create upload request: %w", err)
 	}
@@ -623,13 +632,15 @@ func (s *ScannerService) measureSpeed(ctx context.Context, ip string) (downSpeed
 		return downSpeed, 0, fmt.Errorf("upload test failed: %w", err)
 	}
 	defer respUp.Body.Close()
-	io.Copy(io.Discard, respUp.Body)
+	if _, drainErr := io.Copy(io.Discard, respUp.Body); drainErr != nil {
+		return downSpeed, 0, fmt.Errorf("upload response drain: %w", drainErr)
+	}
 	if respUp.StatusCode < 200 || respUp.StatusCode >= 300 {
 		return downSpeed, 0, fmt.Errorf("upload status: %s", respUp.Status)
 	}
 	upDuration := time.Since(startUp).Seconds()
 	if upDuration > 0 {
-		upSpeed = (float64(uploadBytesTotal) * 8) / (upDuration * 1e6)
+		upSpeed = (float64(upCounter.n) * 8) / (upDuration * 1e6)
 	}
 	return downSpeed, upSpeed, nil
 }
@@ -717,6 +728,20 @@ func saveResultsToCSV(filePath string, results []*ScanResult) error {
 	return gocsv.MarshalFile(&results, file)
 }
 
+// connClosingBody wraps a response body so that closing it also closes the
+// underlying network connection. This prevents connection leaks in the custom
+// BypassJA3Transport which manages connections outside of http.Transport's pool.
+type connClosingBody struct {
+	io.ReadCloser
+	conn net.Conn
+}
+
+func (c *connClosingBody) Close() error {
+	err := c.ReadCloser.Close()
+	c.conn.Close()
+	return err
+}
+
 type BypassJA3Transport struct {
 	tr1         http.Transport
 	tr2         http2.Transport
@@ -783,7 +808,13 @@ func (b *BypassJA3Transport) httpsRoundTrip(req *http.Request) (*http.Response, 
 			tlsConn.Close()
 			return nil, fmt.Errorf("failed to create http2 client connection: %w", err)
 		}
-		return clientConn.RoundTrip(req)
+		resp, err := clientConn.RoundTrip(req)
+		if err != nil {
+			tlsConn.Close()
+			return nil, err
+		}
+		resp.Body = &connClosingBody{ReadCloser: resp.Body, conn: tlsConn}
+		return resp, nil
 	case "http/1.1", "":
 		if err := req.Write(tlsConn); err != nil {
 			tlsConn.Close()
@@ -794,6 +825,7 @@ func (b *BypassJA3Transport) httpsRoundTrip(req *http.Request) (*http.Response, 
 			tlsConn.Close()
 			return nil, err
 		}
+		resp.Body = &connClosingBody{ReadCloser: resp.Body, conn: tlsConn}
 		return resp, nil
 	default:
 		tlsConn.Close()
@@ -803,7 +835,7 @@ func (b *BypassJA3Transport) httpsRoundTrip(req *http.Request) (*http.Response, 
 
 func (b *BypassJA3Transport) getTLSConfig(req *http.Request) *utls.Config {
 	return &utls.Config{
-		ServerName:         req.URL.Host,
+		ServerName:         req.URL.Hostname(),
 		InsecureSkipVerify: false,
 		NextProtos:         []string{"h2", "http/1.1"},
 	}
