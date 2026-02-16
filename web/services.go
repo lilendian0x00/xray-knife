@@ -428,9 +428,9 @@ func (s *CfScannerRunner) run(ctx context.Context, service *scanner.ScannerServi
 
 	var totalIPs int
 	for _, cidr := range cfg.Subnets {
-		ips, err := utils.CIDRtoListIP(cidr)
+		size, err := utils.CIDRSize(cidr)
 		if err == nil {
-			totalIPs += len(ips)
+			totalIPs += size
 		}
 	}
 
