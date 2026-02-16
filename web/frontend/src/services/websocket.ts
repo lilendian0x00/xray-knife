@@ -99,7 +99,6 @@ class WebSocketService {
         const { setHttpTestStatus, updateScanResults, setScanStatus, setHttpTestProgress, setScanProgress, setProxyDetails, setProxyStatus } = useAppStore.getState();
         const rawData = event.data;
         if (!rawData) return;
-        console.log("[WS] RAW:", rawData);
 
         try {
             const message = JSON.parse(rawData);
@@ -136,8 +135,10 @@ class WebSocketService {
                     this.stopHttpResultBatching();
                     const status = message.data as 'finished' | 'stopped' | 'running';
                     if (status === 'finished' || status === 'stopped') {
+                        // Capture previous state BEFORE updating, so the toast logic works correctly.
+                        const previousStatus = useAppStore.getState().httpTestStatus;
                         setHttpTestStatus('idle');
-                        if (useAppStore.getState().httpTestStatus !== 'stopping') {
+                        if (previousStatus !== 'stopping') {
                            toast.success(status === 'finished' ? "HTTP test finished." : "HTTP test stopped.");
                         }
                     } else {
