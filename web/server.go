@@ -1,13 +1,17 @@
 package web
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -71,14 +75,46 @@ func NewServer(listenAddr, user, pass, secret string) (*Server, error) {
 	return s, nil
 }
 
-// Run starts the web server and listens for requests.
+// Run starts the web server and handles graceful shutdown on SIGINT/SIGTERM.
 func (s *Server) Run() error {
-	s.logger.Printf("Web server listening on http://%s", s.listenAddr)
-	err := http.ListenAndServe(s.listenAddr, s.router)
-	if err != nil {
-		s.logger.Printf("Web server failed: %v", err)
-		return fmt.Errorf("web server failed: %w", err)
+	srv := &http.Server{
+		Addr:    s.listenAddr,
+		Handler: s.router,
 	}
+
+	// Channel to receive OS signals
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start server in a goroutine
+	errCh := make(chan error, 1)
+	go func() {
+		s.logger.Printf("Web server listening on http://%s", s.listenAddr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errCh <- err
+		}
+		close(errCh)
+	}()
+
+	// Wait for signal or server error
+	select {
+	case sig := <-quit:
+		s.logger.Printf("Received signal %v, shutting down gracefully...", sig)
+	case err := <-errCh:
+		if err != nil {
+			return fmt.Errorf("web server failed: %w", err)
+		}
+	}
+
+	// Graceful shutdown with a 10-second timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		return fmt.Errorf("server forced to shutdown: %w", err)
+	}
+
+	s.logger.Println("Server shutdown complete.")
 	return nil
 }
 
@@ -91,6 +127,7 @@ func (s *Server) setupRoutes() {
 
 	// Public Routes
 	s.router.HandleFunc("/api/v1/login", s.handleLogin)
+	s.router.HandleFunc("/api/v1/auth/check", s.handleAuthCheck)
 	s.router.HandleFunc("/ws", s.handleWebSocket)
 
 	// Protected API Routes
@@ -120,12 +157,12 @@ func (s *Server) setupRoutes() {
 
 // handleLogin authenticates a user and returns a JWT.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if s.authDetails == nil || s.authDetails.Username == "" {
-		writeJSONError(w, "Authentication is disabled on the server", http.StatusNotImplemented)
-		return
-	}
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)
+		return
+	}
+	if s.authDetails == nil || s.authDetails.Username == "" {
+		writeJSONError(w, "Authentication is disabled on the server", http.StatusNotImplemented)
 		return
 	}
 
@@ -151,6 +188,16 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSONResponse(w, http.StatusOK, map[string]string{"token": tokenString})
+}
+
+// handleAuthCheck returns whether the server requires authentication.
+func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	authRequired := s.authDetails != nil && s.authDetails.Username != ""
+	writeJSONResponse(w, http.StatusOK, map[string]bool{"auth_required": authRequired})
 }
 
 // handleWebSocket upgrades HTTP connections to WebSocket connections.
