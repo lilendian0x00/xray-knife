@@ -50,17 +50,15 @@ export default function Dashboard() {
     const [logSearchTerm, setLogSearchTerm] = useState('');
     const [isAutoScroll, setIsAutoScroll] = useState(true);
 
-    // --- Terminal Lifecycle & WebSocket Connection ---
+    // --- Terminal Lifecycle (create once, never destroy on layout changes) ---
     useEffect(() => {
-        if (terminalRef.current) {
+        if (terminalRef.current && !term.current) {
             const terminal = new Terminal({
                 convertEol: true,
                 cursorBlink: true,
                 fontFamily: 'monospace',
                 fontSize: 13,
-                theme: theme === 'dark'
-                    ? { background: '#18181b', foreground: '#e4e4e7' }
-                    : { background: '#FFFFFF', foreground: '#09090b' },
+                theme: { background: '#18181b', foreground: '#e4e4e7' },
             });
             const addon = new FitAddon();
             terminal.loadAddon(addon);
@@ -75,14 +73,27 @@ export default function Dashboard() {
             });
             resizeObserver.observe(terminalRef.current);
 
-            // Cleanup function for this specific instance
             return () => {
                 resizeObserver.disconnect();
                 terminal.dispose();
                 term.current = null;
             };
         }
-    }, [activePage, theme, isSidebarCollapsed]); // Re-create terminal on layout-affecting changes
+    }, []); // Create terminal only once on mount
+
+    // Update terminal theme without re-creating the instance
+    useEffect(() => {
+        if (term.current) {
+            term.current.options.theme = theme === 'dark'
+                ? { background: '#18181b', foreground: '#e4e4e7' }
+                : { background: '#FFFFFF', foreground: '#09090b' };
+        }
+    }, [theme]);
+
+    // Re-fit terminal when layout changes (sidebar collapse, tab switch)
+    useEffect(() => {
+        setTimeout(() => fitAddon.current?.fit(), 50);
+    }, [activePage, isSidebarCollapsed]);
 
     useEffect(() => {
         // This effect manages the WebSocket connection and the SINGLE log listener.
