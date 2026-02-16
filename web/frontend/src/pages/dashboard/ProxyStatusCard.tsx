@@ -79,12 +79,14 @@ const StoppedContent = () => (
         exit={{ opacity: 0, y: -10 }}
         transition={{ duration: 0.2 }}
     >
-        <CardContent className="flex flex-col justify-center items-center text-center py-12">
-            <div className="bg-muted rounded-full p-3 w-fit mb-4">
-                <ServerOff className="h-8 w-8 text-muted-foreground" />
+        <CardContent className="py-6">
+            <div className="flex items-center gap-3">
+                <ServerOff className="h-5 w-5 text-muted-foreground shrink-0" />
+                <div>
+                    <p className="font-semibold">Proxy Service Stopped</p>
+                    <p className="text-sm text-muted-foreground">Start the proxy to see live details.</p>
+                </div>
             </div>
-            <p className="font-semibold">Proxy Service Stopped</p>
-            <p className="text-sm text-muted-foreground">Start the proxy to see live details.</p>
         </CardContent>
     </motion.div>
 );
@@ -167,7 +169,7 @@ const RunningContent = ({ details }: { details: ProxyDetails }) => {
                          <div className="flex items-center gap-2 font-semibold text-base"><LogOut className="size-4 text-muted-foreground" /><span>Active Outbound</span></div>
                         {activeOutbound && activeOutbound.protocol ? (
                             <div className="space-y-2 pl-6">
-                                <DetailItem icon={Tag} label="Remark"><span className="font-mono text-xs truncate max-w-[150px]">{activeOutbound.protocol.remark || 'N/A'}</span></DetailItem>
+                                <DetailItem icon={Tag} label="Remark"><span className="font-mono text-xs truncate max-w-[280px]">{activeOutbound.protocol.remark || 'N/A'}</span></DetailItem>
                                 <DetailItem icon={MapPin} label="Location"><span className="font-mono text-xs">{activeOutbound.location !== 'null' ? activeOutbound.location : 'N/A'}</span></DetailItem>
                                 <DetailItem icon={Timer} label="Delay"><Badge variant="secondary">{activeOutbound.delay}ms</Badge></DetailItem>
                                 <DetailItem icon={ArrowRightLeft} label="Speed (D/U)">

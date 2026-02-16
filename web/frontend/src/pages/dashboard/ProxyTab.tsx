@@ -222,11 +222,24 @@ ss://..." className="h-40 font-mono text-sm" value={proxyConfigs} onChange={(e) 
                         {proxyStatus === 'starting' && <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Starting...</>}
                         {proxyStatus !== 'starting' && 'Start Proxy'}
                     </Button>
-                    <Button onClick={handleStopProxy} variant="destructive" disabled={proxyStatus !== 'running'}>
-
-                        {proxyStatus === 'stopping' && <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Stopping...</>}
-                        {proxyStatus !== 'stopping' && 'Stop Proxy'}
-                    </Button>
+                    <Dialog>
+                        <DialogTrigger asChild>
+                            <Button variant="destructive" disabled={proxyStatus !== 'running'}>
+                                {proxyStatus === 'stopping' && <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Stopping...</>}
+                                {proxyStatus !== 'stopping' && 'Stop Proxy'}
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                            <DialogHeader>
+                                <DialogTitle>Stop Proxy Service</DialogTitle>
+                                <DialogDescription>Are you sure you want to stop the proxy? Active connections will be terminated.</DialogDescription>
+                            </DialogHeader>
+                            <DialogFooter>
+                                <DialogClose asChild><Button variant="secondary">Cancel</Button></DialogClose>
+                                <DialogClose asChild><Button variant="destructive" onClick={handleStopProxy}>Stop</Button></DialogClose>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
                     <Button onClick={handleRotateProxy} variant="secondary" disabled={proxyStatus !== 'running'}>Rotate Now</Button>
                 </div>
             </CardContent>

@@ -13,7 +13,8 @@ import { Sheet, SheetClose, SheetContent, SheetTrigger } from "@/components/ui/s
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Server, Globe, TerminalSquare, Menu, Package2, PanelLeft, Search, Scroll, Ban, LogOut } from 'lucide-react';
+import { Skeleton } from "@/components/ui/skeleton";
+import { Server, Globe, Menu, Package2, PanelLeft, Search, LogOut, Trash2, ArrowDownToLine, Pause, Sun, Moon, Monitor, ChevronDown, ChevronUp } from 'lucide-react';
 import { useAppStore } from "@/stores/appStore";
 import { webSocketService } from "@/services/websocket";
 import { ProxyTab } from "./dashboard/ProxyTab";
@@ -23,6 +24,7 @@ import { ProxyStatusCard } from "./dashboard/ProxyStatusCard";
 import { type ProxyStatus } from "@/types/dashboard";
 import { api } from "@/services/api";
 import { useTheme } from "@/components/theme-provider";
+import { usePersistentState } from "@/hooks/usePersistentState";
 
 type Page = 'proxy' | 'http-tester' | 'cf-scanner';
 const navItems = [
@@ -34,6 +36,8 @@ const navItems = [
 export default function Dashboard() {
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [activePage, setActivePage] = useState<Page>('proxy');
+    const [isLoading, setIsLoading] = useState(true);
+    const [isTerminalCollapsed, setIsTerminalCollapsed] = usePersistentState('terminal-collapsed', false);
 
     const {
         proxyStatus, setProxyStatus,
@@ -41,14 +45,22 @@ export default function Dashboard() {
         setScanStatus, setScanResults,
         setHttpResults, setHttpTestStatus,
         logout,
+        wsConnected,
     } = useAppStore();
 
-    const { theme } = useTheme();
+    const { theme, setTheme } = useTheme();
     const terminalRef = useRef<HTMLDivElement>(null);
     const term = useRef<Terminal | null>(null);
     const fitAddon = useRef<FitAddon | null>(null);
     const [logSearchTerm, setLogSearchTerm] = useState('');
     const [isAutoScroll, setIsAutoScroll] = useState(true);
+
+    const cycleTheme = () => {
+        const next = theme === 'system' ? 'light' : theme === 'light' ? 'dark' : 'system';
+        setTheme(next);
+    };
+
+    const ThemeIcon = theme === 'light' ? Sun : theme === 'dark' ? Moon : Monitor;
 
     // --- Terminal Lifecycle (create once, never destroy on layout changes) ---
     useEffect(() => {
@@ -90,10 +102,10 @@ export default function Dashboard() {
         }
     }, [theme]);
 
-    // Re-fit terminal when layout changes (sidebar collapse, tab switch)
+    // Re-fit terminal when layout changes (sidebar collapse, tab switch, terminal expand)
     useEffect(() => {
         setTimeout(() => fitAddon.current?.fit(), 50);
-    }, [activePage, isSidebarCollapsed]);
+    }, [activePage, isSidebarCollapsed, isTerminalCollapsed]);
 
     useEffect(() => {
         // This effect manages the WebSocket connection and the SINGLE log listener.
@@ -119,7 +131,7 @@ export default function Dashboard() {
         };
     }, [logSearchTerm, isAutoScroll]); // Re-attach listener only when filter/scroll settings change
 
-    
+
     // --- Initial State Fetching ---
     useEffect(() => {
         const fetchInitialState = async () => {
@@ -157,6 +169,8 @@ export default function Dashboard() {
                 }
             } catch (error) {
                 toast.error("Could not fetch initial server state.");
+            } finally {
+                setIsLoading(false);
             }
         };
         fetchInitialState();
@@ -182,24 +196,53 @@ export default function Dashboard() {
                     <div className="flex items-center gap-2">
                         <div className="relative w-full max-w-sm">
                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                           <Input placeholder="Filter logs..." className="pl-8" value={logSearchTerm} onChange={(e) => setLogSearchTerm(e.target.value)} />
+                           <Input placeholder="Filter incoming logs..." className="pl-8" value={logSearchTerm} onChange={(e) => setLogSearchTerm(e.target.value)} />
                         </div>
                         <Button variant="outline" size="icon" onClick={() => setIsAutoScroll(prev => !prev)} title={isAutoScroll ? "Disable Auto-Scroll" : "Enable Auto-Scroll"}>
-                           {isAutoScroll ? <Scroll className="h-4 w-4" /> : <Ban className="h-4 w-4" />}
+                           {isAutoScroll ? <ArrowDownToLine className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
                         </Button>
                         <Button variant="outline" size="icon" onClick={clearLogs} title="Clear Logs">
-                            <TerminalSquare className="h-4 w-4" />
+                            <Trash2 className="h-4 w-4" />
+                        </Button>
+                        <Button variant="outline" size="icon" onClick={() => setIsTerminalCollapsed(prev => !prev)} title={isTerminalCollapsed ? "Expand Terminal" : "Collapse Terminal"}>
+                            {isTerminalCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
                         </Button>
                     </div>
                 </div>
             </CardHeader>
-            <CardContent className="flex-1 min-h-0 max-w-screen">
-                <div ref={terminalRef} className="h-full w-full rounded-md border bg-muted/20 overflow-hidden" />
-            </CardContent>
+            <AnimatePresence initial={false}>
+                {!isTerminalCollapsed && (
+                    <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="overflow-hidden flex-1 min-h-0"
+                    >
+                        <CardContent className="h-full max-w-screen pb-6">
+                            <div ref={terminalRef} className="h-full w-full min-h-[200px] rounded-md border bg-muted/20 overflow-hidden" />
+                        </CardContent>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </Card>
     );
 
     const renderPageLayout = () => {
+        if (isLoading) {
+            return (
+                <div className="grid h-full items-start gap-4 lg:grid-cols-5 lg:gap-8">
+                    <div className="grid auto-rows-max items-start gap-4 lg:col-span-2">
+                        <Skeleton className="h-[400px] w-full" />
+                    </div>
+                    <div className="flex flex-col items-start gap-4 lg:col-span-3 h-full">
+                        <Skeleton className="h-[200px] w-full" />
+                        <Skeleton className="h-[300px] w-full flex-1" />
+                    </div>
+                </div>
+            );
+        }
+
         if (activePage === 'proxy') {
             return (
                 <div className="grid h-full items-start gap-4 lg:grid-cols-5 lg:gap-8">
@@ -247,7 +290,13 @@ export default function Dashboard() {
                             </SheetContent>
                         </Sheet>
                         <div className="w-full flex-1"><Breadcrumb><BreadcrumbList><BreadcrumbItem><BreadcrumbLink href="/">Home</BreadcrumbLink></BreadcrumbItem><BreadcrumbSeparator /><BreadcrumbItem><BreadcrumbPage>{currentPageInfo?.label}</BreadcrumbPage></BreadcrumbItem></BreadcrumbList></Breadcrumb></div>
+                        <div className="flex items-center gap-1" title={wsConnected ? "WebSocket Connected" : "WebSocket Disconnected"}>
+                            <span className={cn("size-2 rounded-full", wsConnected ? "bg-green-500" : "bg-red-500")} />
+                        </div>
                         <Badge className={cn("capitalize", getProxyStatusColor(proxyStatus))}>Proxy: {proxyStatus}</Badge>
+                        <Button variant="ghost" size="icon" onClick={cycleTheme} title={`Theme: ${theme}`}>
+                            <ThemeIcon className="h-5 w-5" />
+                        </Button>
                         <Button variant="ghost" size="icon" onClick={logout} title="Logout"><LogOut className="h-5 w-5" /></Button>
                     </header>
                     <main className="flex-1 overflow-auto p-4 lg:p-6 min-w-0">
@@ -255,10 +304,10 @@ export default function Dashboard() {
                             <AnimatePresence mode="wait">
                                 <motion.div
                                     key={activePage}
-                                    initial={{ opacity: 0, y: 20 }}
+                                    initial={{ opacity: 0, y: 8 }}
                                     animate={{ opacity: 1, y: 0 }}
-                                    exit={{ opacity: 0, y: -20 }}
-                                    transition={{ duration: 0.2 }}
+                                    exit={{ opacity: 0, y: -8 }}
+                                    transition={{ duration: 0.15 }}
                                     className="h-full"
                                 >
                                     {renderPageLayout()}

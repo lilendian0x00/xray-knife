@@ -1,5 +1,6 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useAutoAnimate } from '@formkit/auto-animate/react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -12,14 +13,18 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
-import { Loader2, Play, StopCircle, Settings, Search as SearchIcon, CloudDownload, Trash2, RefreshCcw, RotateCcw } from 'lucide-react';
+import { Loader2, Play, StopCircle, Settings, Search as SearchIcon, SearchX, CloudDownload, Trash2, RefreshCcw, RotateCcw, Download, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import useDebounce from "react-use/lib/useDebounce";
 import { useAppStore } from "@/stores/appStore";
 import { api } from "@/services/api";
 import { Progress } from "@/components/ui/progress";
 import { usePersistentState } from "@/hooks/usePersistentState";
+import { downloadCSV } from "@/lib/utils";
 
-const SCAN_RESULTS_PAGE_SIZE = 200;
+type SortField = 'ip' | 'latency' | 'download' | 'upload';
+type SortDirection = 'asc' | 'desc';
+
+const VIRTUALIZE_THRESHOLD = 200;
 
 export function CfScannerTab() {
     const { cfScannerSettings, updateCfScannerSettings, resetCfScannerSettings, scanResults, clearScanResults, scanStatus, setScanStatus, scanProgress } = useAppStore();
@@ -29,12 +34,11 @@ export function CfScannerTab() {
     const [searchTerm, setSearchTerm] = useState("");
     const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
     const [onlySpeedtestResults, setOnlySpeedtestResults] = useState(false);
-    const [visibleCount, setVisibleCount] = useState(SCAN_RESULTS_PAGE_SIZE);
+    const [sortField, setSortField] = useState<SortField>('latency');
+    const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
     useDebounce(() => setDebouncedSearchTerm(searchTerm), 300, [searchTerm]);
     const [animationParent] = useAutoAnimate<HTMLTableSectionElement>();
-    // Disable auto-animate for large datasets to avoid performance issues
-    const tableRef = scanResults.length > SCAN_RESULTS_PAGE_SIZE ? undefined : animationParent;
 
     const isBusy = scanStatus === 'running' || scanStatus === 'stopping' || scanStatus === 'starting';
     const progressValue = scanProgress.total > 0 ? (scanProgress.completed / scanProgress.total) * 100 : 0;
@@ -45,15 +49,44 @@ export function CfScannerTab() {
         }
     }, [scanStatus]);
 
+    const handleSort = useCallback((field: SortField) => {
+        if (sortField === field) {
+            setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortField(field);
+            setSortDirection('asc');
+        }
+    }, [sortField]);
+
     const filteredAndSortedResults = useMemo(() => {
         const successfulResults = scanResults.filter(r => !r.error);
         const speedtestFiltered = onlySpeedtestResults ? successfulResults.filter(r => r.download_mbps > 0 || r.upload_mbps > 0) : successfulResults;
         const searchFiltered = debouncedSearchTerm ? speedtestFiltered.filter(r => r.ip.includes(debouncedSearchTerm.trim())) : speedtestFiltered;
-        return [...searchFiltered].sort((a, b) => a.latency_ms - b.latency_ms);
-    }, [scanResults, onlySpeedtestResults, debouncedSearchTerm]);
 
-    const displayedResults = useMemo(() => filteredAndSortedResults.slice(0, visibleCount), [filteredAndSortedResults, visibleCount]);
-    const hasMore = filteredAndSortedResults.length > visibleCount;
+        const dir = sortDirection === 'asc' ? 1 : -1;
+        return [...searchFiltered].sort((a, b) => {
+            switch (sortField) {
+                case 'ip': return a.ip.localeCompare(b.ip) * dir;
+                case 'latency': return (a.latency_ms - b.latency_ms) * dir;
+                case 'download': return (a.download_mbps - b.download_mbps) * dir;
+                case 'upload': return (a.upload_mbps - b.upload_mbps) * dir;
+                default: return 0;
+            }
+        });
+    }, [scanResults, onlySpeedtestResults, debouncedSearchTerm, sortField, sortDirection]);
+
+    const useVirtual = filteredAndSortedResults.length > VIRTUALIZE_THRESHOLD;
+    // Disable auto-animate for large datasets
+    const tableRef = useVirtual ? undefined : animationParent;
+
+    // Virtualization
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const rowVirtualizer = useVirtualizer({
+        count: useVirtual ? filteredAndSortedResults.length : 0,
+        getScrollElement: () => scrollContainerRef.current,
+        estimateSize: () => 48,
+        overscan: 20,
+    });
 
     const handleLoadRanges = async () => {
         setIsLoadingRanges(true);
@@ -109,6 +142,69 @@ export function CfScannerTab() {
             toast.error("Failed to clear scanner history.");
         }
     }
+
+    const handleExportCSV = () => {
+        const headers = ['IP', 'Latency', 'Download', 'Upload'];
+        const rows = filteredAndSortedResults.map(r => [
+            r.ip,
+            `${r.latency_ms}ms`,
+            r.download_mbps > 0 ? `${r.download_mbps.toFixed(2)} Mbps` : '-',
+            r.upload_mbps > 0 ? `${r.upload_mbps.toFixed(2)} Mbps` : '-',
+        ]);
+        downloadCSV('cf-scan-results.csv', headers, rows);
+    };
+
+    const SortIcon = ({ field }: { field: SortField }) => {
+        if (sortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 text-muted-foreground/50" />;
+        return sortDirection === 'asc' ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />;
+    };
+
+    const renderResultRow = (result: typeof filteredAndSortedResults[0]) => (
+        <TableRow key={result.ip}>
+            <TableCell className="font-mono text-xs">{result.ip}</TableCell>
+            <TableCell><Badge variant="secondary">{`${result.latency_ms}ms`}</Badge></TableCell>
+            <TableCell className="text-xs">{result.download_mbps > 0 ? `${result.download_mbps.toFixed(2)} Mbps` : '-'}</TableCell>
+            <TableCell className="text-xs">{result.upload_mbps > 0 ? `${result.upload_mbps.toFixed(2)} Mbps` : '-'}</TableCell>
+        </TableRow>
+    );
+
+    const renderEmptyState = () => {
+        if (isBusy) {
+            return (
+                <TableRow>
+                    <TableCell colSpan={4} className="h-32 text-center">
+                        <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                            <Loader2 className="h-8 w-8 animate-spin" />
+                            <p className="text-sm font-medium">Scanning...</p>
+                        </div>
+                    </TableCell>
+                </TableRow>
+            );
+        }
+        if (searchTerm) {
+            return (
+                <TableRow>
+                    <TableCell colSpan={4} className="h-32 text-center">
+                        <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                            <SearchX className="h-8 w-8" />
+                            <p className="text-sm font-medium">No results match your search</p>
+                        </div>
+                    </TableCell>
+                </TableRow>
+            );
+        }
+        return (
+            <TableRow>
+                <TableCell colSpan={4} className="h-32 text-center">
+                    <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                        <SearchIcon className="h-8 w-8" />
+                        <p className="text-sm font-medium">No results yet</p>
+                        <p className="text-xs">Start a scan to find optimal IPs.</p>
+                    </div>
+                </TableCell>
+            </TableRow>
+        );
+    };
 
     return (
         <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-5 lg:gap-8">
@@ -183,27 +279,58 @@ export function CfScannerTab() {
                         </div>
                         <div className="flex items-center justify-between pt-4">
                             {cfScannerSettings.doSpeedtest && (<Label className="flex items-center gap-2 cursor-pointer"><Checkbox checked={onlySpeedtestResults} onCheckedChange={(c) => setOnlySpeedtestResults(Boolean(c))} />Show only speed-tested IPs</Label>)}
-                            <Dialog><DialogTrigger asChild><Button variant="outline" size="sm" disabled={isBusy || scanResults.length === 0}><Trash2 className="mr-2 h-4 w-4" />Clear</Button></DialogTrigger>
-                                <DialogContent>
-                                    <DialogHeader><DialogTitle>Clear History</DialogTitle><DialogDescription>This will permanently delete all saved scanner results. Are you sure?</DialogDescription></DialogHeader>
-                                    <DialogFooter><DialogClose asChild><Button variant="secondary">Cancel</Button></DialogClose><DialogClose asChild><Button variant="destructive" onClick={handleClearHistory}>Clear</Button></DialogClose></DialogFooter>
-                                </DialogContent>
-                            </Dialog>
+                            <div className="flex items-center gap-2 ml-auto">
+                                <Button variant="outline" size="sm" disabled={scanResults.length === 0} onClick={handleExportCSV}>
+                                    <Download className="mr-2 h-4 w-4" />Export CSV
+                                </Button>
+                                <Dialog><DialogTrigger asChild><Button variant="outline" size="sm" disabled={isBusy || scanResults.length === 0}><Trash2 className="mr-2 h-4 w-4" />Clear</Button></DialogTrigger>
+                                    <DialogContent>
+                                        <DialogHeader><DialogTitle>Clear History</DialogTitle><DialogDescription>This will permanently delete all saved scanner results. Are you sure?</DialogDescription></DialogHeader>
+                                        <DialogFooter><DialogClose asChild><Button variant="secondary">Cancel</Button></DialogClose><DialogClose asChild><Button variant="destructive" onClick={handleClearHistory}>Clear</Button></DialogClose></DialogFooter>
+                                    </DialogContent>
+                                </Dialog>
+                            </div>
                         </div>
                     </CardHeader>
                     <CardContent>
-                        <div className="border rounded-md max-h-[600px] overflow-auto">
-                            <Table><TableHeader className="sticky top-0 z-10 bg-muted/95 backdrop-blur-sm"><TableRow><TableHead className="w-[150px]">IP</TableHead><TableHead>Latency</TableHead><TableHead>Download</TableHead><TableHead>Upload</TableHead></TableRow></TableHeader>
+                        <div ref={scrollContainerRef} className="border rounded-md max-h-[600px] overflow-auto">
+                            <Table>
+                                <TableHeader className="sticky top-0 z-10 bg-muted/95 backdrop-blur-sm">
+                                    <TableRow>
+                                        <TableHead className="w-[150px] cursor-pointer select-none" onClick={() => handleSort('ip')}>
+                                            <span className="flex items-center">IP<SortIcon field="ip" /></span>
+                                        </TableHead>
+                                        <TableHead className="cursor-pointer select-none" onClick={() => handleSort('latency')}>
+                                            <span className="flex items-center">Latency<SortIcon field="latency" /></span>
+                                        </TableHead>
+                                        <TableHead className="cursor-pointer select-none" onClick={() => handleSort('download')}>
+                                            <span className="flex items-center">Download<SortIcon field="download" /></span>
+                                        </TableHead>
+                                        <TableHead className="cursor-pointer select-none" onClick={() => handleSort('upload')}>
+                                            <span className="flex items-center">Upload<SortIcon field="upload" /></span>
+                                        </TableHead>
+                                    </TableRow>
+                                </TableHeader>
                                 <TableBody ref={tableRef}>
-                                    {displayedResults.length > 0 ? (displayedResults.map((result) => (<TableRow key={result.ip}><TableCell className="font-mono">{result.ip}</TableCell><TableCell><Badge variant="secondary">{`${result.latency_ms}ms`}</Badge></TableCell><TableCell>{result.download_mbps > 0 ? `${result.download_mbps.toFixed(2)} Mbps` : '-'}</TableCell><TableCell>{result.upload_mbps > 0 ? `${result.upload_mbps.toFixed(2)} Mbps` : '-'}</TableCell></TableRow>))) : (<TableRow><TableCell colSpan={4} className="h-24 text-center text-muted-foreground">{isBusy ? "Scanning..." : (searchTerm ? "No results match your search." : "No results yet.")}</TableCell></TableRow>)}
-                                    {hasMore && (
-                                        <TableRow>
-                                            <TableCell colSpan={4} className="text-center py-3">
-                                                <Button variant="ghost" size="sm" onClick={() => setVisibleCount(c => c + SCAN_RESULTS_PAGE_SIZE)}>
-                                                    Load more ({filteredAndSortedResults.length - visibleCount} remaining)
-                                                </Button>
-                                            </TableCell>
-                                        </TableRow>
+                                    {filteredAndSortedResults.length > 0 ? (
+                                        useVirtual ? (
+                                            <>
+                                                {rowVirtualizer.getVirtualItems().length > 0 && (
+                                                    <tr><td colSpan={4} style={{ height: rowVirtualizer.getVirtualItems()[0].start, padding: 0, border: 'none' }} /></tr>
+                                                )}
+                                                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                                                    const result = filteredAndSortedResults[virtualRow.index];
+                                                    return renderResultRow(result);
+                                                })}
+                                                {rowVirtualizer.getVirtualItems().length > 0 && (
+                                                    <tr><td colSpan={4} style={{ height: rowVirtualizer.getTotalSize() - (rowVirtualizer.getVirtualItems().at(-1)?.end ?? 0), padding: 0, border: 'none' }} /></tr>
+                                                )}
+                                            </>
+                                        ) : (
+                                            filteredAndSortedResults.map(renderResultRow)
+                                        )
+                                    ) : (
+                                        renderEmptyState()
                                     )}
                                 </TableBody>
                             </Table>
