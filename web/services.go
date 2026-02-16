@@ -396,6 +396,12 @@ func (s *CfScannerRunner) Start(config interface{}) error {
 	cfg.OutputFile = cfScannerHistoryFile
 	cfg.Verbose = false
 
+	// Set up progress counter via instance-scoped callback (instead of global)
+	var completed atomic.Int32
+	cfg.OnIPScannedCallback = func() {
+		completed.Add(1)
+	}
+
 	service, err := scanner.NewScannerService(cfg, s.logger)
 	if err != nil {
 		return fmt.Errorf("failed to create scanner service: %w", err)
@@ -406,12 +412,12 @@ func (s *CfScannerRunner) Start(config interface{}) error {
 	s.wg.Add(1)
 	s.state = StateStarting
 
-	go s.run(ctx, service, cfg)
+	go s.run(ctx, service, cfg, &completed)
 
 	return nil
 }
 
-func (s *CfScannerRunner) run(ctx context.Context, service *scanner.ScannerService, cfg scanner.ScannerConfig) {
+func (s *CfScannerRunner) run(ctx context.Context, service *scanner.ScannerService, cfg scanner.ScannerConfig, completed *atomic.Int32) {
 	defer s.recoverAndLogPanic()
 	defer s.wg.Done()
 	defer s.SetState(StateIdle) // Final state should be idle
@@ -428,13 +434,7 @@ func (s *CfScannerRunner) run(ctx context.Context, service *scanner.ScannerServi
 		}
 	}
 
-	var completed atomic.Int32
-	go s.reportProgress(ctx, &completed, totalIPs, "cf_scan_progress")
-
-	scanner.OnIPScanned = func() {
-		completed.Add(1)
-	}
-	defer func() { scanner.OnIPScanned = nil }()
+	go s.reportProgress(ctx, completed, totalIPs, "cf_scan_progress")
 
 	progressChan := make(chan *scanner.ScanResult, cfg.ThreadCount)
 	go func() {
