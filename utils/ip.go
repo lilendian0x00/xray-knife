@@ -31,6 +31,17 @@ func CIDRtoListIP(cidr string) ([]string, error) {
 	return IPs, nil
 }
 
+// CIDRSize returns the number of IPs in a CIDR range using mask arithmetic,
+// without allocating the full IP list into memory.
+func CIDRSize(cidr string) (int, error) {
+	_, ipNet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return 0, fmt.Errorf("couldn't parse %s CIDR: %w", cidr, err)
+	}
+	ones, bits := ipNet.Mask.Size()
+	return 1 << (bits - ones), nil
+}
+
 func IsIPv6(ipStr string) bool {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
