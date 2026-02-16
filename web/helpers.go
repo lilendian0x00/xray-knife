@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 )
 
 // writeJSONError sends a JSON-formatted error message.
@@ -36,4 +37,47 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, v interface{}) error
 // methodNotAllowed is a helper to respond with a 405 Method Not Allowed error.
 func methodNotAllowed(w http.ResponseWriter) {
 	writeJSONError(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+// writePaginatedResponse supports optional ?page=N&per_page=M query parameters.
+// If no pagination params are provided, returns all results (backwards compatible).
+func writePaginatedResponse[T any](w http.ResponseWriter, r *http.Request, items []T) {
+	pageStr := r.URL.Query().Get("page")
+	perPageStr := r.URL.Query().Get("per_page")
+
+	// If no pagination params, return all results
+	if pageStr == "" && perPageStr == "" {
+		writeJSONResponse(w, http.StatusOK, items)
+		return
+	}
+
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
+		page = 1
+	}
+
+	perPage, err := strconv.Atoi(perPageStr)
+	if err != nil || perPage < 1 {
+		perPage = 100
+	}
+	if perPage > 1000 {
+		perPage = 1000
+	}
+
+	total := len(items)
+	start := (page - 1) * perPage
+	if start > total {
+		start = total
+	}
+	end := start + perPage
+	if end > total {
+		end = total
+	}
+
+	writeJSONResponse(w, http.StatusOK, map[string]interface{}{
+		"items":    items[start:end],
+		"total":    total,
+		"page":     page,
+		"per_page": perPage,
+	})
 }

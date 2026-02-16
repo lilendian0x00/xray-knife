@@ -20,9 +20,12 @@ import { type HttpResult } from "@/types/dashboard";
 import { Progress } from "@/components/ui/progress";
 import { usePersistentState } from "@/hooks/usePersistentState";
 
+const RESULTS_PAGE_SIZE = 200;
+
 export function HttpTesterTab() {
     const { httpSettings, updateHttpSettings, resetHttpSettings, httpResults, clearHttpResults, httpTestStatus, setHttpTestStatus, httpTestProgress } = useAppStore();
     const [httpTestConfigs, setHttpTestConfigs] = usePersistentState('httptest-configs-input', '');
+    const [visibleCount, setVisibleCount] = useState(RESULTS_PAGE_SIZE);
 
     const sortedResults = useMemo(() => {
         return [...httpResults].sort((a, b) => {
@@ -32,10 +35,15 @@ export function HttpTesterTab() {
         });
     }, [httpResults]);
 
+    const displayedResults = useMemo(() => sortedResults.slice(0, visibleCount), [sortedResults, visibleCount]);
+    const hasMore = sortedResults.length > visibleCount;
+
     const isBusy = httpTestStatus === 'running' || httpTestStatus === 'stopping' || httpTestStatus === 'starting';
     const progressValue = httpTestProgress.total > 0 ? (httpTestProgress.completed / httpTestProgress.total) * 100 : 0;
 
+    // Disable auto-animate for large datasets to avoid performance issues
     const [animationParent] = useAutoAnimate<HTMLTableSectionElement>();
+    const tableRef = httpResults.length > RESULTS_PAGE_SIZE ? undefined : animationParent;
 
     const handleRunHttpTest = async () => {
         if (!httpTestConfigs.trim()) { toast.error("HTTP Test configurations cannot be empty."); return; }
@@ -189,9 +197,9 @@ export function HttpTesterTab() {
                                         <TableHead>Link</TableHead>
                                     </TableRow>
                                 </TableHeader>
-                                <TableBody ref={animationParent}>
-                                    {sortedResults.length > 0 ? (
-                                        sortedResults.map((result) => (
+                                <TableBody ref={tableRef}>
+                                    {displayedResults.length > 0 ? (
+                                        displayedResults.map((result) => (
                                             <TableRow key={result.link}>
                                                 <TableCell><Badge variant={getStatusBadgeVariant(result.status)} className="capitalize">{result.status}</Badge></TableCell>
                                                 <TableCell>{result.status === 'passed' ? `${result.delay}ms` : '-'}</TableCell>
@@ -212,6 +220,15 @@ export function HttpTesterTab() {
                                         <TableRow>
                                             <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
                                                 {isBusy ? "Testing..." : "No results yet. Run a test to see results."}
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                    {hasMore && (
+                                        <TableRow>
+                                            <TableCell colSpan={6} className="text-center py-3">
+                                                <Button variant="ghost" size="sm" onClick={() => setVisibleCount(c => c + RESULTS_PAGE_SIZE)}>
+                                                    Load more ({sortedResults.length - visibleCount} remaining)
+                                                </Button>
                                             </TableCell>
                                         </TableRow>
                                     )}

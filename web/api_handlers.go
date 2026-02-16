@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gocarina/gocsv"
 	pkghttp "github.com/lilendian0x00/xray-knife/v7/pkg/http"
@@ -227,7 +228,7 @@ func (h *APIHandler) handleHttpTestHistory(w http.ResponseWriter, r *http.Reques
 	if results == nil {
 		results = []*pkghttp.Result{}
 	}
-	writeJSONResponse(w, http.StatusOK, results)
+	writePaginatedResponse(w, r, results)
 }
 
 func (h *APIHandler) handleHttpTestClearHistory(w http.ResponseWriter, r *http.Request) {
@@ -293,7 +294,7 @@ func (h *APIHandler) handleCfScannerHistory(w http.ResponseWriter, r *http.Reque
 	if results == nil {
 		results = []*scanner.ScanResult{}
 	}
-	writeJSONResponse(w, http.StatusOK, results)
+	writePaginatedResponse(w, r, results)
 }
 
 func (h *APIHandler) handleCfScannerClearHistory(w http.ResponseWriter, r *http.Request) {
@@ -339,67 +340,88 @@ var cloudflareRanges = []string{
 	"2a06:98c0::/29",
 }
 
+// cfRangesCache caches fetched Cloudflare IP ranges to avoid blocking API requests.
+var cfRangesCache struct {
+	mu        sync.Mutex
+	ranges    []string
+	fetchedAt time.Time
+}
+
+const cfRangesCacheTTL = 1 * time.Hour
+
+// fetchCloudflareRanges fetches IP ranges from Cloudflare's endpoints, with caching.
+func fetchCloudflareRanges(logger *log.Logger) []string {
+	cfRangesCache.mu.Lock()
+	defer cfRangesCache.mu.Unlock()
+
+	// Return cached ranges if still fresh
+	if len(cfRangesCache.ranges) > 0 && time.Since(cfRangesCache.fetchedAt) < cfRangesCacheTTL {
+		return cfRangesCache.ranges
+	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var allRanges []string
+	var firstError error
+
+	for _, u := range cloudflareRangesLink {
+		wg.Add(1)
+		go func(url string) {
+			defer wg.Done()
+			client := &http.Client{Timeout: 10 * time.Second}
+			resp, err := client.Get(url)
+			if err != nil {
+				mu.Lock()
+				if firstError == nil {
+					firstError = fmt.Errorf("failed to fetch %s: %w", url, err)
+				}
+				mu.Unlock()
+				return
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				mu.Lock()
+				if firstError == nil {
+					firstError = fmt.Errorf("bad status from %s: %s", url, resp.Status)
+				}
+				mu.Unlock()
+				return
+			}
+
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				mu.Lock()
+				if firstError == nil {
+					firstError = fmt.Errorf("failed to read body from %s: %w", url, err)
+				}
+				mu.Unlock()
+				return
+			}
+
+			mu.Lock()
+			allRanges = append(allRanges, strings.Split(strings.TrimSpace(string(body)), "\n")...)
+			mu.Unlock()
+		}(u)
+	}
+	wg.Wait()
+
+	if firstError != nil {
+		logger.Printf("Failed to fetch live Cloudflare IP ranges, using fallback list. Error: %v", firstError)
+		return cloudflareRanges
+	}
+
+	// Update cache
+	cfRangesCache.ranges = allRanges
+	cfRangesCache.fetchedAt = time.Now()
+	return allRanges
+}
+
 func (h *APIHandler) handleCfScannerRanges(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w)
 		return
 	}
-
-	fetchAndSendRanges := func() {
-		var wg sync.WaitGroup
-		var mu sync.Mutex
-		var allRanges []string
-		var firstError error
-
-		for _, u := range cloudflareRangesLink {
-			wg.Add(1)
-			go func(url string) {
-				defer wg.Done()
-				resp, err := http.Get(url)
-				if err != nil {
-					mu.Lock()
-					if firstError == nil {
-						firstError = fmt.Errorf("failed to fetch %s: %w", url, err)
-					}
-					mu.Unlock()
-					return
-				}
-				defer resp.Body.Close()
-
-				if resp.StatusCode != http.StatusOK {
-					mu.Lock()
-					if firstError == nil {
-						firstError = fmt.Errorf("bad status from %s: %s", url, resp.Status)
-					}
-					mu.Unlock()
-					return
-				}
-
-				body, err := io.ReadAll(resp.Body)
-				if err != nil {
-					mu.Lock()
-					if firstError == nil {
-						firstError = fmt.Errorf("failed to read body from %s: %w", url, err)
-					}
-					mu.Unlock()
-					return
-				}
-
-				mu.Lock()
-				allRanges = append(allRanges, strings.Split(strings.TrimSpace(string(body)), "\n")...)
-				mu.Unlock()
-			}(u)
-		}
-		wg.Wait()
-
-		if firstError != nil {
-			h.logger.Printf("Failed to fetch live Cloudflare IP ranges, using fallback list. Error: %v", firstError)
-			writeJSONResponse(w, http.StatusOK, map[string][]string{"ranges": cloudflareRanges})
-			return
-		}
-
-		writeJSONResponse(w, http.StatusOK, map[string][]string{"ranges": allRanges})
-	}
-
-	fetchAndSendRanges()
+	ranges := fetchCloudflareRanges(h.logger)
+	writeJSONResponse(w, http.StatusOK, map[string][]string{"ranges": ranges})
 }

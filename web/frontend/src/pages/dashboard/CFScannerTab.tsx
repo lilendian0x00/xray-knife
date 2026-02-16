@@ -19,6 +19,8 @@ import { api } from "@/services/api";
 import { Progress } from "@/components/ui/progress";
 import { usePersistentState } from "@/hooks/usePersistentState";
 
+const SCAN_RESULTS_PAGE_SIZE = 200;
+
 export function CfScannerTab() {
     const { cfScannerSettings, updateCfScannerSettings, resetCfScannerSettings, scanResults, clearScanResults, scanStatus, setScanStatus, scanProgress } = useAppStore();
 
@@ -27,9 +29,12 @@ export function CfScannerTab() {
     const [searchTerm, setSearchTerm] = useState("");
     const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
     const [onlySpeedtestResults, setOnlySpeedtestResults] = useState(false);
+    const [visibleCount, setVisibleCount] = useState(SCAN_RESULTS_PAGE_SIZE);
 
     useDebounce(() => setDebouncedSearchTerm(searchTerm), 300, [searchTerm]);
     const [animationParent] = useAutoAnimate<HTMLTableSectionElement>();
+    // Disable auto-animate for large datasets to avoid performance issues
+    const tableRef = scanResults.length > SCAN_RESULTS_PAGE_SIZE ? undefined : animationParent;
 
     const isBusy = scanStatus === 'running' || scanStatus === 'stopping' || scanStatus === 'starting';
     const progressValue = scanProgress.total > 0 ? (scanProgress.completed / scanProgress.total) * 100 : 0;
@@ -46,6 +51,9 @@ export function CfScannerTab() {
         const searchFiltered = debouncedSearchTerm ? speedtestFiltered.filter(r => r.ip.includes(debouncedSearchTerm.trim())) : speedtestFiltered;
         return [...searchFiltered].sort((a, b) => a.latency_ms - b.latency_ms);
     }, [scanResults, onlySpeedtestResults, debouncedSearchTerm]);
+
+    const displayedResults = useMemo(() => filteredAndSortedResults.slice(0, visibleCount), [filteredAndSortedResults, visibleCount]);
+    const hasMore = filteredAndSortedResults.length > visibleCount;
 
     const handleLoadRanges = async () => {
         setIsLoadingRanges(true);
@@ -186,8 +194,17 @@ export function CfScannerTab() {
                     <CardContent>
                         <div className="border rounded-md max-h-[600px] overflow-auto">
                             <Table><TableHeader className="sticky top-0 z-10 bg-muted/95 backdrop-blur-sm"><TableRow><TableHead className="w-[150px]">IP</TableHead><TableHead>Latency</TableHead><TableHead>Download</TableHead><TableHead>Upload</TableHead></TableRow></TableHeader>
-                                <TableBody ref={animationParent}>
-                                    {filteredAndSortedResults.length > 0 ? (filteredAndSortedResults.map((result) => (<TableRow key={result.ip}><TableCell className="font-mono">{result.ip}</TableCell><TableCell><Badge variant="secondary">{`${result.latency_ms}ms`}</Badge></TableCell><TableCell>{result.download_mbps > 0 ? `${result.download_mbps.toFixed(2)} Mbps` : '-'}</TableCell><TableCell>{result.upload_mbps > 0 ? `${result.upload_mbps.toFixed(2)} Mbps` : '-'}</TableCell></TableRow>))) : (<TableRow><TableCell colSpan={4} className="h-24 text-center text-muted-foreground">{isBusy ? "Scanning..." : (searchTerm ? "No results match your search." : "No results yet.")}</TableCell></TableRow>)}
+                                <TableBody ref={tableRef}>
+                                    {displayedResults.length > 0 ? (displayedResults.map((result) => (<TableRow key={result.ip}><TableCell className="font-mono">{result.ip}</TableCell><TableCell><Badge variant="secondary">{`${result.latency_ms}ms`}</Badge></TableCell><TableCell>{result.download_mbps > 0 ? `${result.download_mbps.toFixed(2)} Mbps` : '-'}</TableCell><TableCell>{result.upload_mbps > 0 ? `${result.upload_mbps.toFixed(2)} Mbps` : '-'}</TableCell></TableRow>))) : (<TableRow><TableCell colSpan={4} className="h-24 text-center text-muted-foreground">{isBusy ? "Scanning..." : (searchTerm ? "No results match your search." : "No results yet.")}</TableCell></TableRow>)}
+                                    {hasMore && (
+                                        <TableRow>
+                                            <TableCell colSpan={4} className="text-center py-3">
+                                                <Button variant="ghost" size="sm" onClick={() => setVisibleCount(c => c + SCAN_RESULTS_PAGE_SIZE)}>
+                                                    Load more ({filteredAndSortedResults.length - visibleCount} remaining)
+                                                </Button>
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
                                 </TableBody>
                             </Table>
                         </div>
