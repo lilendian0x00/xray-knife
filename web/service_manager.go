@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"time"
 
 	pkghttp "github.com/lilendian0x00/xray-knife/v7/pkg/http"
@@ -11,8 +13,21 @@ import (
 	"github.com/lilendian0x00/xray-knife/v7/pkg/scanner"
 )
 
-const cfScannerHistoryFile = "results.csv"
-const httpTesterHistoryFile = "http-results.csv"
+var cfScannerHistoryFile string
+var httpTesterHistoryFile string
+
+func init() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// Fallback to current directory if home dir is unavailable
+		cfScannerHistoryFile = "results.csv"
+		httpTesterHistoryFile = "http-results.csv"
+		return
+	}
+	dataDir := filepath.Join(home, ".xray-knife")
+	cfScannerHistoryFile = filepath.Join(dataDir, "results.csv")
+	httpTesterHistoryFile = filepath.Join(dataDir, "http-results.csv")
+}
 
 // ServiceManager holds a registry of all available background services.
 type ServiceManager struct {
