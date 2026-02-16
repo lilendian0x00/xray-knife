@@ -41,6 +41,8 @@ interface AppState {
     scanProgress: ProgressState;
     token: string | null;
     isAuthenticated: boolean;
+    authRequired: boolean | null; // null = not yet checked
+    wsConnected: boolean;
 }
 
 interface AppActions {
@@ -63,7 +65,9 @@ interface AppActions {
     setHttpTestProgress: (progress: ProgressState) => void;
     setScanProgress: (progress: ProgressState) => void;
     setToken: (token: string | null) => void;
+    setAuthRequired: (required: boolean) => void;
     logout: () => void;
+    setWsConnected: (connected: boolean) => void;
 }
 
 export const useAppStore = create<AppState & AppActions>()(
@@ -82,6 +86,8 @@ export const useAppStore = create<AppState & AppActions>()(
             scanProgress: initialProgress,
             token: null,
             isAuthenticated: false,
+            authRequired: null,
+            wsConnected: false,
 
             updateProxySettings: (newSettings) => set(state => ({ proxySettings: { ...state.proxySettings, ...newSettings } })),
             updateHttpSettings: (newSettings) => set(state => ({ httpSettings: { ...state.httpSettings, ...newSettings } })),
@@ -108,7 +114,9 @@ export const useAppStore = create<AppState & AppActions>()(
             setHttpTestProgress: (progress) => set({ httpTestProgress: progress }),
             setScanProgress: (progress) => set({ scanProgress: progress }),
             setToken: (token) => set({ token, isAuthenticated: !!token }),
+            setAuthRequired: (required) => set({ authRequired: required }),
             logout: () => set({ token: null, isAuthenticated: false }),
+            setWsConnected: (connected) => set({ wsConnected: connected }),
         }),
         {
             name: 'xray-knife-app-storage',
@@ -120,8 +128,25 @@ export const useAppStore = create<AppState & AppActions>()(
                 token: state.token,
             }),
             onRehydrateStorage: () => (state) => {
-                if (state) {
-                    state.isAuthenticated = !!state.token;
+                if (state && state.token) {
+                    // Decode JWT payload and check expiry
+                    try {
+                        const payload = JSON.parse(atob(state.token.split('.')[1]));
+                        if (payload.exp && payload.exp * 1000 < Date.now()) {
+                            // Token expired, clear it
+                            state.token = null;
+                            state.isAuthenticated = false;
+                            return;
+                        }
+                    } catch {
+                        // Malformed token, clear it
+                        state.token = null;
+                        state.isAuthenticated = false;
+                        return;
+                    }
+                    state.isAuthenticated = true;
+                } else if (state) {
+                    state.isAuthenticated = false;
                 }
             },
         }

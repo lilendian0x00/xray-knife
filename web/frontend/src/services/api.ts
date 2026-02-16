@@ -5,7 +5,10 @@ import { type ProxyDetails, type HttpResult } from '@/types/dashboard';
 import { useAppStore } from '@/stores/appStore';
 
 export const api = {
-    // Auth Endpoint
+    // Auth Endpoints
+    checkAuth() {
+        return axios.get<{ auth_required: boolean }>('/api/v1/auth/check');
+    },
     login(username: string, password: string) {
         return axios.post('/api/v1/login', { username, password });
     },
