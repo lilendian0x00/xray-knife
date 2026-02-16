@@ -211,15 +211,17 @@ func (p *ProxyServiceRunner) run(ctx context.Context) {
 
 	// This is the blocking call.
 	if err := p.service.Run(ctx, p.forceRotate); err != nil {
-		p.logger.Printf("Proxy service exited with error: %v", err)
-
-		// Inform the frontend of the failure
-		statusMsgStopped, _ := json.Marshal(map[string]interface{}{
-			"type":  "proxy_status",
-			"data":  "stopped",
-			"error": err.Error(), // err msg
-		})
-		p.hub.Broadcast(statusMsgStopped)
+		// Only broadcast the error if it was NOT caused by a user-initiated stop (context cancellation).
+		// Stop() will send its own 'stopped' broadcast after wg.Wait() returns.
+		if ctx.Err() == nil {
+			p.logger.Printf("Proxy service exited with error: %v", err)
+			statusMsgStopped, _ := json.Marshal(map[string]interface{}{
+				"type":  "proxy_status",
+				"data":  "stopped",
+				"error": err.Error(),
+			})
+			p.hub.Broadcast(statusMsgStopped)
+		}
 	}
 }
 
