@@ -140,7 +140,7 @@ func NewExaminer(opts Options) (*Examiner, error) {
 	switch opts.Core {
 	case "xray":
 		e.Core = core.CoreFactory(core.XrayCoreType, e.InsecureTLS, e.Verbose)
-	case "singbox":
+	case "singbox", "sing-box":
 		e.Core = core.CoreFactory(core.SingboxCoreType, e.InsecureTLS, e.Verbose)
 	case "auto":
 		fallthrough

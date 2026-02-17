@@ -43,7 +43,7 @@ type ManagedService interface {
 
 // BaseService provides common functionality for all managed services.
 type BaseService struct {
-	mu          sync.Mutex
+	mu          sync.RWMutex
 	state       ServiceState
 	cancelFunc  context.CancelFunc
 	wg          sync.WaitGroup
@@ -77,8 +77,8 @@ func (s *BaseService) SetState(newState ServiceState) {
 
 // Status safely returns the current state of the service.
 func (s *BaseService) Status() ServiceState {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.state
 }
 
@@ -228,8 +228,8 @@ func (p *ProxyServiceRunner) run(ctx context.Context) {
 }
 
 func (p *ProxyServiceRunner) GetDetails() (*proxy.Details, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	if p.service == nil || p.state != StateRunning {
 		return nil, fmt.Errorf("proxy service not running")
 	}
@@ -237,8 +237,8 @@ func (p *ProxyServiceRunner) GetDetails() (*proxy.Details, error) {
 }
 
 func (p *ProxyServiceRunner) Rotate() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	if p.forceRotate == nil {
 		return fmt.Errorf("proxy service not running or not in rotation mode")
 	}

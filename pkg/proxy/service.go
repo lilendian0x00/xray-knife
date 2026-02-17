@@ -1,20 +1,19 @@
 package proxy
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/v7/database"
-	"io"
 	"log"
 	"math/rand"
-	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/fatih/color"
+
+	"github.com/lilendian0x00/xray-knife/v7/database"
 	"github.com/lilendian0x00/xray-knife/v7/pkg/core"
 	"github.com/lilendian0x00/xray-knife/v7/pkg/core/protocol"
 	pkgsingbox "github.com/lilendian0x00/xray-knife/v7/pkg/core/singbox"
@@ -23,8 +22,6 @@ import (
 	"github.com/lilendian0x00/xray-knife/v7/utils"
 	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
 	"github.com/xtls/xray-core/common/uuid"
-
-	"github.com/fatih/color"
 )
 
 // Config holds all the settings for the proxy service.
@@ -106,7 +103,7 @@ func New(config Config, logger *log.Logger) (*Service, error) {
 	case "sing-box":
 		s.core = core.CoreFactory(core.SingboxCoreType, config.InsecureTLS, config.Verbose)
 	default:
-		return nil, fmt.Errorf("allowed core types: (xray, singbox), got: %s", config.CoreType)
+		return nil, fmt.Errorf("allowed core types: (xray, sing-box), got: %s", config.CoreType)
 	}
 
 	inbound, err := s.createInbound()
@@ -151,6 +148,11 @@ func (s *Service) GetCurrentDetails() *Details {
 		TotalConfigs:     len(s.config.ConfigLinks),
 	}
 	return details
+}
+
+// ConfigCount returns the number of config links loaded for the proxy.
+func (s *Service) ConfigCount() int {
+	return len(s.config.ConfigLinks)
 }
 
 // logf is a helper to direct logs to either the web logger or the CLI customlog.
@@ -226,12 +228,11 @@ func (s *Service) runRotationMode(ctx context.Context, forceRotate <-chan struct
 		}
 	}()
 
-	r := rand.New(rand.NewSource(time.Now().Unix()))
 	var lastUsedLink string
 
 	// Initial setup
 	s.setRotationStatus("testing")
-	instance, result, err := s.findAndStartWorkingConfig(examiner, r, "")
+	instance, result, err := s.findAndStartWorkingConfig(examiner, "")
 	if err != nil {
 		s.logf(customlog.Failure, "Could not find any working config on initial startup. Exiting.")
 		return err
@@ -242,7 +243,10 @@ func (s *Service) runRotationMode(ctx context.Context, forceRotate <-chan struct
 
 	for {
 		rotationDuration := time.Duration(s.config.RotationInterval) * time.Second
-		if s.rotationStatus == "stalled" {
+		s.mu.RLock()
+		isStalled := s.rotationStatus == "stalled"
+		s.mu.RUnlock()
+		if isStalled {
 			rotationDuration = 30 * time.Second // Shorter retry interval if stalled
 		}
 
@@ -268,7 +272,7 @@ func (s *Service) runRotationMode(ctx context.Context, forceRotate <-chan struct
 		}
 
 		s.setRotationStatus("testing")
-		instance, result, err := s.findAndStartWorkingConfig(examiner, r, lastUsedLink)
+		instance, result, err := s.findAndStartWorkingConfig(examiner, lastUsedLink)
 		if err != nil {
 			s.logf(customlog.Warning, "Rotation failed to find a new working config. Keeping the current one. Retrying in 30s...")
 			s.setRotationStatus("stalled")
@@ -289,13 +293,12 @@ func (s *Service) runRotationMode(ctx context.Context, forceRotate <-chan struct
 
 func (s *Service) findAndStartWorkingConfig(
 	examiner *pkghttp.Examiner,
-	r *rand.Rand,
 	lastUsedLink string,
 ) (protocol.Instance, *pkghttp.Result, error) {
 	const BatchAmount = 50
 	availableLinks := make([]string, len(s.config.ConfigLinks))
 	copy(availableLinks, s.config.ConfigLinks)
-	r.Shuffle(len(availableLinks), func(i, j int) { availableLinks[i], availableLinks[j] = availableLinks[j], availableLinks[i] })
+	rand.Shuffle(len(availableLinks), func(i, j int) { availableLinks[i], availableLinks[j] = availableLinks[j], availableLinks[i] })
 
 	testCount := BatchAmount
 	if len(availableLinks) < testCount {
@@ -387,32 +390,6 @@ func (s *Service) findAndStartWorkingConfig(
 	return nil, nil, errors.New("failed to find any new working outbound configuration in this batch")
 }
 
-// GetConfigLinks is a helper to centralize the logic of reading links from various sources.
-func GetConfigLinks(fromFile, fromLink string, fromSTDIN bool) ([]string, error) {
-	var links []string
-	if fromSTDIN {
-		scanner := bufio.NewScanner(os.Stdin)
-		fmt.Println("Reading config links from STDIN (press CTRL+D when done):")
-		for scanner.Scan() {
-			if trimmed := strings.TrimSpace(scanner.Text()); trimmed != "" {
-				links = append(links, trimmed)
-			}
-		}
-		if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
-			return nil, err
-		}
-	} else if fromLink != "" {
-		links = append(links, fromLink)
-	} else if fromFile != "" {
-		links = utils.ParseFileByNewline(fromFile)
-	}
-
-	if len(links) == 0 {
-		return nil, errors.New("no configuration links provided or found")
-	}
-	return links, nil
-}
-
 func (s *Service) createExaminer() (*pkghttp.Examiner, error) {
 	return pkghttp.NewExaminer(pkghttp.Options{
 		Core:                   s.config.CoreType,
@@ -460,8 +437,14 @@ func (s *Service) createInbound() (protocol.Protocol, error) {
 func createXrayInbound(cfg Config, uuid string) (protocol.Protocol, error) {
 	switch cfg.InboundProtocol {
 	case "socks":
-		user, _ := utils.GeneratePassword(4)
-		pass, _ := utils.GeneratePassword(4)
+		user, err := utils.GeneratePassword(4)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate socks username: %w", err)
+		}
+		pass, err := utils.GeneratePassword(4)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate socks password: %w", err)
+		}
 		return &pkgxray.Socks{
 			Remark: "Listener", Address: cfg.ListenAddr, Port: cfg.ListenPort,
 			Username: user, Password: pass,
@@ -546,8 +529,14 @@ func createXrayInbound(cfg Config, uuid string) (protocol.Protocol, error) {
 func createSingboxInbound(cfg Config) (protocol.Protocol, error) {
 	// Currently, only SOCKS is implemented for Singbox inbound in this logic
 	if cfg.InboundProtocol == "socks" {
-		user, _ := utils.GeneratePassword(4)
-		pass, _ := utils.GeneratePassword(4)
+		user, err := utils.GeneratePassword(4)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate socks username: %w", err)
+		}
+		pass, err := utils.GeneratePassword(4)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate socks password: %w", err)
+		}
 		return &pkgsingbox.Socks{
 			Remark: "Listener", Address: cfg.ListenAddr, Port: cfg.ListenPort,
 			Username: user, Password: pass,

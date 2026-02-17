@@ -32,12 +32,14 @@ func init() {
 // ServiceManager holds a registry of all available background services.
 type ServiceManager struct {
 	services map[string]ManagedService
+	done     chan struct{}
 }
 
 // NewServiceManager creates a new service manager and initializes all services.
 func NewServiceManager(logger *log.Logger, hub *Hub) *ServiceManager {
 	sm := &ServiceManager{
 		services: make(map[string]ManagedService),
+		done:     make(chan struct{}),
 	}
 	// Register all the available services
 	sm.registerService(NewProxyServiceRunner(logger, hub))
@@ -54,18 +56,28 @@ func (sm *ServiceManager) proxyDetailsBroadcaster(hub *Hub) {
 	ticker := time.NewTicker(2 * time.Second) // Broadcast every 2 seconds
 	defer ticker.Stop()
 
-	for range ticker.C {
-		if sm.GetProxyStatus() == "running" {
-			details, err := sm.GetProxyDetails()
-			if err == nil && details != nil {
-				payload, _ := json.Marshal(map[string]interface{}{
-					"type": "proxy_details",
-					"data": details,
-				})
-				hub.Broadcast(payload)
+	for {
+		select {
+		case <-ticker.C:
+			if sm.GetProxyStatus() == "running" {
+				details, err := sm.GetProxyDetails()
+				if err == nil && details != nil {
+					payload, _ := json.Marshal(map[string]interface{}{
+						"type": "proxy_details",
+						"data": details,
+					})
+					hub.Broadcast(payload)
+				}
 			}
+		case <-sm.done:
+			return
 		}
 	}
+}
+
+// Close stops the background goroutines of the ServiceManager.
+func (sm *ServiceManager) Close() {
+	close(sm.done)
 }
 
 func (sm *ServiceManager) registerService(s ManagedService) {

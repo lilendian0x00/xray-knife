@@ -105,6 +105,7 @@ func (s *Server) Run() error {
 		return fmt.Errorf("server forced to shutdown: %w", err)
 	}
 
+	s.manager.Close()
 	s.logger.Println("Server shutdown complete.")
 	return nil
 }

@@ -112,7 +112,7 @@ Use --file, --config, or --stdin to provide configs for a single session without
 			// Set up channel for manual rotation
 			forceRotateChan := make(chan struct{})
 			// Only listen for Enter if in rotation mode (more than 1 config, either from flags or DB)
-			if len(serviceConfig.ConfigLinks) > 1 {
+			if service.ConfigCount() > 1 {
 				go func() {
 					reader := bufio.NewReader(os.Stdin)
 					for {
