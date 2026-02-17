@@ -22,7 +22,7 @@ type Manager interface {
 	Restore(prev *Settings) error
 }
 
-// stateFilePath returns the path to the crash-recovery state file.
+// stateFilePath returns the path where we save proxy state for crash recovery.
 func stateFilePath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

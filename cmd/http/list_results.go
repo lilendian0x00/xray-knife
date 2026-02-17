@@ -12,7 +12,7 @@ import (
 
 var listLimit int
 
-// listResultsCmd represents the list-results command
+// listResultsCmd prints HTTP test results from the database.
 var listResultsCmd = &cobra.Command{
 	Use:   "list-results",
 	Short: "Lists the results from the last HTTP test run from the database",

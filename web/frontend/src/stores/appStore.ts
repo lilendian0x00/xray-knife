@@ -7,6 +7,8 @@ import { type HttpResult, type ProxyStatus, type ProxyDetails, type ScanResult }
 const defaultProxySettings: ProxySettings = {
     mode: 'inbound', coreType: 'xray', listenAddr: '127.0.0.1', listenPort: '9999', inboundProtocol: 'socks',
     inboundTransport: 'tcp', inboundUUID: 'random', rotationInterval: 300, maximumAllowedDelay: 3000,
+    batchSize: 0, concurrency: 0, healthCheckInterval: 30, drainTimeout: 0,
+    blacklistStrikes: 3, blacklistDuration: 600,
     enableTls: false, tlsCertPath: '', tlsKeyPath: '', tlsSni: '', tlsAlpn: '',
     transportOptions: { ws: { host: '', path: '/' }, grpc: { serviceName: 'grpc-service', authority: '' }, xhttp: { mode: 'auto', host: '', path: '/' } }
 };
@@ -121,12 +123,22 @@ export const useAppStore = create<AppState & AppActions>()(
         {
             name: 'xray-knife-app-storage',
             storage: createJSONStorage(() => localStorage),
-            partialize: (state) => ({ 
+            partialize: (state) => ({
                 proxySettings: state.proxySettings,
                 httpSettings: state.httpSettings,
                 cfScannerSettings: state.cfScannerSettings,
                 token: state.token,
             }),
+            merge: (persistedState, currentState) => {
+                const persisted = persistedState as Partial<AppState & AppActions> | undefined;
+                return {
+                    ...currentState,
+                    ...persisted,
+                    proxySettings: { ...defaultProxySettings, ...persisted?.proxySettings },
+                    httpSettings: { ...defaultHttpSettings, ...persisted?.httpSettings },
+                    cfScannerSettings: { ...defaultCfScannerSettings, ...persisted?.cfScannerSettings },
+                };
+            },
             onRehydrateStorage: () => (state) => {
                 if (state && state.token) {
                     // Decode JWT payload and check expiry

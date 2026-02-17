@@ -25,7 +25,7 @@ func writeJSONResponse(w http.ResponseWriter, statusCode int, data interface{}) 
 	}
 }
 
-// decodeJSONBody safely decodes the request body into a given struct.
+// decodeJSONBody decodes the JSON request body into v.
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, v interface{}) error {
 	if r.Body == nil {
 		return fmt.Errorf("request body is empty")

@@ -10,7 +10,7 @@ import (
 	"github.com/fatih/color"
 )
 
-// Type defines the level or category of the log message.
+// Type is the log level/category.
 type Type uint8
 
 // Defines the available log types.
@@ -48,15 +48,13 @@ var (
 	mu     sync.Mutex
 )
 
-// SetOutput sets the output destination for the custom logger.
-// This is useful for redirecting logs to a file or a web socket.
+// SetOutput redirects log output (e.g. to a file or websocket).
 func SetOutput(w io.Writer) {
 	mu.Lock()
 	defer mu.Unlock()
 	output = w
 }
 
-// GetOutput returns the current output writer.
 func GetOutput() io.Writer {
 	mu.Lock()
 	defer mu.Unlock()
@@ -107,7 +105,7 @@ func Println(v ...interface{}) {
 	fmt.Fprintln(output, v...)
 }
 
-// GetColor returns a string colored according to the specified log type.
+// GetColor wraps text in the ANSI color for the given log type.
 func GetColor(logType Type, text string) string {
 	t, ok := logTypeMap[logType]
 	if !ok {

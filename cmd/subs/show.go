@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ShowCmd represents the show command
+// ShowCmd lists all subscriptions in the DB.
 var ShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Shows all subscriptions available in the DB",

@@ -12,7 +12,7 @@ var (
 	addUserAgent string
 )
 
-// AddCmd represents the add command
+// AddCmd adds a new subscription to the DB.
 var AddCmd = &cobra.Command{
 	Use:   "add",
 	Short: "Adds a new subscription to the database",

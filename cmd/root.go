@@ -17,15 +17,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// rootCmd represents the base command when called without any subcommands
+// rootCmd is the top-level cobra command.
 var rootCmd = &cobra.Command{
 	Use:     "xray-knife",
 	Short:   "Swiss Army Knife for xray-core & sing-box",
 	Version: "9.0.0",
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
+// Execute is called by main() to kick everything off.
 func Execute() {
 	err := rootCmd.Execute()
 	if err != nil {

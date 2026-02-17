@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -51,10 +52,16 @@ type Config struct {
 	XHTTPPath           string `json:"xhttpPath"`
 	RotationInterval    uint32 `json:"rotationInterval"`
 	MaximumAllowedDelay uint16 `json:"maximumAllowedDelay"`
+	BatchSize           uint16 `json:"batchSize"`           // configs to test per rotation (0=auto)
+	Concurrency         uint16 `json:"concurrency"`         // concurrent test threads (0=auto)
+	HealthCheckInterval uint32 `json:"healthCheckInterval"` // seconds between health checks (0=disabled)
+	DrainTimeout        uint16 `json:"drainTimeout"`        // seconds to keep old connection alive during rotation (0=immediate)
+	BlacklistStrikes    uint16 `json:"blacklistStrikes"`    // failures before blacklisting (0=disabled)
+	BlacklistDuration   uint32 `json:"blacklistDuration"`   // seconds to blacklist a config
 	ConfigLinks         []string
 }
 
-// Details represents the current state of a running proxy service.
+// Details is a snapshot of the running proxy state.
 type Details struct {
 	Inbound          protocol.GeneralConfig `json:"inbound"`
 	ActiveOutbound   *pkghttp.Result        `json:"activeOutbound,omitempty"`
@@ -62,6 +69,11 @@ type Details struct {
 	NextRotationTime time.Time              `json:"nextRotationTime"`
 	RotationInterval uint32                 `json:"rotationInterval"`
 	TotalConfigs     int                    `json:"totalConfigs"`
+}
+
+type blacklistEntry struct {
+	strikes          int
+	blacklistedUntil time.Time
 }
 
 // Service is the main proxy service engine.
@@ -76,9 +88,9 @@ type Service struct {
 	nextRotationTime  time.Time
 	sysProxyManager   sysproxy.Manager   // nil if mode != "system"
 	prevProxySettings *sysproxy.Settings // saved OS settings before modification
+	blacklist         map[string]*blacklistEntry
 }
 
-// New creates a new proxy Service.
 func New(config Config, logger *log.Logger) (*Service, error) {
 	// Crash recovery: restore stale system proxy settings from a previous unclean exit.
 	if stale, err := sysproxy.LoadState(); err == nil && stale != nil {
@@ -92,6 +104,7 @@ func New(config Config, logger *log.Logger) (*Service, error) {
 		config:         config,
 		logger:         logger,
 		rotationStatus: "idle",
+		blacklist:      make(map[string]*blacklistEntry),
 	}
 
 	// If no config links are provided via flags, fetch them from the database.
@@ -106,6 +119,13 @@ func New(config Config, logger *log.Logger) (*Service, error) {
 		}
 		s.config.ConfigLinks = dbLinks
 		s.logf(customlog.Success, "Loaded %d configs from the database for rotation pool.\n", len(s.config.ConfigLinks))
+	}
+
+	// Deduplicate config links to avoid wasting bandwidth testing the same config twice.
+	var dupsRemoved int
+	s.config.ConfigLinks, dupsRemoved = pkghttp.DeduplicateLinks(s.config.ConfigLinks)
+	if dupsRemoved > 0 {
+		s.logf(customlog.Info, "Removed %d duplicate configs from pool (%d unique remain).\n", dupsRemoved, len(s.config.ConfigLinks))
 	}
 
 	switch config.CoreType {
@@ -167,7 +187,7 @@ func (s *Service) setRotationStatus(status string) {
 	s.mu.Unlock()
 }
 
-// GetCurrentDetails safely returns the details of the running service.
+// GetCurrentDetails returns a snapshot of the proxy state under the read lock.
 func (s *Service) GetCurrentDetails() *Details {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -183,7 +203,7 @@ func (s *Service) GetCurrentDetails() *Details {
 	return details
 }
 
-// ConfigCount returns the number of config links loaded for the proxy.
+// ConfigCount returns how many config links are loaded.
 func (s *Service) ConfigCount() int {
 	return len(s.config.ConfigLinks)
 }
@@ -195,6 +215,36 @@ func (s *Service) logf(logType customlog.Type, format string, v ...interface{}) 
 	} else {
 		customlog.Printf(logType, format, v...)
 	}
+}
+
+// healthCheck tests whether the active outbound connection is still working.
+func (s *Service) healthCheck(ctx context.Context) bool {
+	s.mu.RLock()
+	activeOutbound := s.activeOutbound
+	s.mu.RUnlock()
+	if activeOutbound == nil || activeOutbound.Protocol == nil {
+		return false
+	}
+
+	timeout := time.Duration(s.config.MaximumAllowedDelay) * time.Millisecond
+	client, instance, err := s.core.MakeHttpClient(ctx, activeOutbound.Protocol, timeout)
+	if err != nil {
+		return false
+	}
+	defer instance.Close()
+
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, "GET", "https://cloudflare.com/cdn-cgi/trace", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 // Close restores the system proxy settings if they were modified, and cleans up state.
@@ -211,7 +261,7 @@ func (s *Service) Close() {
 	}
 }
 
-// Run starts the proxy service and blocks until the context is canceled.
+// Run blocks until the context is canceled, running either single or rotation mode.
 func (s *Service) Run(ctx context.Context, forceRotate <-chan struct{}) error {
 	if len(s.config.ConfigLinks) == 0 {
 		return errors.New("no configuration links provided")
@@ -288,6 +338,15 @@ func (s *Service) runRotationMode(ctx context.Context, forceRotate <-chan struct
 	lastUsedLink = result.ConfigLink
 	s.setRotationStatus("idle")
 
+	// Set up health check ticker if enabled
+	var healthTicker *time.Ticker
+	var healthTickerC <-chan time.Time
+	if s.config.HealthCheckInterval > 0 {
+		healthTicker = time.NewTicker(time.Duration(s.config.HealthCheckInterval) * time.Second)
+		healthTickerC = healthTicker.C
+		defer healthTicker.Stop()
+	}
+
 	for {
 		rotationDuration := time.Duration(s.config.RotationInterval) * time.Second
 		s.mu.RLock()
@@ -305,17 +364,51 @@ func (s *Service) runRotationMode(ctx context.Context, forceRotate <-chan struct
 
 		timer := time.NewTimer(rotationDuration)
 
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return nil
-		case <-forceRotate:
-			s.logf(customlog.Processing, "Manual rotation triggered.")
-			if !timer.Stop() {
-				<-timer.C // Drain the timer if it already fired
+		doRotate := false
+		waitLoop:
+		for {
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil
+			case <-forceRotate:
+				s.logf(customlog.Processing, "Manual rotation triggered.")
+				if !timer.Stop() {
+					<-timer.C
+				}
+				doRotate = true
+				break waitLoop
+			case <-timer.C:
+				s.logf(customlog.Processing, "Rotation interval elapsed.")
+				doRotate = true
+				break waitLoop
+			case <-healthTickerC:
+				if !s.healthCheck(ctx) {
+					s.logf(customlog.Warning, "Health check failed! Triggering immediate rotation.")
+					// Record a blacklist strike for the active config
+					if s.config.BlacklistStrikes > 0 && lastUsedLink != "" {
+						entry, exists := s.blacklist[lastUsedLink]
+						if !exists {
+							entry = &blacklistEntry{}
+							s.blacklist[lastUsedLink] = entry
+						}
+						entry.strikes++
+						if entry.strikes >= int(s.config.BlacklistStrikes) {
+							entry.blacklistedUntil = time.Now().Add(time.Duration(s.config.BlacklistDuration) * time.Second)
+							s.logf(customlog.Warning, "Blacklisted failed active config for %ds: %s\n", s.config.BlacklistDuration, lastUsedLink)
+						}
+					}
+					if !timer.Stop() {
+						<-timer.C
+					}
+					doRotate = true
+					break waitLoop
+				}
 			}
-		case <-timer.C:
-			s.logf(customlog.Processing, "Rotation interval elapsed.")
+		}
+
+		if !doRotate {
+			continue
 		}
 
 		s.setRotationStatus("testing")
@@ -330,7 +423,17 @@ func (s *Service) runRotationMode(ctx context.Context, forceRotate <-chan struct
 		s.logf(customlog.Success, "Switching to new outbound: %s", result.ConfigLink)
 
 		if currentInstance != nil {
-			currentInstance.Close()
+			oldInstance := currentInstance
+			drainTimeout := time.Duration(s.config.DrainTimeout) * time.Second
+			if drainTimeout > 0 {
+				s.logf(customlog.Processing, "Draining old connection for %v...", drainTimeout)
+				go func() {
+					time.Sleep(drainTimeout)
+					oldInstance.Close()
+				}()
+			} else {
+				oldInstance.Close()
+			}
 		}
 		currentInstance = instance
 		lastUsedLink = result.ConfigLink
@@ -342,19 +445,61 @@ func (s *Service) findAndStartWorkingConfig(
 	examiner *pkghttp.Examiner,
 	lastUsedLink string,
 ) (protocol.Instance, *pkghttp.Result, error) {
-	const BatchAmount = 50
 	availableLinks := make([]string, len(s.config.ConfigLinks))
 	copy(availableLinks, s.config.ConfigLinks)
 	rand.Shuffle(len(availableLinks), func(i, j int) { availableLinks[i], availableLinks[j] = availableLinks[j], availableLinks[i] })
 
-	testCount := BatchAmount
-	if len(availableLinks) < testCount {
-		testCount = len(availableLinks)
+	// Filter out blacklisted configs
+	if s.config.BlacklistStrikes > 0 {
+		now := time.Now()
+		filtered := make([]string, 0, len(availableLinks))
+		for _, link := range availableLinks {
+			entry, exists := s.blacklist[link]
+			if !exists {
+				filtered = append(filtered, link)
+			} else if now.After(entry.blacklistedUntil) {
+				delete(s.blacklist, link)
+				filtered = append(filtered, link)
+			}
+		}
+		if len(filtered) == 0 {
+			s.logf(customlog.Warning, "All configs are blacklisted. Clearing blacklist.\n")
+			s.blacklist = make(map[string]*blacklistEntry)
+			filtered = availableLinks
+		} else if len(filtered) < len(availableLinks) {
+			s.logf(customlog.Info, "Skipped %d blacklisted configs.\n", len(availableLinks)-len(filtered))
+		}
+		availableLinks = filtered
 	}
-	linksToTest := availableLinks[:testCount]
-	s.logf(customlog.Processing, "Testing a batch of %d configs...\n", len(linksToTest))
 
-	testManager := pkghttp.NewTestManager(examiner, 50, false, s.logger)
+	// Determine batch size: use configured value or auto-derive from pool size
+	batchSize := int(s.config.BatchSize)
+	if batchSize == 0 {
+		batchSize = len(availableLinks) / 10
+		if batchSize < 10 {
+			batchSize = 10
+		}
+		if batchSize > 200 {
+			batchSize = 200
+		}
+	}
+	if batchSize > len(availableLinks) {
+		batchSize = len(availableLinks)
+	}
+
+	// Determine concurrency: use configured value or auto-derive from batch size
+	concurrency := int(s.config.Concurrency)
+	if concurrency == 0 {
+		concurrency = batchSize
+		if concurrency > 50 {
+			concurrency = 50
+		}
+	}
+
+	linksToTest := availableLinks[:batchSize]
+	s.logf(customlog.Processing, "Testing a batch of %d configs (concurrency: %d)...\n", len(linksToTest), concurrency)
+
+	testManager := pkghttp.NewTestManager(examiner, uint16(concurrency), false, s.logger)
 	resultsChan := make(chan *pkghttp.Result, len(linksToTest))
 	var results pkghttp.ConfigResults
 	var wg sync.WaitGroup
@@ -374,6 +519,24 @@ func (s *Service) findAndStartWorkingConfig(
 	wg.Wait()
 
 	sort.Sort(results)
+
+	// Record strikes for failed configs in the blacklist
+	if s.config.BlacklistStrikes > 0 {
+		for _, res := range results {
+			if res.Status != "passed" && res.ConfigLink != "" {
+				entry, exists := s.blacklist[res.ConfigLink]
+				if !exists {
+					entry = &blacklistEntry{}
+					s.blacklist[res.ConfigLink] = entry
+				}
+				entry.strikes++
+				if entry.strikes >= int(s.config.BlacklistStrikes) {
+					entry.blacklistedUntil = time.Now().Add(time.Duration(s.config.BlacklistDuration) * time.Second)
+					s.logf(customlog.Warning, "Blacklisted config for %ds (%d strikes): %s\n", s.config.BlacklistDuration, entry.strikes, res.ConfigLink)
+				}
+			}
+		}
+	}
 
 	for _, res := range results {
 		// This check is now safe because we know `res.Protocol` is non-nil if status is "passed".

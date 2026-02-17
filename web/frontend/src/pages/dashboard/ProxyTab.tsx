@@ -207,6 +207,44 @@ export function ProxyTab() {
                         <InputNumber id="max-delay-proxy" min={100} step={100} value={proxySettings.maximumAllowedDelay} onChange={(v) => updateProxySettings({ maximumAllowedDelay: v })} disabled={proxyStatus !== 'stopped'} />
                     </div>
 
+                    <div className="sm:col-span-2">
+                        <Dialog>
+                            <DialogTrigger asChild><Button variant="outline" className="w-full justify-start" disabled={proxyStatus !== 'stopped'}><Settings className="mr-2 size-4" /> Advanced Rotation Settings</Button></DialogTrigger>
+                            <DialogContent className="max-w-lg">
+                                <DialogHeader>
+                                    <DialogTitle>Advanced Rotation Settings</DialogTitle>
+                                    <DialogDescription>Configure batch testing, health checks, connection draining, and config blacklisting.</DialogDescription>
+                                </DialogHeader>
+                                <div className="grid grid-cols-2 gap-4 py-4">
+                                    <div className="flex flex-col gap-2">
+                                        <Label htmlFor="batch-size">Batch Size (0=auto)</Label>
+                                        <InputNumber id="batch-size" min={0} value={proxySettings.batchSize} onChange={(v) => updateProxySettings({ batchSize: v })} />
+                                    </div>
+                                    <div className="flex flex-col gap-2">
+                                        <Label htmlFor="concurrency">Concurrency (0=auto)</Label>
+                                        <InputNumber id="concurrency" min={0} value={proxySettings.concurrency} onChange={(v) => updateProxySettings({ concurrency: v })} />
+                                    </div>
+                                    <div className="flex flex-col gap-2">
+                                        <Label htmlFor="health-check">Health Check (s, 0=off)</Label>
+                                        <InputNumber id="health-check" min={0} value={proxySettings.healthCheckInterval} onChange={(v) => updateProxySettings({ healthCheckInterval: v })} />
+                                    </div>
+                                    <div className="flex flex-col gap-2">
+                                        <Label htmlFor="drain-timeout">Drain Timeout (s)</Label>
+                                        <InputNumber id="drain-timeout" min={0} value={proxySettings.drainTimeout} onChange={(v) => updateProxySettings({ drainTimeout: v })} />
+                                    </div>
+                                    <div className="flex flex-col gap-2">
+                                        <Label htmlFor="blacklist-strikes">Blacklist Strikes (0=off)</Label>
+                                        <InputNumber id="blacklist-strikes" min={0} value={proxySettings.blacklistStrikes} onChange={(v) => updateProxySettings({ blacklistStrikes: v })} />
+                                    </div>
+                                    <div className="flex flex-col gap-2">
+                                        <Label htmlFor="blacklist-duration">Blacklist Duration (s)</Label>
+                                        <InputNumber id="blacklist-duration" min={0} value={proxySettings.blacklistDuration} onChange={(v) => updateProxySettings({ blacklistDuration: v })} />
+                                    </div>
+                                </div>
+                            </DialogContent>
+                        </Dialog>
+                    </div>
+
                     <AnimatePresence>
                         {isTlsCompatible && (
                             <motion.div

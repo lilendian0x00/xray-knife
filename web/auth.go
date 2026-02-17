@@ -35,13 +35,13 @@ func (a *AuthDetails) CheckPassword(password string) bool {
 	return err == nil
 }
 
-// Claims defines the JWT claims.
+// Claims is the JWT payload.
 type Claims struct {
 	Username string `json:"username"`
 	jwt.RegisteredClaims
 }
 
-// GenerateJWT creates a new JWT for a given username.
+// GenerateJWT makes a 24-hour JWT for the given username.
 func GenerateJWT(username string) (string, error) {
 	expirationTime := time.Now().Add(24 * time.Hour)
 	claims := &Claims{
@@ -55,7 +55,7 @@ func GenerateJWT(username string) (string, error) {
 	return token.SignedString(jwtSecret)
 }
 
-// ValidateJWT validates a token string.
+// ValidateJWT parses and verifies a token string, returning the claims.
 func ValidateJWT(tokenStr string) (*Claims, error) {
 	claims := &Claims{}
 	token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {

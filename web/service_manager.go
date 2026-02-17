@@ -35,7 +35,7 @@ type ServiceManager struct {
 	done     chan struct{}
 }
 
-// NewServiceManager creates a new service manager and initializes all services.
+// NewServiceManager sets up the service registry and registers all available services.
 func NewServiceManager(logger *log.Logger, hub *Hub) *ServiceManager {
 	sm := &ServiceManager{
 		services: make(map[string]ManagedService),

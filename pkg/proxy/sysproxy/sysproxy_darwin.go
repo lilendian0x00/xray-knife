@@ -8,7 +8,7 @@ import (
 
 type darwinManager struct{}
 
-// New returns a Manager for macOS.
+// New returns a macOS proxy manager.
 func New() (Manager, error) {
 	return &darwinManager{}, nil
 }
@@ -101,7 +101,7 @@ func (m *darwinManager) Restore(prev *Settings) error {
 	return nil
 }
 
-// activeNetworkServices returns the list of network services that currently have an IP address.
+// activeNetworkServices lists network services that have an active IP address.
 func activeNetworkServices() ([]string, error) {
 	out, err := exec.Command("networksetup", "-listallnetworkservices").Output()
 	if err != nil {

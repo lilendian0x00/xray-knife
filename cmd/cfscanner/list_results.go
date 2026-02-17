@@ -12,7 +12,7 @@ import (
 
 var listLimit int
 
-// listResultsCmd represents the list-results command for the cfscanner
+// listResultsCmd prints CF scanner results from the database.
 var listResultsCmd = &cobra.Command{
 	Use:   "list-results",
 	Short: "Lists the results from the CF scanner from the database",

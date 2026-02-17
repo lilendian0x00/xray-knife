@@ -21,7 +21,7 @@ import (
 	"github.com/lilendian0x00/xray-knife/v7/utils"
 )
 
-// ServiceState represents the lifecycle state of a managed service.
+// Lifecycle states for managed services.
 type ServiceState string
 
 const (
@@ -33,7 +33,7 @@ const (
 	StateError    ServiceState = "error"
 )
 
-// ManagedService defines the contract for a background service managed by the ServiceManager.
+// ManagedService is the interface all background services must implement.
 type ManagedService interface {
 	Start(config interface{}) error
 	Stop() error
@@ -41,7 +41,7 @@ type ManagedService interface {
 	Type() string
 }
 
-// BaseService provides common functionality for all managed services.
+// BaseService has the shared lock/state/logger that all service runners embed.
 type BaseService struct {
 	mu          sync.RWMutex
 	state       ServiceState
@@ -68,14 +68,14 @@ func (s *BaseService) recoverAndLogPanic() {
 	}
 }
 
-// SetState safely updates the service's state.
+// SetState updates the service state under the write lock.
 func (s *BaseService) SetState(newState ServiceState) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.state = newState
 }
 
-// Status safely returns the current state of the service.
+// Status returns the current state under the read lock.
 func (s *BaseService) Status() ServiceState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

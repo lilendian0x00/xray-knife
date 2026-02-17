@@ -10,9 +10,8 @@ import (
 	"github.com/xtls/xray-core/infra/conf"
 )
 
-// Tun represents an xray-core TUN inbound configuration.
-// TUN inbounds capture system traffic through a virtual network interface.
-// NOTE: TUN is Linux-only and requires root/admin privileges.
+// Tun is an xray-core TUN inbound (Linux-only, needs root).
+// Captures system traffic through a virtual network interface.
 type Tun struct {
 	// Name of the TUN interface. Defaults to "xray0".
 	Name string `json:"name"`
@@ -24,7 +23,7 @@ type Tun struct {
 	Remark string `json:"-"`
 }
 
-// NewTun creates a new Tun instance with default values.
+// NewTun returns a Tun with default interface name "xray0" and MTU 1500.
 func NewTun() *Tun {
 	return &Tun{
 		Name:      "xray0",
@@ -33,7 +32,7 @@ func NewTun() *Tun {
 	}
 }
 
-// NewTunWithConfig creates a new Tun instance with the specified configuration.
+// NewTunWithConfig is like NewTun but lets you set the interface name, MTU, and user level.
 func NewTunWithConfig(name string, mtu uint32, userLevel uint32) *Tun {
 	t := &Tun{
 		Name:      name,
@@ -74,7 +73,7 @@ func (t *Tun) DetailsStr() string {
 	return info
 }
 
-// GetLink returns the interface name as there is no standard URL format for TUN.
+// GetLink returns the interface name (TUN has no URL format).
 func (t *Tun) GetLink() string {
 	return t.Name
 }

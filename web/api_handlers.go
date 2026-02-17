@@ -47,12 +47,11 @@ type APIHandler struct {
 	logger  *log.Logger
 }
 
-// NewAPIHandler creates a new API handler.
 func NewAPIHandler(manager *ServiceManager, logger *log.Logger) *APIHandler {
 	return &APIHandler{manager: manager, logger: logger}
 }
 
-// RegisterRoutes sets up all the API routes.
+// RegisterRoutes wires up all API endpoints.
 func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/proxy/start", h.handleProxyStart)
 	mux.HandleFunc("/api/v1/proxy/stop", h.handleProxyStop)

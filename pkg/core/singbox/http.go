@@ -14,8 +14,8 @@ import (
 	"github.com/sagernet/sing/common/logger"
 )
 
-// Http is a minimal HTTP proxy protocol used for system proxy mode inbound.
-// On sing-box it uses the "mixed" inbound type which handles both HTTP and SOCKS5.
+// Http is the inbound used in system proxy mode.
+// sing-box calls it "mixed" because it handles both HTTP and SOCKS5.
 type Http struct {
 	Remark  string
 	Address string

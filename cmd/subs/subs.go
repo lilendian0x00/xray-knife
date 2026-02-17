@@ -4,7 +4,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// SubsCmd represents the subs command
+// SubsCmd is the subs subcommand (manages subscription links).
 var SubsCmd = &cobra.Command{
 	Use:   "subs",
 	Short: "Fetch and manage proxy configurations from subscription links.",

@@ -233,7 +233,7 @@ func (rp *ResultProcessor) saveCSVResults(results ConfigResults) error {
 	return nil
 }
 
-// DeduplicateLinks removes duplicate links and returns the unique list and the number of duplicates removed.
+// DeduplicateLinks strips duplicates from links, returning the unique list and how many were removed.
 func DeduplicateLinks(links []string) ([]string, int) {
 	seen := make(map[string]struct{}, len(links))
 	unique := make([]string, 0, len(links))

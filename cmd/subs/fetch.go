@@ -23,13 +23,13 @@ type FetchConfig struct {
 	Proxy           string
 }
 
-// FetchCommand encapsulates the fetch command functionality
+// FetchCommand holds state for the fetch subcommand.
 type FetchCommand struct {
 	config *FetchConfig
 	core   core.Core
 }
 
-// NewFetchCommand creates a new instance of the fetch command
+// NewFetchCommand builds the cobra command for fetching subscription configs.
 func NewFetchCommand() *cobra.Command {
 	fc := &FetchCommand{
 		config: &FetchConfig{},
@@ -38,7 +38,6 @@ func NewFetchCommand() *cobra.Command {
 	return fc.createCommand()
 }
 
-// createCommand creates and configures the cobra command
 func (fc *FetchCommand) createCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "fetch",
@@ -55,7 +54,6 @@ func (fc *FetchCommand) createCommand() *cobra.Command {
 	return cmd
 }
 
-// addFlags adds command-line flags to the command
 func (fc *FetchCommand) addFlags(cmd *cobra.Command) {
 	flags := cmd.Flags()
 	flags.Int64Var(&fc.config.SubscriptionID, "id", 0, "The ID of the subscription from the DB")

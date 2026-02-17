@@ -8,6 +8,12 @@ export interface ProxySettings {
     inboundUUID: string;
     rotationInterval: number;
     maximumAllowedDelay: number;
+    batchSize: number;
+    concurrency: number;
+    healthCheckInterval: number;
+    drainTimeout: number;
+    blacklistStrikes: number;
+    blacklistDuration: number;
     enableTls: boolean;
     tlsCertPath: string;
     tlsKeyPath: string;

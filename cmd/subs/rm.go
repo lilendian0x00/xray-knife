@@ -8,7 +8,7 @@ import (
 	"strconv"
 )
 
-// RmCmd represents the rm command
+// RmCmd deletes a subscription from the DB by ID.
 var RmCmd = &cobra.Command{
 	Use:   "rm [ID]",
 	Short: "Removes a subscription from the DB by its ID",

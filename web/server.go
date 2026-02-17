@@ -20,7 +20,7 @@ import (
 //go:embed dist
 var embeddedFiles embed.FS
 
-// Server represents the web application server.
+// Server is the main web server.
 type Server struct {
 	listenAddr  string
 	router      *http.ServeMux
@@ -30,7 +30,7 @@ type Server struct {
 	authDetails *AuthDetails
 }
 
-// NewServer creates and initializes a new web server.
+// NewServer builds the web server, sets up auth, and configures routing.
 func NewServer(listenAddr, user, pass, secret string) (*Server, error) {
 	hub := newHub()
 	go hub.run()
@@ -66,7 +66,7 @@ func NewServer(listenAddr, user, pass, secret string) (*Server, error) {
 	return s, nil
 }
 
-// Run starts the web server and handles graceful shutdown on SIGINT/SIGTERM.
+// Run starts listening and blocks until SIGINT/SIGTERM or an error.
 func (s *Server) Run() error {
 	srv := &http.Server{
 		Addr:    s.listenAddr,
@@ -221,7 +221,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, http.StatusOK, map[string]string{"message": "logged out"})
 }
 
-// handleSSE handles Server-Sent Events connections.
+// handleSSE keeps an SSE connection open and streams events to the client.
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	// Validate auth cookie if auth is enabled
 	if s.authDetails != nil && s.authDetails.Username != "" {

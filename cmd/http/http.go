@@ -24,7 +24,7 @@ import (
 	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
 )
 
-// HttpCmd represents the http command
+// HttpCmd is the http subcommand.
 var HttpCmd = newHttpCommand()
 
 // Config holds all command configuration options
@@ -61,7 +61,6 @@ type Config struct {
 	PingInterval        uint16
 }
 
-// validateConfig validates the configuration options
 func validateConfig(cfg *Config) error {
 	validCores := map[string]bool{"auto": true, "xray": true, "singbox": true}
 	if !validCores[cfg.CoreType] {
@@ -94,7 +93,6 @@ func validateConfig(cfg *Config) error {
 	return nil
 }
 
-// newHttpCommand creates and returns the HTTP command
 func newHttpCommand() *cobra.Command {
 	config := &Config{}
 
@@ -177,7 +175,7 @@ Use --from-db to test configs from the database library.`,
 	return cmd
 }
 
-// handlePingMode handles the continuous HTTP test.
+// handlePingMode runs a continuous ping loop until the user hits Ctrl+C.
 func handlePingMode(examiner *pkghttp.Examiner, config *Config) error {
 	pinger, err := examiner.Core.CreateProtocol(config.ConfigLink)
 	if err != nil {
@@ -250,7 +248,7 @@ func handlePingMode(examiner *pkghttp.Examiner, config *Config) error {
 	}
 }
 
-// handleMultipleConfigs handles testing multiple configurations
+// handleMultipleConfigs runs a batch test with a progress bar and saves results.
 func handleMultipleConfigs(examiner *pkghttp.Examiner, config *Config, links []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -384,7 +382,6 @@ func handleMultipleConfigs(examiner *pkghttp.Examiner, config *Config, links []s
 	return processor.SaveResults(results)
 }
 
-// handleSingleConfig handles testing a single configuration
 func handleSingleConfig(examiner *pkghttp.Examiner, config *Config) {
 	examiner.Verbose = true
 	res, err := examiner.ExamineConfig(context.Background(), config.ConfigLink)
@@ -425,7 +422,6 @@ func printConfiguration(config *Config, totalConfigs int) {
 	fmt.Println()
 }
 
-// addFlags adds all command-line flags to the command
 func addFlags(cmd *cobra.Command, config *Config) {
 	flags := cmd.Flags()
 

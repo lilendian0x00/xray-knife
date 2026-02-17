@@ -16,10 +16,9 @@ type tcpCmdConfig struct {
 	configLink string
 }
 
-// TcpCmd represents the tcp command
+// TcpCmd is the tcp subcommand.
 var TcpCmd = newTcpCommand()
 
-// newTcpCommand creates and returns the tcp command
 func newTcpCommand() *cobra.Command {
 	// cfg holds the configuration for this command, populated by flags
 	cfg := &tcpCmdConfig{}

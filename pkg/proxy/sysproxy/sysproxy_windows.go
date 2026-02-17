@@ -22,7 +22,7 @@ var (
 
 type windowsManager struct{}
 
-// New returns a Manager for Windows.
+// New returns a Windows proxy manager.
 func New() (Manager, error) {
 	return &windowsManager{}, nil
 }

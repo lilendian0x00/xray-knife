@@ -20,7 +20,7 @@ var migrationsFS embed.FS
 // DB is the global connection pool for the application. It is initialized by InitDB.
 var DB *sqlx.DB
 
-// InitDB initializes the SQLite database connection, runs migrations, and sets up the global DB variable.
+// InitDB opens the SQLite connection, runs migrations, and sets the global DB.
 func InitDB(dbPath string) error {
 	// The `_pragma=foreign_keys(1)` is crucial for enforcing data integrity.
 	db, err := sqlx.Open("sqlite", dbPath+"?_pragma=foreign_keys(1)")

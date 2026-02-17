@@ -27,7 +27,7 @@ type parseCmdConfig struct {
 	outputJSON      bool
 }
 
-// ParseCmd represents the parse command
+// ParseCmd is the parse subcommand.
 var ParseCmd = newParseCommand()
 
 // removeEmptyValues recursively traverses a map or slice and removes keys/elements
@@ -110,7 +110,7 @@ func removeEmptyValues(data interface{}) interface{} {
 	return data
 }
 
-// generateAndPrintXrayJSON creates a full xray-core configuration from a link and prints it.
+// generateAndPrintXrayJSON builds a full xray-core config from a link and prints it as cleaned JSON.
 func generateAndPrintXrayJSON(configLink string) error {
 	xrayCore := xray.NewXrayService(false, false)
 

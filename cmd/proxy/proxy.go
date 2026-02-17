@@ -33,12 +33,17 @@ type proxyCmdConfig struct {
 	insecureTLS         bool
 	maximumAllowedDelay uint16
 	inboundConfigLink   string
+	batchSize           uint16
+	concurrency         uint16
+	healthCheckInterval uint32
+	drainTimeout        uint16
+	blacklistStrikes    uint16
+	blacklistDuration   uint32
 }
 
-// ProxyCmd represents the proxy command
+// ProxyCmd is the proxy subcommand.
 var ProxyCmd = newProxyCommand()
 
-// newProxyCommand creates the cobra command for the proxy service
 func newProxyCommand() *cobra.Command {
 	cfg := &proxyCmdConfig{}
 
@@ -83,6 +88,12 @@ Use --file, --config, or --stdin to provide configs for a single session without
 				InsecureTLS:         cfg.insecureTLS,
 				RotationInterval:    cfg.rotationInterval,
 				MaximumAllowedDelay: cfg.maximumAllowedDelay,
+				BatchSize:           cfg.batchSize,
+				Concurrency:         cfg.concurrency,
+				HealthCheckInterval: cfg.healthCheckInterval,
+				DrainTimeout:        cfg.drainTimeout,
+				BlacklistStrikes:    cfg.blacklistStrikes,
+				BlacklistDuration:   cfg.blacklistDuration,
 				ConfigLinks:         links,
 			}
 
@@ -166,6 +177,13 @@ func addFlags(cmd *cobra.Command, cfg *proxyCmdConfig) {
 
 	flags.BoolVarP(&cfg.verbose, "verbose", "v", false, "Enable verbose logging for the selected core")
 	flags.BoolVarP(&cfg.insecureTLS, "insecure", "e", false, "Allow insecure TLS connections (e.g., self-signed certs)")
+
+	flags.Uint16VarP(&cfg.batchSize, "batch", "b", 0, "Number of configs to test per rotation (0=auto)")
+	flags.Uint16VarP(&cfg.concurrency, "concurrency", "n", 0, "Number of concurrent test threads (0=auto)")
+	flags.Uint32Var(&cfg.healthCheckInterval, "health-check", 30, "Health check interval in seconds (0=disabled)")
+	flags.Uint16Var(&cfg.drainTimeout, "drain", 0, "Seconds to keep old connection alive during rotation (0=immediate)")
+	flags.Uint16Var(&cfg.blacklistStrikes, "blacklist-strikes", 3, "Failures before blacklisting a config (0=disabled)")
+	flags.Uint32Var(&cfg.blacklistDuration, "blacklist-duration", 600, "Seconds to blacklist a failed config")
 
 	// Mark mutually exclusive flags
 	cmd.MarkFlagsMutuallyExclusive("file", "config", "stdin")

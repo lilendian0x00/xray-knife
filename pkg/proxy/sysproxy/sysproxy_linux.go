@@ -22,7 +22,7 @@ type linuxManager struct {
 	kreadConfig  string // "kreadconfig5" or "kreadconfig6"
 }
 
-// New returns a Manager for the current Linux desktop environment.
+// New detects the Linux desktop environment and returns the right Manager.
 func New() (Manager, error) {
 	m := &linuxManager{}
 	m.de = detectDE()

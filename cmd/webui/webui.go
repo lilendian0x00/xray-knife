@@ -29,10 +29,10 @@ type webuiCmdConfig struct {
 	AuthSecret    string
 }
 
-// WebUICmd represents the webui command
+// WebUICmd is the webui subcommand.
 var WebUICmd = newWebUICommand()
 
-// generateJWTSecret creates a cryptographically secure random string for use as a JWT secret.
+// generateJWTSecret makes a random base64 string for use as a JWT secret.
 func generateJWTSecret(length int) (string, error) {
 	bytes := make([]byte, length)
 	if _, err := rand.Read(bytes); err != nil {

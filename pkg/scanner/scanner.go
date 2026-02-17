@@ -92,7 +92,7 @@ func (s *ScannerService) notifyIPScanned() {
 	}
 }
 
-// ScanResult represents the outcome of scanning a single IP.
+// ScanResult holds the outcome for a single scanned IP.
 type ScanResult struct {
 	IP        string        `csv:"ip" json:"ip"`
 	Latency   time.Duration `csv:"-" json:"-"`
@@ -116,7 +116,7 @@ func (r *ScanResult) PrepareForMarshal() {
 	}
 }
 
-// NewScannerService creates a new, configured scanner service.
+// NewScannerService builds a scanner service from the given config, resuming previous results if asked.
 func NewScannerService(config ScannerConfig, logger *log.Logger) (*ScannerService, error) {
 	s := &ScannerService{
 		config:     config,
@@ -176,7 +176,7 @@ func NewScannerService(config ScannerConfig, logger *log.Logger) (*ScannerServic
 	return s, nil
 }
 
-// Run starts the scan and sends results to progressChan. It blocks until complete or context is cancelled.
+// Run scans all IPs, sending results to progressChan. Blocks until done or ctx is canceled.
 func (s *ScannerService) Run(ctx context.Context, progressChan chan<- *ScanResult) error {
 	defer close(progressChan)
 

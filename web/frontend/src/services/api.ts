@@ -30,6 +30,12 @@ export const api = {
             xhttpMode: settings.inboundTransport === 'xhttp' ? settings.transportOptions.xhttp.mode : '',
             xhttpHost: settings.inboundTransport === 'xhttp' ? settings.transportOptions.xhttp.host : '',
             xhttpPath: settings.inboundTransport === 'xhttp' ? settings.transportOptions.xhttp.path : '',
+            batchSize: settings.batchSize,
+            concurrency: settings.concurrency,
+            healthCheckInterval: settings.healthCheckInterval,
+            drainTimeout: settings.drainTimeout,
+            blacklistStrikes: settings.blacklistStrikes,
+            blacklistDuration: settings.blacklistDuration,
         };
         return axios.post('/api/v1/proxy/start', payload);
     },
