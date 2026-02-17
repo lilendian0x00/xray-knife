@@ -205,6 +205,11 @@ func (p *ProxyServiceRunner) run(ctx context.Context) {
 	defer p.recoverAndLogPanic()
 	defer p.wg.Done()
 	defer p.SetState(StateIdle)
+	defer func() {
+		if p.service != nil {
+			p.service.Close()
+		}
+	}()
 
 	// Immediately set state to running and notify UI.
 	p.SetState(StateRunning)

@@ -1,4 +1,5 @@
 export interface ProxySettings {
+    mode: 'inbound' | 'system';
     coreType: 'xray' | 'sing-box';
     listenAddr: string;
     listenPort: string;

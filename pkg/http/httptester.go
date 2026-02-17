@@ -19,7 +19,6 @@ import (
 	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
 )
 
-// HttpTestRequest encapsulates all parameters for an HTTP test job.
 type HttpTestRequest struct {
 	Links       []string `json:"links"`
 	ThreadCount uint16   `json:"threadCount"`
@@ -27,10 +26,10 @@ type HttpTestRequest struct {
 	Options
 }
 
-// ConfigResults represents a slice of test results
+// ConfigResults is a sortable slice of results
 type ConfigResults []*Result
 
-// ResultProcessor handles the processing and storage of test results
+// ResultProcessor saves test results to files and DB
 type ResultProcessor struct {
 	runID      int64
 	outputFile string
@@ -45,7 +44,6 @@ type ResultProcessorOptions struct {
 	Sorted     bool
 }
 
-// NewResultProcessor creates a new ResultProcessor instance
 func NewResultProcessor(opts ResultProcessorOptions) *ResultProcessor {
 	return &ResultProcessor{
 		runID:      opts.RunID,
@@ -55,11 +53,10 @@ func NewResultProcessor(opts ResultProcessorOptions) *ResultProcessor {
 	}
 }
 
-// Sort interface implementation for ConfigResults
+// sort.Interface for ConfigResults
 func (cr ConfigResults) Len() int { return len(cr) }
 func (cr ConfigResults) Less(i, j int) bool {
-	// A more robust sorting: prioritize lower latency, then higher download, then higher upload.
-	// Treat negative delay (failed) as infinity so failed results sort last.
+	// delay=-1 means failed; treat as infinity so they sort to the end
 	di, dj := cr[i].Delay, cr[j].Delay
 	if di < 0 {
 		di = math.MaxInt64
@@ -77,7 +74,7 @@ func (cr ConfigResults) Less(i, j int) bool {
 }
 func (cr ConfigResults) Swap(i, j int) { cr[i], cr[j] = cr[j], cr[i] }
 
-// TestManager handles the concurrent testing of configurations
+// TestManager runs configs through the examiner concurrently
 type TestManager struct {
 	examiner    *Examiner
 	logger      *log.Logger // Optional logger for web UI
@@ -85,7 +82,6 @@ type TestManager struct {
 	verbose     bool
 }
 
-// NewTestManager creates a new TestManager instance
 func NewTestManager(examiner *Examiner, threadCount uint16, verbose bool, logger *log.Logger) *TestManager {
 	return &TestManager{
 		examiner:    examiner,
@@ -204,7 +200,6 @@ func (rp *ResultProcessor) RewriteFileSorted(results ConfigResults) {
 	}
 }
 
-// saveTxtResults saves results in text format (private helper method)
 func (rp *ResultProcessor) saveTxtResults(results ConfigResults) error {
 	var validConfigs []string
 	for _, v := range results {
@@ -223,7 +218,6 @@ func (rp *ResultProcessor) saveTxtResults(results ConfigResults) error {
 	return nil
 }
 
-// saveCSVResults saves results in CSV format (private helper method)
 func (rp *ResultProcessor) saveCSVResults(results ConfigResults) error {
 	out, err := gocsv.MarshalString(&results)
 	if err != nil {

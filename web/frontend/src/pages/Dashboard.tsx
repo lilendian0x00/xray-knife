@@ -68,7 +68,7 @@ export default function Dashboard() {
 
     const ThemeIcon = theme === 'light' ? Sun : theme === 'dark' ? Moon : Monitor;
 
-    // --- Terminal Lifecycle (create once, never destroy on layout changes) ---
+    // create terminal once and keep it alive across layout changes
     useEffect(() => {
         if (terminalRef.current && !term.current) {
             const terminal = new Terminal({
@@ -141,7 +141,6 @@ export default function Dashboard() {
     }, [logSearchTerm, isAutoScroll]);
 
 
-    // --- Initial State Fetching ---
     useEffect(() => {
         const fetchInitialState = async () => {
             try {

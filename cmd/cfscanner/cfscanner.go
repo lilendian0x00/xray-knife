@@ -59,7 +59,7 @@ pass a file containing one subnet per line.`,
 		}
 
 		progressChan := make(chan *pkgscanner.ScanResult, cliConfig.ThreadCount)
-		// Use a map to store results, with the IP as the key. This prevents duplicates.
+		// keyed by IP to deduplicate
 		finalResultsMap := make(map[string]*pkgscanner.ScanResult)
 		var mapMu sync.Mutex
 		var wg sync.WaitGroup

@@ -66,11 +66,10 @@ export function HttpTesterTab() {
     const isBusy = httpTestStatus === 'running' || httpTestStatus === 'stopping' || httpTestStatus === 'starting';
     const progressValue = httpTestProgress.total > 0 ? (httpTestProgress.completed / httpTestProgress.total) * 100 : 0;
 
-    // Disable auto-animate for large datasets to avoid performance issues
+    // skip animation past the threshold, it tanks perf
     const [animationParent] = useAutoAnimate<HTMLTableSectionElement>();
     const tableRef = useVirtual ? undefined : animationParent;
 
-    // Virtualization
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const rowVirtualizer = useVirtualizer({
         count: useVirtual ? sortedResults.length : 0,

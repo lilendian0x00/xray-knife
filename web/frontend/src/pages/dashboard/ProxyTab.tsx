@@ -27,8 +27,8 @@ export function ProxyTab() {
 
     const [proxyConfigs, setProxyConfigs] = usePersistentState('proxy-configs-input', '');
 
-
-    const isTlsCompatible = proxySettings.inboundProtocol === 'vless' || proxySettings.inboundProtocol === 'vmess';
+    const isSystemMode = proxySettings.mode === 'system';
+    const isTlsCompatible = !isSystemMode && (proxySettings.inboundProtocol === 'vless' || proxySettings.inboundProtocol === 'vmess');
     const showTransportSettings = isTlsCompatible && ['ws', 'grpc', 'xhttp'].includes(proxySettings.inboundTransport);
 
     useEffect(() => {
@@ -40,7 +40,7 @@ export function ProxyTab() {
 
     const handleStartProxy = async () => {
         if (!proxyConfigs.trim()) { toast.error("Proxy configurations cannot be empty."); return; }
-        if (proxySettings.enableTls && (!proxySettings.tlsCertPath.trim() || !proxySettings.tlsKeyPath.trim())) {
+        if (!isSystemMode && proxySettings.enableTls && (!proxySettings.tlsCertPath.trim() || !proxySettings.tlsKeyPath.trim())) {
             toast.error("TLS Certificate and Key paths are required when TLS is enabled.");
             return;
         }
@@ -158,11 +158,38 @@ export function ProxyTab() {
             </CardHeader>
             <CardContent className="flex flex-col gap-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div className="flex flex-col gap-2"><Label htmlFor="proxy-mode">Mode</Label><Select value={proxySettings.mode} onValueChange={(v) => updateProxySettings({ mode: v as any })} disabled={proxyStatus !== 'stopped'}><SelectTrigger id="proxy-mode"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="inbound">Inbound</SelectItem><SelectItem value="system">System Proxy</SelectItem></SelectContent></Select></div>
                         <div className="flex flex-col gap-2"><Label htmlFor="core-type-proxy">Core</Label><Select value={proxySettings.coreType} onValueChange={(v) => updateProxySettings({ coreType: v as any })} disabled={proxyStatus !== 'stopped'}><SelectTrigger id="core-type-proxy"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="xray">Xray</SelectItem><SelectItem value="sing-box">Sing-box</SelectItem></SelectContent></Select></div>
-                        <div className="flex flex-col gap-2"><Label htmlFor="inbound-protocol">Protocol</Label><Select value={proxySettings.inboundProtocol} onValueChange={(v) => updateProxySettings({ inboundProtocol: v as any })} disabled={proxyStatus !== 'stopped'}><SelectTrigger id="inbound-protocol"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="socks">SOCKS</SelectItem><SelectItem value="vless">VLESS</SelectItem><SelectItem value="vmess">VMess</SelectItem></SelectContent></Select></div>
-                        <div className="flex flex-col gap-2"><Label htmlFor="inbound-transport">Transport</Label><Select value={proxySettings.inboundTransport} onValueChange={(v) => updateProxySettings({ inboundTransport: v as any })} disabled={proxyStatus !== 'stopped' || proxySettings.inboundProtocol === 'socks'}><SelectTrigger id="inbound-transport"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="tcp">TCP</SelectItem><SelectItem value="ws">WebSocket</SelectItem><SelectItem value="grpc">gRPC</SelectItem><SelectItem value="xhttp">XHTTP</SelectItem></SelectContent></Select></div>
                     </div>
+
+                    <AnimatePresence>
+                        {isSystemMode && (
+                            <motion.p
+                                className="sm:col-span-2 text-sm text-muted-foreground"
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                            >
+                                System mode creates a local SOCKS proxy and configures your OS to route traffic through it. Protocol, transport, UUID, and TLS settings are managed automatically.
+                            </motion.p>
+                        )}
+                    </AnimatePresence>
+
+                    <AnimatePresence>
+                        {!isSystemMode && (
+                            <motion.div
+                                className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-2"
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                            >
+                                <div className="flex flex-col gap-2"><Label htmlFor="inbound-protocol">Protocol</Label><Select value={proxySettings.inboundProtocol} onValueChange={(v) => updateProxySettings({ inboundProtocol: v as any })} disabled={proxyStatus !== 'stopped'}><SelectTrigger id="inbound-protocol"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="socks">SOCKS</SelectItem><SelectItem value="vless">VLESS</SelectItem><SelectItem value="vmess">VMess</SelectItem></SelectContent></Select></div>
+                                <div className="flex flex-col gap-2"><Label htmlFor="inbound-transport">Transport</Label><Select value={proxySettings.inboundTransport} onValueChange={(v) => updateProxySettings({ inboundTransport: v as any })} disabled={proxyStatus !== 'stopped' || proxySettings.inboundProtocol === 'socks'}><SelectTrigger id="inbound-transport"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="tcp">TCP</SelectItem><SelectItem value="ws">WebSocket</SelectItem><SelectItem value="grpc">gRPC</SelectItem><SelectItem value="xhttp">XHTTP</SelectItem></SelectContent></Select></div>
+                                <div className="flex flex-col gap-2"><Label htmlFor="inbound-uuid">Inbound UUID</Label><Input id="inbound-uuid" value={proxySettings.inboundUUID} onChange={(e) => updateProxySettings({ inboundUUID: e.target.value })} disabled={proxyStatus !== 'stopped'} /></div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
 
                     <AnimatePresence>
                         {showTransportSettings && (
@@ -174,7 +201,6 @@ export function ProxyTab() {
 
                     <div className="flex flex-col gap-2"><Label htmlFor="listen-addr">Listen Address</Label><Input id="listen-addr" value={proxySettings.listenAddr} onChange={(e) => updateProxySettings({ listenAddr: e.target.value })} disabled={proxyStatus !== 'stopped'} /></div>
                     <div className="flex flex-col gap-2"><Label htmlFor="listen-port">Listen Port</Label><Input id="listen-port" value={proxySettings.listenPort} onChange={(e) => updateProxySettings({ listenPort: e.target.value })} disabled={proxyStatus !== 'stopped'} /></div>
-                    <div className="flex flex-col gap-2"><Label htmlFor="inbound-uuid">Inbound UUID</Label><Input id="inbound-uuid" value={proxySettings.inboundUUID} onChange={(e) => updateProxySettings({ inboundUUID: e.target.value })} disabled={proxyStatus !== 'stopped'} /></div>
                     <div className="flex flex-col gap-2"><Label htmlFor="rotation-interval">Rotation Interval (s)</Label><InputNumber id="rotation-interval" min={1} value={proxySettings.rotationInterval} onChange={(v) => updateProxySettings({ rotationInterval: v })} disabled={proxyStatus !== 'stopped'} /></div>
                     <div className="flex flex-col gap-2">
                         <Label htmlFor="max-delay-proxy">Max Delay (ms)</Label>

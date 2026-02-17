@@ -728,9 +728,8 @@ func saveResultsToCSV(filePath string, results []*ScanResult) error {
 	return gocsv.MarshalFile(&results, file)
 }
 
-// connClosingBody wraps a response body so that closing it also closes the
-// underlying network connection. This prevents connection leaks in the custom
-// BypassJA3Transport which manages connections outside of http.Transport's pool.
+// connClosingBody also closes the underlying conn on Close() because
+// BypassJA3Transport manages connections outside of http.Transport's pool.
 type connClosingBody struct {
 	io.ReadCloser
 	conn net.Conn

@@ -3,10 +3,10 @@ package proxy
 import (
 	"bufio"
 	"context"
-	"fmt" // Import fmt
+	"fmt"
 	"os"
 	"os/signal"
-	"strings" // Import strings
+	"strings"
 	"syscall"
 
 	pkgproxy "github.com/lilendian0x00/xray-knife/v7/pkg/proxy"
@@ -86,11 +86,12 @@ Use --file, --config, or --stdin to provide configs for a single session without
 				ConfigLinks:         links,
 			}
 
-			// Create the new proxy service
+				// Create the new proxy service
 			service, err := pkgproxy.New(serviceConfig, nil)
 			if err != nil {
 				return err
 			}
+			defer service.Close()
 
 			// Set up context for graceful shutdown
 			ctx, cancel := context.WithCancel(context.Background())
@@ -153,7 +154,10 @@ func addFlags(cmd *cobra.Command, cfg *proxyCmdConfig) {
 	flags.StringVarP(&cfg.inboundUUID, "uuid", "g", "random", "Inbound custom UUID to use (default: random)")
 
 	flags.StringVarP(&cfg.inboundConfigLink, "inbound-config", "I", "", "Custom config link for the inbound proxy")
-	flags.StringVarP(&cfg.mode, "mode", "m", "inbound", "Proxy operating mode: inbound or system (not implemented)")
+	flags.StringVarP(&cfg.mode, "mode", "m", "inbound", "Proxy operating mode: inbound (local proxy) or system (set OS system proxy)")
+	cmd.RegisterFlagCompletionFunc("mode", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"inbound", "system"}, cobra.ShellCompDirectiveNoFileComp
+	})
 
 	flags.StringVarP(&cfg.CoreType, "core", "z", "xray", "Core type: (xray, sing-box)")
 	cmd.RegisterFlagCompletionFunc("core", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

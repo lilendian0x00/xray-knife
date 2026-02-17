@@ -11,8 +11,6 @@ import { type ProxyDetails } from "@/types/dashboard";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
-// --- Sub-components for the new design ---
-
 interface DetailItemProps {
     label: string;
     icon: React.ElementType;
@@ -20,9 +18,6 @@ interface DetailItemProps {
     className?: string;
 }
 
-/**
- * A compact, flexible row item for displaying a piece of data.
- */
 const DetailItem = ({ label, icon: Icon, children, className }: DetailItemProps) => {
     if (!children) return null;
     const content = (
@@ -43,9 +38,7 @@ const DetailItem = ({ label, icon: Icon, children, className }: DetailItemProps)
 };
 
 
-/**
- * A memoized countdown timer to prevent unnecessary re-renders.
- */
+// memoized so parent re-renders don't reset the interval
 const Countdown = React.memo(({ to }: { to: string }) => {
     const calculateTimeLeft = () => {
         const difference = +new Date(to) - +new Date();
@@ -68,8 +61,6 @@ const Countdown = React.memo(({ to }: { to: string }) => {
     );
 });
 
-
-// --- Main Card Component ---
 
 const StoppedContent = () => (
     <motion.div

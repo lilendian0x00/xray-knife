@@ -76,10 +76,9 @@ export function CfScannerTab() {
     }, [scanResults, onlySpeedtestResults, debouncedSearchTerm, sortField, sortDirection]);
 
     const useVirtual = filteredAndSortedResults.length > VIRTUALIZE_THRESHOLD;
-    // Disable auto-animate for large datasets
+    // skip animation past the threshold, it tanks perf
     const tableRef = useVirtual ? undefined : animationParent;
 
-    // Virtualization
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const rowVirtualizer = useVirtualizer({
         count: useVirtual ? filteredAndSortedResults.length : 0,

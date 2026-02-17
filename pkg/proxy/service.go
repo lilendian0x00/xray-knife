@@ -19,6 +19,7 @@ import (
 	pkgsingbox "github.com/lilendian0x00/xray-knife/v7/pkg/core/singbox"
 	pkgxray "github.com/lilendian0x00/xray-knife/v7/pkg/core/xray"
 	pkghttp "github.com/lilendian0x00/xray-knife/v7/pkg/http"
+	"github.com/lilendian0x00/xray-knife/v7/pkg/proxy/sysproxy"
 	"github.com/lilendian0x00/xray-knife/v7/utils"
 	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
 	"github.com/xtls/xray-core/common/uuid"
@@ -65,18 +66,28 @@ type Details struct {
 
 // Service is the main proxy service engine.
 type Service struct {
-	config           Config
-	core             core.Core
-	logger           *log.Logger
-	inbound          protocol.Protocol
-	activeOutbound   *pkghttp.Result
-	mu               sync.RWMutex
-	rotationStatus   string
-	nextRotationTime time.Time
+	config            Config
+	core              core.Core
+	logger            *log.Logger
+	inbound           protocol.Protocol
+	activeOutbound    *pkghttp.Result
+	mu                sync.RWMutex
+	rotationStatus    string
+	nextRotationTime  time.Time
+	sysProxyManager   sysproxy.Manager   // nil if mode != "system"
+	prevProxySettings *sysproxy.Settings // saved OS settings before modification
 }
 
 // New creates a new proxy Service.
 func New(config Config, logger *log.Logger) (*Service, error) {
+	// Crash recovery: restore stale system proxy settings from a previous unclean exit.
+	if stale, err := sysproxy.LoadState(); err == nil && stale != nil {
+		if mgr, mgrErr := sysproxy.New(); mgrErr == nil {
+			mgr.Restore(stale)
+		}
+		sysproxy.ClearState()
+	}
+
 	s := &Service{
 		config:         config,
 		logger:         logger,
@@ -125,6 +136,28 @@ func New(config Config, logger *log.Logger) (*Service, error) {
 	}
 	s.logf(customlog.Info, "============================\n\n")
 
+	// If system mode, configure the OS to route traffic through our local SOCKS proxy.
+	if config.Mode == "system" {
+		mgr, err := sysproxy.New()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create system proxy manager: %w", err)
+		}
+		prev, err := mgr.Get()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read current system proxy settings: %w", err)
+		}
+		if err := sysproxy.SaveState(prev); err != nil {
+			return nil, fmt.Errorf("failed to save system proxy state for crash recovery: %w", err)
+		}
+		if err := mgr.Set(config.ListenAddr, config.ListenPort); err != nil {
+			sysproxy.ClearState()
+			return nil, fmt.Errorf("failed to set system proxy: %w", err)
+		}
+		s.sysProxyManager = mgr
+		s.prevProxySettings = prev
+		s.logf(customlog.Success, "System proxy configured: http://%s:%s\n", config.ListenAddr, config.ListenPort)
+	}
+
 	return s, nil
 }
 
@@ -161,6 +194,20 @@ func (s *Service) logf(logType customlog.Type, format string, v ...interface{}) 
 		s.logger.Printf(format, v...)
 	} else {
 		customlog.Printf(logType, format, v...)
+	}
+}
+
+// Close restores the system proxy settings if they were modified, and cleans up state.
+func (s *Service) Close() {
+	if s.sysProxyManager != nil {
+		s.logf(customlog.Processing, "Restoring system proxy settings...\n")
+		if err := s.sysProxyManager.Restore(s.prevProxySettings); err != nil {
+			s.logf(customlog.Failure, "Failed to restore system proxy settings: %v\n", err)
+		} else {
+			s.logf(customlog.Success, "System proxy settings restored.\n")
+		}
+		sysproxy.ClearState()
+		s.sysProxyManager = nil
 	}
 }
 
@@ -416,7 +463,19 @@ func (s *Service) createInbound() (protocol.Protocol, error) {
 	}
 
 	if s.config.Mode == "system" {
-		return nil, errors.New(`mode "system" is not yet implemented`)
+		// System mode uses an HTTP inbound (xray) or mixed HTTP+SOCKS inbound (sing-box)
+		// so the OS system proxy settings work with all browsers.
+		switch s.config.CoreType {
+		case "xray":
+			return &pkgxray.Http{
+				Remark: "Listener", Address: s.config.ListenAddr, Port: s.config.ListenPort,
+			}, nil
+		case "sing-box":
+			return &pkgsingbox.Http{
+				Remark: "Listener", Address: s.config.ListenAddr, Port: s.config.ListenPort,
+			}, nil
+		}
+		return nil, fmt.Errorf("unsupported core type for system mode: %s", s.config.CoreType)
 	}
 
 	u := uuid.New()
