@@ -39,16 +39,18 @@ type HttpTestRun struct {
 }
 
 type HttpTestResult struct {
-	ID           int64          `db:"id"`
-	RunID        int64          `db:"run_id"`
-	ConfigLink   string         `db:"config_link"`
-	Status       string         `db:"status"`
-	Reason       sql.NullString `db:"reason"`
-	DelayMs      int64          `db:"delay_ms"`
-	DownloadMbps float64        `db:"download_mbps"`
-	UploadMbps   float64        `db:"upload_mbps"`
-	IPAddress    sql.NullString `db:"ip_address"`
-	IPLocation   sql.NullString `db:"ip_location"`
+	ID            int64          `db:"id"`
+	RunID         int64          `db:"run_id"`
+	ConfigLink    string         `db:"config_link"`
+	Status        string         `db:"status"`
+	Reason        sql.NullString `db:"reason"`
+	DelayMs       int64          `db:"delay_ms"`
+	DownloadMbps  float64        `db:"download_mbps"`
+	UploadMbps    float64        `db:"upload_mbps"`
+	IPAddress     sql.NullString `db:"ip_address"`
+	IPLocation    sql.NullString `db:"ip_location"`
+	TTFBMs        int64          `db:"ttfb_ms"`
+	ConnectTimeMs int64          `db:"connect_time_ms"`
 }
 
 type CfScanResult struct {
@@ -218,8 +220,8 @@ func InsertHttpTestResultsBatch(runID int64, results []HttpTestResult) error {
 	defer tx.Rollback()
 
 	stmt, err := tx.PrepareNamedContext(context.Background(), `
-        INSERT INTO http_test_results (run_id, config_link, status, reason, delay_ms, download_mbps, upload_mbps, ip_address, ip_location)
-        VALUES (:run_id, :config_link, :status, :reason, :delay_ms, :download_mbps, :upload_mbps, :ip_address, :ip_location)
+        INSERT INTO http_test_results (run_id, config_link, status, reason, delay_ms, download_mbps, upload_mbps, ip_address, ip_location, ttfb_ms, connect_time_ms)
+        VALUES (:run_id, :config_link, :status, :reason, :delay_ms, :download_mbps, :upload_mbps, :ip_address, :ip_location, :ttfb_ms, :connect_time_ms)
     `)
 	if err != nil {
 		return fmt.Errorf("could not prepare named statement for http_test_results: %w", err)

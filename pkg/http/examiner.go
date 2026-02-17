@@ -6,8 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -35,9 +38,11 @@ type Result struct {
 	RealIPAddr    string            `csv:"ip" json:"ip"`             // Real ip address (req to cloudflare.com/cdn-cgi/trace)
 	Delay         int64             `csv:"delay" json:"delay"`       // millisecond
 	HTTPCode      int               `csv:"code" json:"code"`         // HTTP status code of the tested URL
-	DownloadSpeed float32           `csv:"download" json:"download"` // mbps
-	UploadSpeed   float32           `csv:"upload" json:"upload"`     // mbps
-	IpAddrLoc     string            `csv:"location" json:"location"` // IP address location
+	DownloadSpeed float32           `csv:"download" json:"download"`       // mbps
+	UploadSpeed   float32           `csv:"upload" json:"upload"`           // mbps
+	IpAddrLoc     string            `csv:"location" json:"location"`       // IP address location
+	TTFB          int64             `csv:"ttfb" json:"ttfb"`               // Time to first byte (ms)
+	ConnectTime   int64             `csv:"connect_time" json:"connectTime"` // Connection time (ms)
 }
 
 type Examiner struct {
@@ -49,10 +54,12 @@ type Examiner struct {
 	singboxCore  core.Core
 	// =========================== //
 
-	// Maximum allowed delay (in ms)
-	MaxDelay    uint16
-	Verbose     bool
-	ShowBody    bool
+	// Maximum allowed delay (in ms) — used as the pass/fail latency threshold
+	MaxDelay uint16
+	// Connection timeout (in ms) — used for the HTTP client timeout
+	Timeout  uint16
+	Verbose  bool
+	ShowBody bool
 	InsecureTLS bool
 
 	DoSpeedtest bool
@@ -60,18 +67,20 @@ type Examiner struct {
 
 	TestEndpoint           string
 	TestEndpointHttpMethod string
-	SpeedtestKbAmount      uint32
+	SpeedtestKbAmount      uint64
+	Retries                uint8
+
+	Logger *log.Logger `json:"-"`
 }
 
-var (
-	failedDelay int64 = 99999
-)
+const FailedDelay int64 = -1
 
 type Options struct {
 	Core         string    `json:"core"`
 	CoreInstance core.Core `json:"-"` // This field should not be part of the JSON payload
 
 	MaxDelay               uint16 `json:"maxDelay"`
+	Timeout                uint16 `json:"timeout"` // Separate timeout for HTTP client (0 = use MaxDelay)
 	Verbose                bool   `json:"verbose"`
 	ShowBody               bool   `json:"showBody"`
 	InsecureTLS            bool   `json:"insecureTLS"`
@@ -79,12 +88,14 @@ type Options struct {
 	DoIPInfo               bool   `json:"doIPInfo"`
 	TestEndpoint           string `json:"destURL"`
 	TestEndpointHttpMethod string `json:"httpMethod"`
-	SpeedtestKbAmount      uint32 `json:"speedtestAmount"`
+	SpeedtestKbAmount      uint64 `json:"speedtestAmount"`
+	Retries                uint8  `json:"retries"`
+	Logger                 *log.Logger `json:"-"`
 }
 
 func NewExaminer(opts Options) (*Examiner, error) {
+	// Set defaults first
 	e := &Examiner{
-		MaxDelay:               opts.MaxDelay,
 		Verbose:                opts.Verbose,
 		ShowBody:               opts.ShowBody,
 		InsecureTLS:            opts.InsecureTLS,
@@ -92,7 +103,38 @@ func NewExaminer(opts Options) (*Examiner, error) {
 		DoIPInfo:               opts.DoIPInfo,
 		TestEndpoint:           "https://cloudflare.com/cdn-cgi/trace",
 		TestEndpointHttpMethod: "GET",
+		MaxDelay:               5000,
 		SpeedtestKbAmount:      10000,
+	}
+
+	// Override from opts if non-zero
+	if opts.MaxDelay != 0 {
+		e.MaxDelay = opts.MaxDelay
+	}
+	if opts.SpeedtestKbAmount != 0 {
+		e.SpeedtestKbAmount = opts.SpeedtestKbAmount
+	}
+	if opts.TestEndpoint != "" {
+		e.TestEndpoint = opts.TestEndpoint
+	}
+	if opts.TestEndpointHttpMethod != "" {
+		e.TestEndpointHttpMethod = opts.TestEndpointHttpMethod
+	}
+
+	// Set Timeout: use explicit value if provided, otherwise default to MaxDelay
+	if opts.Timeout != 0 {
+		e.Timeout = opts.Timeout
+	} else {
+		e.Timeout = e.MaxDelay
+	}
+
+	e.Retries = opts.Retries
+
+	// Set logger: use provided logger or default to stdout
+	if opts.Logger != nil {
+		e.Logger = opts.Logger
+	} else {
+		e.Logger = log.New(os.Stdout, "", 0)
 	}
 
 	switch opts.Core {
@@ -108,19 +150,6 @@ func NewExaminer(opts Options) (*Examiner, error) {
 
 	if e.Core == nil {
 		return nil, fmt.Errorf("failed to create core of type: %s", opts.Core)
-	}
-
-	if opts.MaxDelay != 0 {
-		e.MaxDelay = opts.MaxDelay
-	}
-	if opts.SpeedtestKbAmount != 0 {
-		e.SpeedtestKbAmount = opts.SpeedtestKbAmount
-	}
-	if opts.TestEndpoint != "" {
-		e.TestEndpoint = opts.TestEndpoint
-	}
-	if opts.TestEndpointHttpMethod != "" {
-		e.TestEndpointHttpMethod = opts.TestEndpointHttpMethod
 	}
 
 	return e, nil
@@ -150,7 +179,7 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 	r := Result{
 		ConfigLink: link,
 		Status:     "passed",
-		Delay:      failedDelay,
+		Delay:      FailedDelay,
 		HTTPCode:   -1,
 		RealIPAddr: "null",
 		IpAddrLoc:  "null",
@@ -178,7 +207,7 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 	}
 
 	if e.Verbose {
-		fmt.Printf("%v%s: %s\n\n", proto.DetailsStr(), color.RedString("Link"), proto.GetLink())
+		e.Logger.Printf("%v%s: %s\n\n", proto.DetailsStr(), color.RedString("Link"), proto.GetLink())
 	}
 
 	r.Protocol = proto
@@ -191,7 +220,7 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 	}
 	r.TLS = generalConfig.TLS
 
-	client, instance, err := e.Core.MakeHttpClient(ctx, proto, time.Duration(e.MaxDelay)*time.Millisecond)
+	client, instance, err := e.Core.MakeHttpClient(ctx, proto, time.Duration(e.Timeout)*time.Millisecond)
 	if err != nil {
 		r.Status = "broken"
 		r.Reason = err.Error()
@@ -199,16 +228,22 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 	}
 	defer instance.Close()
 
-	delay, code, body, err := MeasureDelay(ctx, client, e.ShowBody, e.TestEndpoint, e.TestEndpointHttpMethod)
+	delayResult, err := MeasureDelayDetailed(ctx, client, e.TestEndpoint, e.TestEndpointHttpMethod)
 	if err != nil {
 		r.Status = "failed"
 		r.Reason = err.Error()
 		return r, err
 	}
-	r.Delay = delay
-	r.HTTPCode = code
+	if e.ShowBody {
+		e.Logger.Printf("Response body: \n%s\n", delayResult.Body)
+	}
+	r.Delay = delayResult.Delay
+	r.HTTPCode = delayResult.Code
+	r.TTFB = delayResult.TTFB
+	r.ConnectTime = delayResult.ConnectTime
+	body := delayResult.Body
 
-	if delay > int64(e.MaxDelay) {
+	if r.Delay > int64(e.MaxDelay) {
 		r.Status = "timeout"
 		r.Reason = "config delay is more than the maximum allowed delay"
 		return r, errors.New(r.Reason)
@@ -221,48 +256,133 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 		} else {
 			// Otherwise, make a dedicated request for the IP info.
 			// Use a standard, reliable trace endpoint.
-			req, _ := http.NewRequestWithContext(ctx, "GET", "https://cloudflare.com/cdn-cgi/trace", nil)
-			_, ipBody, traceErr := CoreHTTPRequestCustom(ctx, client, 10*time.Second, req)
-			if traceErr != nil {
+			req, reqErr := http.NewRequestWithContext(ctx, "GET", "https://cloudflare.com/cdn-cgi/trace", nil)
+			if reqErr != nil {
 				if r.Reason != "" {
 					r.Reason += "; "
 				}
 				r.Reason += "ip_info_failed"
+				r.Status = "semi-passed"
 			} else {
-				parseTraceBody(ipBody, &r)
+				_, ipBody, _, traceErr := CoreHTTPRequestCustom(ctx, client, 10*time.Second, req)
+				if traceErr != nil {
+					if r.Reason != "" {
+						r.Reason += "; "
+					}
+					r.Reason += "ip_info_failed"
+					r.Status = "semi-passed"
+				} else {
+					parseTraceBody(ipBody, &r)
+				}
 			}
 		}
 	}
 
 	if e.DoSpeedtest {
 		downloadStartTime := time.Now()
-		_, _, err := CoreHTTPRequestCustom(ctx, client, time.Duration(20000)*time.Millisecond, speedtest.MakeDownloadHTTPRequest(false, e.SpeedtestKbAmount*1000))
-		if err == nil {
+		_, _, bytesRead, dlErr := CoreHTTPRequestCustom(ctx, client, 20*time.Second, speedtest.MakeDownloadHTTPRequest(false, e.SpeedtestKbAmount*1000))
+		if dlErr == nil {
 			downloadTime := time.Since(downloadStartTime).Milliseconds()
-			r.DownloadSpeed = (float32((e.SpeedtestKbAmount*1000)*8) / (float32(downloadTime) / float32(1000.0))) / float32(1000000.0)
+			// Use actual bytes received for accurate speed calculation
+			r.DownloadSpeed = (float32(bytesRead*8) / (float32(downloadTime) / float32(1000.0))) / float32(1000000.0)
 		}
 
 		uploadStartTime := time.Now()
-		_, _, err = CoreHTTPRequestCustom(ctx, client, time.Duration(20000)*time.Millisecond, speedtest.MakeUploadHTTPRequest(false, e.SpeedtestKbAmount*1000))
-		if err == nil {
+		byteAmount := e.SpeedtestKbAmount * 1000
+		_, _, _, ulErr := CoreHTTPRequestCustom(ctx, client, 20*time.Second, speedtest.MakeUploadHTTPRequest(false, byteAmount))
+		if ulErr == nil {
 			uploadTime := time.Since(uploadStartTime).Milliseconds()
-			r.UploadSpeed = (float32((e.SpeedtestKbAmount*1000)*8) / (float32(uploadTime) / float32(1000.0))) / float32(1000000.0)
+			// For upload, use intended byte amount (request body is locally generated)
+			r.UploadSpeed = (float32(byteAmount*8) / (float32(uploadTime) / float32(1000.0))) / float32(1000000.0)
 		}
 	}
 
 	return r, nil
 }
 
-func MeasureDelay(ctx context.Context, client *http.Client, showBody bool, dest string, httpMethod string) (int64, int, []byte, error) {
-	start := time.Now()
-	code, body, err := CoreHTTPRequest(ctx, client, httpMethod, dest)
+// ExamineConfigWithRetries runs ExamineConfig up to 1+Retries times, keeping the best result.
+func (e *Examiner) ExamineConfigWithRetries(ctx context.Context, link string) (Result, error) {
+	best, err := e.ExamineConfig(ctx, link)
+	if e.Retries == 0 || best.Status == "passed" {
+		return best, err
+	}
+
+	for i := uint8(0); i < e.Retries; i++ {
+		if ctx.Err() != nil {
+			break
+		}
+		res, retryErr := e.ExamineConfig(ctx, link)
+		// Keep the best result: prefer passed, then lowest delay
+		if res.Status == "passed" && (best.Status != "passed" || (res.Delay >= 0 && res.Delay < best.Delay)) {
+			best = res
+			err = retryErr
+		}
+		if best.Status == "passed" {
+			break
+		}
+	}
+	return best, err
+}
+
+// MeasureDelayResult holds the timing results from MeasureDelay.
+type MeasureDelayResult struct {
+	Delay       int64
+	Code        int
+	Body        []byte
+	TTFB        int64
+	ConnectTime int64
+}
+
+func MeasureDelay(ctx context.Context, client *http.Client, dest string, httpMethod string) (int64, int, []byte, error) {
+	res, err := MeasureDelayDetailed(ctx, client, dest, httpMethod)
 	if err != nil {
 		return -1, -1, nil, err
 	}
-	if showBody {
-		fmt.Printf("Response body: \n%s\n", body)
+	return res.Delay, res.Code, res.Body, nil
+}
+
+func MeasureDelayDetailed(ctx context.Context, client *http.Client, dest string, httpMethod string) (*MeasureDelayResult, error) {
+	req, err := http.NewRequestWithContext(ctx, httpMethod, dest, nil)
+	if err != nil {
+		return nil, err
 	}
-	return time.Since(start).Milliseconds(), code, body, nil
+
+	var connectStart time.Time
+	var connectTime int64
+	var ttfb int64
+	start := time.Now()
+
+	trace := &httptrace.ClientTrace{
+		ConnectStart: func(_, _ string) {
+			connectStart = time.Now()
+		},
+		ConnectDone: func(_, _ string, err error) {
+			if err == nil && !connectStart.IsZero() {
+				connectTime = time.Since(connectStart).Milliseconds()
+			}
+		},
+		GotFirstResponseByte: func() {
+			ttfb = time.Since(start).Milliseconds()
+		},
+	}
+
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	b, _ := io.ReadAll(resp.Body)
+	delay := time.Since(start).Milliseconds()
+
+	return &MeasureDelayResult{
+		Delay:       delay,
+		Code:        resp.StatusCode,
+		Body:        b,
+		TTFB:        ttfb,
+		ConnectTime: connectTime,
+	}, nil
 }
 
 // zeroReader is an io.Reader that endlessly produces zero bytes.
@@ -276,7 +396,10 @@ func (z zeroReader) Read(p []byte) (n int, err error) {
 }
 
 func CoreHTTPRequest(ctx context.Context, client *http.Client, method, dest string) (int, []byte, error) {
-	req, _ := http.NewRequestWithContext(ctx, method, dest, nil)
+	req, err := http.NewRequestWithContext(ctx, method, dest, nil)
+	if err != nil {
+		return -1, nil, err
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return -1, nil, err
@@ -287,17 +410,18 @@ func CoreHTTPRequest(ctx context.Context, client *http.Client, method, dest stri
 	return resp.StatusCode, b, nil
 }
 
-func CoreHTTPRequestCustom(ctx context.Context, client *http.Client, timeout time.Duration, req *http.Request) (int, []byte, error) {
-	req = req.WithContext(ctx)
-	client.Timeout = timeout
+func CoreHTTPRequestCustom(ctx context.Context, client *http.Client, timeout time.Duration, req *http.Request) (int, []byte, int64, error) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req = req.WithContext(timeoutCtx)
 	resp, err := client.Do(req)
 	if err != nil {
-		return -1, nil, err
+		return -1, nil, 0, err
 	}
 	defer resp.Body.Close()
 
 	b, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, b, nil
+	return resp.StatusCode, b, int64(len(b)), nil
 }
 
 type SpeedTester struct {
@@ -314,7 +438,7 @@ var speedtest = &SpeedTester{
 	UploadEndpoint:   "/__up",
 }
 
-func (c *SpeedTester) MakeDownloadHTTPRequest(noTLS bool, amount uint32) *http.Request {
+func (c *SpeedTester) MakeDownloadHTTPRequest(noTLS bool, amount uint64) *http.Request {
 	scheme := "https"
 	if noTLS {
 		scheme = "http"
@@ -332,7 +456,7 @@ func (c *SpeedTester) MakeDownloadHTTPRequest(noTLS bool, amount uint32) *http.R
 	}
 }
 
-func (c *SpeedTester) MakeUploadHTTPRequest(noTLS bool, amount uint32) *http.Request {
+func (c *SpeedTester) MakeUploadHTTPRequest(noTLS bool, amount uint64) *http.Request {
 	scheme := "https"
 	if noTLS {
 		scheme = "http"

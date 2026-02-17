@@ -3,6 +3,7 @@ package web
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lilendian0x00/xray-knife/v7/database"
 	pkghttp "github.com/lilendian0x00/xray-knife/v7/pkg/http"
 	"github.com/lilendian0x00/xray-knife/v7/pkg/proxy"
 	"github.com/lilendian0x00/xray-knife/v7/pkg/scanner"
@@ -294,6 +296,9 @@ func (ht *HttpTestRunner) run(ctx context.Context, req pkghttp.HttpTestRequest) 
 	statusMsgRunning, _ := json.Marshal(map[string]interface{}{"type": "http_test_status", "data": "running"})
 	ht.hub.Broadcast(statusMsgRunning)
 
+	// Deduplicate links before testing
+	req.Links, _ = pkghttp.DeduplicateLinks(req.Links)
+
 	total := len(req.Links)
 	var completed atomic.Int32
 	go ht.reportProgress(ctx, &completed, total, "http_test_progress")
@@ -305,6 +310,16 @@ func (ht *HttpTestRunner) run(ctx context.Context, req pkghttp.HttpTestRequest) 
 		return
 	}
 
+	// Create a DB test run if SaveToDB is requested
+	var runID int64
+	if req.SaveToDB {
+		optsJson, _ := json.Marshal(req.Options)
+		runID, err = database.CreateHttpTestRun(string(optsJson), total)
+		if err != nil {
+			ht.logger.Printf("Warning: failed to create DB test run: %v", err)
+		}
+	}
+
 	testManager := pkghttp.NewTestManager(examiner, req.ThreadCount, false, ht.logger)
 	resultsChan := make(chan *pkghttp.Result, req.ThreadCount)
 
@@ -312,7 +327,7 @@ func (ht *HttpTestRunner) run(ctx context.Context, req pkghttp.HttpTestRequest) 
 	consumerWg.Add(1)
 	go func() {
 		defer consumerWg.Done()
-		ht.consumeResults(ctx, resultsChan)
+		ht.consumeResults(ctx, resultsChan, runID)
 	}()
 
 	testManager.RunTests(ctx, req.Links, resultsChan, func() {
@@ -332,7 +347,7 @@ func (ht *HttpTestRunner) run(ctx context.Context, req pkghttp.HttpTestRequest) 
 	ht.hub.Broadcast(statusMsg)
 }
 
-func (ht *HttpTestRunner) consumeResults(ctx context.Context, resultsChan <-chan *pkghttp.Result) {
+func (ht *HttpTestRunner) consumeResults(ctx context.Context, resultsChan <-chan *pkghttp.Result, runID int64) {
 	const saveBatchSize = 50
 	const saveInterval = 5 * time.Second
 	batch := make([]*pkghttp.Result, 0, saveBatchSize)
@@ -340,12 +355,40 @@ func (ht *HttpTestRunner) consumeResults(ctx context.Context, resultsChan <-chan
 	defer ticker.Stop()
 
 	save := func() {
-		if len(batch) > 0 {
-			if err := appendResultsToCSV(httpTesterHistoryFile, batch); err != nil {
-				ht.logger.Printf("HTTP test history save failed: %v", err)
-			}
-			batch = make([]*pkghttp.Result, 0, saveBatchSize)
+		if len(batch) == 0 {
+			return
 		}
+		// Save to CSV history file
+		if err := appendResultsToCSV(httpTesterHistoryFile, batch); err != nil {
+			ht.logger.Printf("HTTP test history save failed: %v", err)
+		}
+		// Save to DB if a run ID is available
+		if runID > 0 {
+			dbResults := make([]database.HttpTestResult, 0, len(batch))
+			for _, res := range batch {
+				dbRes := database.HttpTestResult{
+					RunID:      runID,
+					ConfigLink: res.ConfigLink,
+					Status:     res.Status,
+					Reason:     sql.NullString{String: res.Reason, Valid: res.Reason != ""},
+					DelayMs:    -1,
+				}
+				if res.Status == "passed" || res.Status == "semi-passed" {
+					dbRes.DelayMs = res.Delay
+					dbRes.DownloadMbps = float64(res.DownloadSpeed)
+					dbRes.UploadMbps = float64(res.UploadSpeed)
+					dbRes.IPAddress = sql.NullString{String: res.RealIPAddr, Valid: res.RealIPAddr != "" && res.RealIPAddr != "null"}
+					dbRes.IPLocation = sql.NullString{String: res.IpAddrLoc, Valid: res.IpAddrLoc != "" && res.IpAddrLoc != "null"}
+					dbRes.TTFBMs = res.TTFB
+					dbRes.ConnectTimeMs = res.ConnectTime
+				}
+				dbResults = append(dbResults, dbRes)
+			}
+			if err := database.InsertHttpTestResultsBatch(runID, dbResults); err != nil {
+				ht.logger.Printf("HTTP test DB save failed: %v", err)
+			}
+		}
+		batch = make([]*pkghttp.Result, 0, saveBatchSize)
 	}
 
 	for {

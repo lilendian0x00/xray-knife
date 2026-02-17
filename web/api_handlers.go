@@ -1,8 +1,6 @@
 package web
 
 import (
-	"bufio"
-	"encoding/csv"
 	"fmt"
 	"io"
 	"log"
@@ -18,34 +16,9 @@ import (
 	"github.com/lilendian0x00/xray-knife/v7/pkg/scanner"
 )
 
-// appendResultsToCSV appends a batch of results to a CSV file.
-func appendResultsToCSV(filePath string, batch interface{}) error {
-	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to open file for appending: %w", err)
-	}
-	defer file.Close()
-
-	info, err := file.Stat()
-	if err != nil {
-		return fmt.Errorf("failed to stat file: %w", err)
-	}
-
-	bufWriter := bufio.NewWriter(file)
-	csvWriter := csv.NewWriter(bufWriter)
-
-	if info.Size() == 0 {
-		err = gocsv.MarshalCSV(batch, csvWriter)
-	} else {
-		err = gocsv.MarshalCSVWithoutHeaders(batch, csvWriter)
-	}
-
-	if err != nil {
-		return fmt.Errorf("failed to marshal and append results to CSV: %w", err)
-	}
-
-	csvWriter.Flush()
-	return bufWriter.Flush()
+// appendResultsToCSV delegates to the shared implementation in pkg/http.
+func appendResultsToCSV(filePath string, batch []*pkghttp.Result) error {
+	return pkghttp.AppendResultsToCSV(filePath, batch)
 }
 
 // loadResultsFromCSV loads results from a CSV file into the provided slice pointer.
@@ -176,6 +149,7 @@ func (h *APIHandler) handleHttpTest(w http.ResponseWriter, r *http.Request) {
 	var requestBody struct {
 		Links       []string `json:"links"`
 		ThreadCount uint16   `json:"threadCount"`
+		SaveToDB    bool     `json:"saveToDB"`
 		pkghttp.Options
 	}
 
@@ -187,6 +161,7 @@ func (h *APIHandler) handleHttpTest(w http.ResponseWriter, r *http.Request) {
 	req := pkghttp.HttpTestRequest{
 		Links:       requestBody.Links,
 		ThreadCount: requestBody.ThreadCount,
+		SaveToDB:    requestBody.SaveToDB,
 		Options:     requestBody.Options,
 	}
 

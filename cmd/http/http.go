@@ -10,16 +10,18 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/fatih/color"
+	"github.com/schollz/progressbar/v3"
+	"github.com/spf13/cobra"
 
 	"github.com/lilendian0x00/xray-knife/v7/database"
 	pkghttp "github.com/lilendian0x00/xray-knife/v7/pkg/http"
 	"github.com/lilendian0x00/xray-knife/v7/utils"
 	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
-
-	"github.com/fatih/color"
-	"github.com/spf13/cobra"
 )
 
 // HttpCmd represents the http command
@@ -51,8 +53,10 @@ type Config struct {
 	SaveToDB            bool
 	Speedtest           bool
 	GetIPInfo           bool
-	SpeedtestAmount     uint32
+	SpeedtestAmount     uint64
 	MaximumAllowedDelay uint16
+	Timeout             uint16
+	Retries             uint16
 	Ping                bool
 	PingInterval        uint16
 }
@@ -108,6 +112,8 @@ Use --from-db to test configs from the database library.`,
 			examiner, err := pkghttp.NewExaminer(pkghttp.Options{
 				Core:                   config.CoreType,
 				MaxDelay:               config.MaximumAllowedDelay,
+				Timeout:                config.Timeout,
+				Retries:                uint8(config.Retries),
 				Verbose:                config.Verbose,
 				ShowBody:               config.ShowBody,
 				InsecureTLS:            config.InsecureTLS,
@@ -187,6 +193,17 @@ func handlePingMode(examiner *pkghttp.Examiner, config *Config) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Create HTTP client and instance ONCE before the ticker loop
+	timeout := time.Duration(config.Timeout) * time.Millisecond
+	if timeout == 0 {
+		timeout = time.Duration(config.MaximumAllowedDelay) * time.Millisecond
+	}
+	client, instance, err := examiner.Core.MakeHttpClient(ctx, pinger, timeout)
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP client: %w", err)
+	}
+	defer instance.Close()
+
 	ticker := time.NewTicker(time.Duration(config.PingInterval) * time.Millisecond)
 	defer ticker.Stop()
 
@@ -215,20 +232,7 @@ func handlePingMode(examiner *pkghttp.Examiner, config *Config) error {
 			return nil
 		case <-ticker.C:
 			sent++
-			client, instance, err := examiner.Core.MakeHttpClient(context.Background(), pinger, time.Duration(config.MaximumAllowedDelay)*time.Millisecond)
-			if err != nil {
-				customlog.Printf(customlog.Failure, "Failed to create HTTP client: %v\n", err)
-				if instance != nil {
-					instance.Close()
-				}
-				continue
-			}
-
-			delay, _, _, err := pkghttp.MeasureDelay(context.Background(), client, false, config.DestURL, config.HTTPMethod)
-			if instance != nil {
-				instance.Close()
-			}
-
+			delay, _, _, err := pkghttp.MeasureDelay(ctx, client, config.DestURL, config.HTTPMethod)
 			if err != nil {
 				customlog.Printf(customlog.Failure, "Request failed: %v\n", err)
 			} else {
@@ -251,12 +255,20 @@ func handleMultipleConfigs(examiner *pkghttp.Examiner, config *Config, links []s
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Deduplicate links before testing
+	links, dupsRemoved := pkghttp.DeduplicateLinks(links)
+	if dupsRemoved > 0 {
+		customlog.Printf(customlog.Info, "Removed %d duplicate config link(s). Testing %d unique configs.\n", dupsRemoved, len(links))
+	}
+
 	printConfiguration(config, len(links))
 
 	// Create a test run entry in the database
 	opts := pkghttp.Options{
 		Core:                   config.CoreType,
 		MaxDelay:               config.MaximumAllowedDelay,
+		Timeout:                config.Timeout,
+		Retries:                uint8(config.Retries),
 		Verbose:                config.Verbose,
 		ShowBody:               config.ShowBody,
 		InsecureTLS:            config.InsecureTLS,
@@ -290,30 +302,85 @@ func handleMultipleConfigs(examiner *pkghttp.Examiner, config *Config, links []s
 		},
 	)
 
-	// Run the tests as before
+	// Clear the output file before streaming so we start fresh
+	if config.OutputFile != "" {
+		os.Remove(config.OutputFile)
+	}
+
+	// Run the tests with progress bar
 	testManager := pkghttp.NewTestManager(examiner, config.ThreadCount, config.Verbose, nil)
-	resultsChan := make(chan *pkghttp.Result, len(links))
+	resultsChan := make(chan *pkghttp.Result, config.ThreadCount)
 	var results pkghttp.ConfigResults
+	var passedCount int32
 	var collectorWg sync.WaitGroup
 
+	bar := progressbar.NewOptions(len(links),
+		progressbar.OptionSetWriter(os.Stderr),
+		progressbar.OptionEnableColorCodes(true),
+		progressbar.OptionShowCount(),
+		progressbar.OptionShowIts(),
+		progressbar.OptionSetDescription("[cyan]Testing configs (0 passed)[reset]"),
+		progressbar.OptionSetTheme(progressbar.Theme{
+			Saucer:        "[green]=[reset]",
+			SaucerHead:    "[green]>[reset]",
+			SaucerPadding: " ",
+			BarStart:      "[",
+			BarEnd:        "]",
+		}),
+	)
+
+	// Stream results to file in batches as they arrive
+	const saveBatchSize = 50
 	collectorWg.Add(1)
 	go func() {
 		defer collectorWg.Done()
-		var counter int
+		batch := make([]*pkghttp.Result, 0, saveBatchSize)
+		flushBatch := func() {
+			if len(batch) == 0 {
+				return
+			}
+			if config.OutputFile != "" {
+				var err error
+				switch config.OutputType {
+				case "csv":
+					err = pkghttp.AppendResultsToCSV(config.OutputFile, batch)
+				case "txt":
+					err = pkghttp.AppendResultsToTxt(config.OutputFile, batch)
+				}
+				if err != nil {
+					customlog.Printf(customlog.Failure, "Failed to stream results to file: %v\n", err)
+				}
+			}
+			batch = make([]*pkghttp.Result, 0, saveBatchSize)
+		}
 		for res := range resultsChan {
 			if res.Status == "passed" {
-				printSuccessDetails(counter, *res)
-				counter++
+				atomic.AddInt32(&passedCount, 1)
 			}
 			results = append(results, res)
+			batch = append(batch, res)
+			if len(batch) >= saveBatchSize {
+				flushBatch()
+			}
 		}
+		flushBatch()
 	}()
 
-	testManager.RunTests(ctx, links, resultsChan, func() {})
+	testManager.RunTests(ctx, links, resultsChan, func() {
+		bar.Describe(fmt.Sprintf("[cyan]Testing configs (%d passed)[reset]", atomic.LoadInt32(&passedCount)))
+		bar.Add(1)
+	})
 	close(resultsChan)
 	collectorWg.Wait()
+	bar.Finish()
+	fmt.Fprintln(os.Stderr)
 
-	// Save results to both DB and file if specified
+	// If sorted output was requested, rewrite the file sorted
+	if config.SortedByRealDelay && config.OutputFile != "" {
+		processor.RewriteFileSorted(results)
+	}
+
+	// Save to DB and print summary (file already written via streaming)
 	return processor.SaveResults(results)
 }
 
@@ -330,21 +397,15 @@ func handleSingleConfig(examiner *pkghttp.Examiner, config *Config) {
 		customlog.Printf(customlog.Failure, "%s: %s\n", res.Status, res.Reason)
 	}
 
-	customlog.Printf(customlog.Success, "Real Delay: %dms\n\n", res.Delay)
+	if res.Delay >= 0 {
+		customlog.Printf(customlog.Success, "Real Delay: %dms\n\n", res.Delay)
+	}
 	if config.Speedtest {
 		customlog.Printf(customlog.Success, "Downloaded %dKB - Speed: %f mbps\n",
 			config.SpeedtestAmount, res.DownloadSpeed)
 		customlog.Printf(customlog.Success, "Uploaded %dKB - Speed: %f mbps\n",
 			config.SpeedtestAmount, res.UploadSpeed)
 	}
-}
-
-// printSuccessDetails prints the details of a successful test for the CLI
-func printSuccessDetails(index int, res pkghttp.Result) {
-	d := color.New(color.FgCyan, color.Bold)
-	d.Printf("Config Number: %d\n", index+1)
-	fmt.Printf("%v%s: %s\n", res.Protocol.DetailsStr(), color.RedString("Link"), res.Protocol.GetLink())
-	customlog.Printf(customlog.Success, "Real Delay: %dms\n\n", res.Delay)
 }
 
 // printConfiguration prints the current configuration
@@ -380,10 +441,12 @@ func addFlags(cmd *cobra.Command, config *Config) {
 	flags.BoolVarP(&config.ShowBody, "body", "b", false, "Show response body")
 	flags.Uint16VarP(&config.MaximumAllowedDelay, "mdelay", "d", 5000, "Maximum allowed delay (ms)")
 	flags.BoolVarP(&config.InsecureTLS, "insecure", "e", false, "Insecure tls connection (fake SNI)")
+	flags.Uint16Var(&config.Timeout, "timeout", 0, "HTTP client timeout in ms (0 = use mdelay value)")
+	flags.Uint16Var(&config.Retries, "retries", 0, "Number of retries for failed proxy tests")
 
 	// Speedtest flags
 	flags.BoolVarP(&config.Speedtest, "speedtest", "p", false, "Speed test with speed.cloudflare.com")
-	flags.Uint32VarP(&config.SpeedtestAmount, "amount", "a", 10000, "Download and upload amount (Kbps)")
+	flags.Uint64VarP(&config.SpeedtestAmount, "amount", "a", 10000, "Download and upload amount (KB)")
 
 	flags.BoolVarP(&config.GetIPInfo, "rip", "r", true, "Receive real IP (csv)")
 	flags.BoolVarP(&config.Verbose, "verbose", "v", false, "Verbose")

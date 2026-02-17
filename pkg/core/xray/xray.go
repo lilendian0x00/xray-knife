@@ -23,6 +23,11 @@ import (
 	_ "github.com/xtls/xray-core/app/proxyman/outbound"
 )
 
+// noOpHandler discards all log messages.
+type noOpHandler struct{}
+
+func (*noOpHandler) Handle(msg commlog.Message) {}
+
 type Core struct {
 	Inbound Protocol
 
@@ -67,6 +72,10 @@ func NewXrayService(verbose bool, allowInsecure bool, opts ...ServiceOption) *Co
 		s.LogType = applog.LogType_Console
 		s.LogLevel = commlog.Severity_Debug
 		commlog.RegisterHandler(commlog.NewLogger(commlog.CreateStderrLogWriter()))
+	} else {
+		// Override xray-core's default stdout handler (set in common/log init())
+		// with a no-op handler to suppress deprecation warnings during config building.
+		commlog.RegisterHandler(&noOpHandler{})
 	}
 
 	for _, opt := range opts {
