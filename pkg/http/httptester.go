@@ -14,9 +14,9 @@ import (
 
 	"github.com/alitto/pond/v2"
 	"github.com/gocarina/gocsv"
-	"github.com/lilendian0x00/xray-knife/v7/database"
-	"github.com/lilendian0x00/xray-knife/v7/utils"
-	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v9/database"
+	"github.com/lilendian0x00/xray-knife/v9/utils"
+	"github.com/lilendian0x00/xray-knife/v9/utils/customlog"
 )
 
 type HttpTestRequest struct {

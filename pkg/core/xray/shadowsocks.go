@@ -12,8 +12,8 @@ import (
 
 	net2 "github.com/xtls/xray-core/common/net"
 
-	"github.com/lilendian0x00/xray-knife/v7/pkg/core/protocol"
-	"github.com/lilendian0x00/xray-knife/v7/utils"
+	"github.com/lilendian0x00/xray-knife/v9/pkg/core/protocol"
+	"github.com/lilendian0x00/xray-knife/v9/utils"
 
 	"github.com/fatih/color"
 	"github.com/xtls/xray-core/infra/conf"

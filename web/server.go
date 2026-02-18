@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v9/utils/customlog"
 )
 
 //go:embed dist

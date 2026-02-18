@@ -18,10 +18,10 @@ import (
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 
-	"github.com/lilendian0x00/xray-knife/v7/database"
-	pkghttp "github.com/lilendian0x00/xray-knife/v7/pkg/http"
-	"github.com/lilendian0x00/xray-knife/v7/utils"
-	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v9/database"
+	pkghttp "github.com/lilendian0x00/xray-knife/v9/pkg/http"
+	"github.com/lilendian0x00/xray-knife/v9/utils"
+	"github.com/lilendian0x00/xray-knife/v9/utils/customlog"
 )
 
 // HttpCmd is the http subcommand.

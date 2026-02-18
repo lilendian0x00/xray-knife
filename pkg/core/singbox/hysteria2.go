@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/lilendian0x00/xray-knife/v7/pkg/core/protocol"
+	"github.com/lilendian0x00/xray-knife/v9/pkg/core/protocol"
 
 	"github.com/fatih/color"
 	"github.com/sagernet/sing-box/adapter"

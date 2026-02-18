@@ -9,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v9/utils/customlog"
 )
 
 func Base64Decode(b64 string) ([]byte, error) {

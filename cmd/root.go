@@ -5,16 +5,16 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/lilendian0x00/xray-knife/v7/cmd/cfscanner"
-	xkexec "github.com/lilendian0x00/xray-knife/v7/cmd/exec"
-	"github.com/lilendian0x00/xray-knife/v7/cmd/http"
-	"github.com/lilendian0x00/xray-knife/v7/cmd/net"
-	"github.com/lilendian0x00/xray-knife/v7/cmd/parse"
-	"github.com/lilendian0x00/xray-knife/v7/cmd/proxy"
-	"github.com/lilendian0x00/xray-knife/v7/cmd/subs"
-	"github.com/lilendian0x00/xray-knife/v7/cmd/webui"
-	"github.com/lilendian0x00/xray-knife/v7/database"
-	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v9/cmd/cfscanner"
+	xkexec "github.com/lilendian0x00/xray-knife/v9/cmd/exec"
+	"github.com/lilendian0x00/xray-knife/v9/cmd/http"
+	"github.com/lilendian0x00/xray-knife/v9/cmd/net"
+	"github.com/lilendian0x00/xray-knife/v9/cmd/parse"
+	"github.com/lilendian0x00/xray-knife/v9/cmd/proxy"
+	"github.com/lilendian0x00/xray-knife/v9/cmd/subs"
+	"github.com/lilendian0x00/xray-knife/v9/cmd/webui"
+	"github.com/lilendian0x00/xray-knife/v9/database"
+	"github.com/lilendian0x00/xray-knife/v9/utils/customlog"
 	"github.com/spf13/cobra"
 )
 
@@ -22,7 +22,7 @@ import (
 var rootCmd = &cobra.Command{
 	Use:     "xray-knife",
 	Short:   "Swiss Army Knife for xray-core & sing-box",
-	Version: "9.8.7",
+	Version: "9.8.8",
 }
 
 // Execute is called by main() to kick everything off.

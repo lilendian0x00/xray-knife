@@ -60,7 +60,7 @@ chmod +x xray-knife
 
 If you have Go (1.25) installed, you can build and install `xray-knife` with a single command:
 ```bash
-go install github.com/lilendian0x00/xray-knife/v7@latest
+go install github.com/lilendian0x00/xray-knife/v9@latest
 ```
 
 ### Arch linux aur

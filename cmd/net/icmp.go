@@ -11,7 +11,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v9/utils/customlog"
 
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"

@@ -18,16 +18,16 @@ import (
 
 	"github.com/fatih/color"
 
-	"github.com/lilendian0x00/xray-knife/v7/database"
-	"github.com/lilendian0x00/xray-knife/v7/pkg/core"
-	"github.com/lilendian0x00/xray-knife/v7/pkg/core/protocol"
-	pkgsingbox "github.com/lilendian0x00/xray-knife/v7/pkg/core/singbox"
-	pkgxray "github.com/lilendian0x00/xray-knife/v7/pkg/core/xray"
-	pkghttp "github.com/lilendian0x00/xray-knife/v7/pkg/http"
-	"github.com/lilendian0x00/xray-knife/v7/pkg/proxy/netns"
-	"github.com/lilendian0x00/xray-knife/v7/pkg/proxy/sysproxy"
-	"github.com/lilendian0x00/xray-knife/v7/utils"
-	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v9/database"
+	"github.com/lilendian0x00/xray-knife/v9/pkg/core"
+	"github.com/lilendian0x00/xray-knife/v9/pkg/core/protocol"
+	pkgsingbox "github.com/lilendian0x00/xray-knife/v9/pkg/core/singbox"
+	pkgxray "github.com/lilendian0x00/xray-knife/v9/pkg/core/xray"
+	pkghttp "github.com/lilendian0x00/xray-knife/v9/pkg/http"
+	"github.com/lilendian0x00/xray-knife/v9/pkg/proxy/netns"
+	"github.com/lilendian0x00/xray-knife/v9/pkg/proxy/sysproxy"
+	"github.com/lilendian0x00/xray-knife/v9/utils"
+	"github.com/lilendian0x00/xray-knife/v9/utils/customlog"
 	"github.com/xtls/xray-core/common/uuid"
 )
 

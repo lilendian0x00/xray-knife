@@ -9,7 +9,7 @@ import (
 	net2 "github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/infra/conf"
 
-	"github.com/lilendian0x00/xray-knife/v7/pkg/core/protocol"
+	"github.com/lilendian0x00/xray-knife/v9/pkg/core/protocol"
 )
 
 // Http is a minimal HTTP proxy protocol used for system proxy mode inbound.

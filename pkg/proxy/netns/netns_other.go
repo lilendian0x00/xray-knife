@@ -6,7 +6,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/lilendian0x00/xray-knife/v7/pkg/core/protocol"
+	"github.com/lilendian0x00/xray-knife/v9/pkg/core/protocol"
 )
 
 // ErrNotSupported is returned on non-Linux platforms.
