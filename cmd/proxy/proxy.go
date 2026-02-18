@@ -39,6 +39,8 @@ type proxyCmdConfig struct {
 	drainTimeout        uint16
 	blacklistStrikes    uint16
 	blacklistDuration   uint32
+	shell               bool
+	namespaceName       string
 }
 
 // ProxyCmd is the proxy subcommand.
@@ -74,6 +76,17 @@ Use --file, --config, or --stdin to provide configs for a single session without
 			}
 			// If links slice is empty, the service will automatically fetch from the DB.
 
+			// Validate app mode flags.
+			if cfg.shell && cfg.mode != "app" {
+				return fmt.Errorf("--shell requires --mode app")
+			}
+			if cfg.namespaceName != "" && cfg.mode != "app" {
+				return fmt.Errorf("--namespace requires --mode app")
+			}
+			if cfg.shell && cfg.namespaceName != "" {
+				return fmt.Errorf("--shell and --namespace are mutually exclusive")
+			}
+
 			// Create the service configuration from flags
 			serviceConfig := pkgproxy.Config{
 				CoreType:            cfg.CoreType,
@@ -94,6 +107,8 @@ Use --file, --config, or --stdin to provide configs for a single session without
 				DrainTimeout:        cfg.drainTimeout,
 				BlacklistStrikes:    cfg.blacklistStrikes,
 				BlacklistDuration:   cfg.blacklistDuration,
+				Shell:               cfg.shell,
+				NamespaceName:       cfg.namespaceName,
 				ConfigLinks:         links,
 			}
 
@@ -121,10 +136,11 @@ Use --file, --config, or --stdin to provide configs for a single session without
 				}
 			}()
 
-			// Set up channel for manual rotation
+			// Set up channel for manual rotation.
+			// Skip the stdin reader in app+shell mode because the shell
+			// takes over stdin.
 			forceRotateChan := make(chan struct{})
-			// Only listen for Enter if in rotation mode (more than 1 config, either from flags or DB)
-			if service.ConfigCount() > 1 {
+			if service.ConfigCount() > 1 && !cfg.shell {
 				go func() {
 					reader := bufio.NewReader(os.Stdin)
 					for {
@@ -165,9 +181,9 @@ func addFlags(cmd *cobra.Command, cfg *proxyCmdConfig) {
 	flags.StringVarP(&cfg.inboundUUID, "uuid", "g", "random", "Inbound custom UUID to use (default: random)")
 
 	flags.StringVarP(&cfg.inboundConfigLink, "inbound-config", "I", "", "Custom config link for the inbound proxy")
-	flags.StringVarP(&cfg.mode, "mode", "m", "inbound", "Proxy operating mode: inbound (local proxy) or system (set OS system proxy)")
+	flags.StringVarP(&cfg.mode, "mode", "m", "inbound", "Proxy operating mode: inbound, system, or app (per-process namespace)")
 	cmd.RegisterFlagCompletionFunc("mode", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string{"inbound", "system"}, cobra.ShellCompDirectiveNoFileComp
+		return []string{"inbound", "system", "app"}, cobra.ShellCompDirectiveNoFileComp
 	})
 
 	flags.StringVarP(&cfg.CoreType, "core", "z", "xray", "Core type: (xray, sing-box)")
@@ -185,7 +201,11 @@ func addFlags(cmd *cobra.Command, cfg *proxyCmdConfig) {
 	flags.Uint16Var(&cfg.blacklistStrikes, "blacklist-strikes", 3, "Failures before blacklisting a config (0=disabled)")
 	flags.Uint32Var(&cfg.blacklistDuration, "blacklist-duration", 600, "Seconds to blacklist a failed config")
 
+	flags.BoolVar(&cfg.shell, "shell", false, "Launch an interactive shell inside the proxy namespace (requires --mode app)")
+	flags.StringVar(&cfg.namespaceName, "namespace", "", "Create a named namespace for the proxy (requires --mode app)")
+
 	// Mark mutually exclusive flags
 	cmd.MarkFlagsMutuallyExclusive("file", "config", "stdin")
 	cmd.MarkFlagsMutuallyExclusive("inbound-config", "inbound")
+	cmd.MarkFlagsMutuallyExclusive("shell", "namespace")
 }

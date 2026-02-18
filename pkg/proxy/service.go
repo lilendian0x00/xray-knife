@@ -7,7 +7,11 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"os"
+	osexec "os/exec"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +24,7 @@ import (
 	pkgsingbox "github.com/lilendian0x00/xray-knife/v7/pkg/core/singbox"
 	pkgxray "github.com/lilendian0x00/xray-knife/v7/pkg/core/xray"
 	pkghttp "github.com/lilendian0x00/xray-knife/v7/pkg/http"
+	"github.com/lilendian0x00/xray-knife/v7/pkg/proxy/netns"
 	"github.com/lilendian0x00/xray-knife/v7/pkg/proxy/sysproxy"
 	"github.com/lilendian0x00/xray-knife/v7/utils"
 	"github.com/lilendian0x00/xray-knife/v7/utils/customlog"
@@ -58,6 +63,8 @@ type Config struct {
 	DrainTimeout        uint16 `json:"drainTimeout"`        // seconds to keep old connection alive during rotation (0=immediate)
 	BlacklistStrikes    uint16 `json:"blacklistStrikes"`    // failures before blacklisting (0=disabled)
 	BlacklistDuration   uint32 `json:"blacklistDuration"`   // seconds to blacklist a config
+	Shell               bool   `json:"shell"`               // launch shell in namespace (app mode)
+	NamespaceName       string `json:"namespaceName"`       // named namespace (app mode)
 	ConfigLinks         []string
 }
 
@@ -89,6 +96,10 @@ type Service struct {
 	sysProxyManager   sysproxy.Manager   // nil if mode != "system"
 	prevProxySettings *sysproxy.Settings // saved OS settings before modification
 	blacklist         map[string]*blacklistEntry
+	nsManager         *netns.Namespace   // non-nil when mode == "app"
+	nsTunnel          protocol.Instance  // the sing-box tunnel inside the namespace
+	proxyReady        chan struct{}       // closed when the first proxy instance starts
+	proxyReadyOnce    sync.Once
 }
 
 func New(config Config, logger *log.Logger) (*Service, error) {
@@ -100,11 +111,34 @@ func New(config Config, logger *log.Logger) (*Service, error) {
 		sysproxy.ClearState()
 	}
 
+	// Crash recovery: clean up stale network namespace from a previous unclean exit.
+	netns.RecoverFromCrash()
+
+	// App mode validation and overrides.
+	if config.Mode == "app" {
+		if runtime.GOOS != "linux" {
+			return nil, errors.New("app mode is only supported on Linux")
+		}
+		if os.Getuid() != 0 {
+			return nil, errors.New("app mode requires root privileges. Run with sudo")
+		}
+		// Default to shell mode if neither --shell nor --namespace is set.
+		if !config.Shell && config.NamespaceName == "" {
+			config.Shell = true
+		}
+		// Force SOCKS inbound on 0.0.0.0 so the namespace can reach the proxy
+		// through the veth pair.
+		config.ListenAddr = "0.0.0.0"
+		config.InboundProtocol = "socks"
+		config.InboundConfigLink = ""
+	}
+
 	s := &Service{
 		config:         config,
 		logger:         logger,
 		rotationStatus: "idle",
 		blacklist:      make(map[string]*blacklistEntry),
+		proxyReady:     make(chan struct{}),
 	}
 
 	// If no config links are provided via flags, fetch them from the database.
@@ -249,6 +283,23 @@ func (s *Service) healthCheck(ctx context.Context) bool {
 
 // Close restores the system proxy settings if they were modified, and cleans up state.
 func (s *Service) Close() {
+	// Tear down namespace resources (reverse order: tunnel first, then namespace).
+	if s.nsTunnel != nil {
+		s.logf(customlog.Processing, "Stopping namespace tunnel...\n")
+		s.nsTunnel.Close()
+		s.nsTunnel = nil
+	}
+	if s.nsManager != nil {
+		s.logf(customlog.Processing, "Cleaning up network namespace...\n")
+		if err := s.nsManager.Close(); err != nil {
+			s.logf(customlog.Failure, "Failed to clean up namespace: %v\n", err)
+		} else {
+			s.logf(customlog.Success, "Network namespace cleaned up.\n")
+		}
+		netns.ClearState()
+		s.nsManager = nil
+	}
+
 	if s.sysProxyManager != nil {
 		s.logf(customlog.Processing, "Restoring system proxy settings...\n")
 		if err := s.sysProxyManager.Restore(s.prevProxySettings); err != nil {
@@ -261,10 +312,74 @@ func (s *Service) Close() {
 	}
 }
 
+// signalProxyReady is called once after the first proxy instance is started
+// so that the app mode setup can proceed.
+func (s *Service) signalProxyReady() {
+	s.proxyReadyOnce.Do(func() { close(s.proxyReady) })
+}
+
+// setupAppMode creates the network namespace, veth pair, and TUN tunnel.
+// It must be called after the proxy instance is listening.
+func (s *Service) setupAppMode(ctx context.Context) error {
+	nsName := s.config.NamespaceName
+	if nsName == "" {
+		nsName = fmt.Sprintf("xk-%d", os.Getpid())
+	}
+
+	// Extract SOCKS credentials from the inbound so the tunnel can authenticate.
+	var socksUser, socksPass string
+	switch in := s.inbound.(type) {
+	case *pkgsingbox.Socks:
+		socksUser = in.Username
+		socksPass = in.Password
+	case *pkgxray.Socks:
+		socksUser = in.Username
+		socksPass = in.Password
+	}
+
+	port, _ := strconv.ParseUint(s.config.ListenPort, 10, 16)
+	nsCfg := netns.DefaultConfig(uint16(port))
+	nsCfg.Name = nsName
+	nsCfg.SocksUser = socksUser
+	nsCfg.SocksPass = socksPass
+
+	// Persist state for crash recovery.
+	if err := netns.SaveState(&netns.State{
+		Name:     nsName,
+		VethHost: nsCfg.VethHost,
+		VethNS:   nsCfg.VethNS,
+	}); err != nil {
+		return fmt.Errorf("failed to save namespace state: %w", err)
+	}
+
+	ns, err := netns.Setup(nsCfg)
+	if err != nil {
+		netns.ClearState()
+		return fmt.Errorf("failed to set up namespace: %w", err)
+	}
+	s.nsManager = ns
+
+	tunnel, err := netns.StartTunnel(ctx, nsName, nsCfg)
+	if err != nil {
+		ns.Close()
+		netns.ClearState()
+		s.nsManager = nil
+		return fmt.Errorf("failed to start tunnel in namespace: %w", err)
+	}
+	s.nsTunnel = tunnel
+
+	s.logf(customlog.Success, "Network namespace '%s' is ready.\n", nsName)
+	return nil
+}
+
 // Run blocks until the context is canceled, running either single or rotation mode.
 func (s *Service) Run(ctx context.Context, forceRotate <-chan struct{}) error {
 	if len(s.config.ConfigLinks) == 0 {
 		return errors.New("no configuration links provided")
+	}
+
+	if s.config.Mode == "app" {
+		return s.runAppMode(ctx, forceRotate)
 	}
 
 	if len(s.config.ConfigLinks) == 1 {
@@ -272,6 +387,63 @@ func (s *Service) Run(ctx context.Context, forceRotate <-chan struct{}) error {
 	}
 
 	return s.runRotationMode(ctx, forceRotate)
+}
+
+// runAppMode starts the proxy in a goroutine, waits for it to be ready,
+// sets up the namespace and tunnel, then either launches a shell or
+// waits for the proxy to finish.
+func (s *Service) runAppMode(ctx context.Context, forceRotate <-chan struct{}) error {
+	// Derive a context that we can cancel when the shell exits.
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
+
+	// Run the underlying proxy (single or rotation) in a goroutine.
+	errCh := make(chan error, 1)
+	go func() {
+		if len(s.config.ConfigLinks) == 1 {
+			errCh <- s.runSingleMode(runCtx, s.config.ConfigLinks[0])
+		} else {
+			errCh <- s.runRotationMode(runCtx, forceRotate)
+		}
+	}()
+
+	// Wait for the proxy to start listening.
+	select {
+	case <-s.proxyReady:
+	case err := <-errCh:
+		return err
+	}
+
+	// Set up namespace + tunnel.
+	if err := s.setupAppMode(ctx); err != nil {
+		runCancel()
+		<-errCh
+		return err
+	}
+
+	if s.config.Shell {
+		s.logf(customlog.Info, "Launching shell in namespace. Type 'exit' to shut down.\n")
+		shellErr := s.nsManager.Shell(ctx)
+		// Shell exited — cancel the proxy and wait for it to finish.
+		runCancel()
+		<-errCh
+		// Treat signal-induced exits (e.g. Ctrl+C → exit code 130) as clean
+		// shutdowns rather than errors.
+		if ee, ok := shellErr.(*osexec.ExitError); ok && ee.ExitCode() >= 128 {
+			return nil
+		}
+		return shellErr
+	}
+
+	// Named namespace mode: print instructions and wait.
+	nsName := s.config.NamespaceName
+	if nsName == "" {
+		nsName = fmt.Sprintf("xk-%d", os.Getpid())
+	}
+	s.logf(customlog.Info, "Use: xray-knife exec %s -- <command>\n", nsName)
+	s.logf(customlog.Info, "Press Ctrl+C to shut down.\n")
+
+	return <-errCh
 }
 
 func (s *Service) runSingleMode(ctx context.Context, link string) error {
@@ -306,6 +478,7 @@ func (s *Service) runSingleMode(ctx context.Context, link string) error {
 		return fmt.Errorf("error starting instance: %w", err)
 	}
 	s.logf(customlog.Success, "Started listening for new connections...\n")
+	s.signalProxyReady()
 
 	<-ctx.Done() // Wait for shutdown signal
 	s.logf(customlog.Processing, "Shutting down proxy...\n")
@@ -337,6 +510,7 @@ func (s *Service) runRotationMode(ctx context.Context, forceRotate <-chan struct
 	currentInstance = instance
 	lastUsedLink = result.ConfigLink
 	s.setRotationStatus("idle")
+	s.signalProxyReady()
 
 	// Set up health check ticker if enabled
 	var healthTicker *time.Ticker

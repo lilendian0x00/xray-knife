@@ -35,6 +35,8 @@ A powerful command-line utility and secure web UI designed for managing, testing
 
 - **🔄 Auto-Rotating Proxy**: Run a local SOCKS/HTTP proxy that automatically finds the fastest, working outbound from your database and rotates it on a schedule or on-demand.
 
+- **🖥️ Per-Process Proxy (Linux)**: Route only specific applications through the proxy using Linux network namespaces. Launch a proxied shell or run individual commands — no system-wide settings, no LD_PRELOAD hacks.
+
 - **🌐 Powerful IP Scanner**: Discover optimal Cloudflare edge IPs by scanning entire CIDR ranges for latency and speed. Results are saved to the database for future use.
 
 - **🔎 Universal Config Parser**: Decode any configuration link into a human-readable breakdown or generate a full, clean `xray-core` compatible JSON file.
@@ -175,6 +177,49 @@ xray-knife proxy --inbound socks -f ./configs.txt --port 9999 --rotate 300
 xray-knife proxy --inbound socks --port 9999 --rotate 300
 ```
 > **Pro Tip:** While the proxy is running, simply press `Enter` in the terminal to force an immediate rotation to the next available fast configuration.
+
+**2. System-Wide Proxy**
+
+Set the OS-level proxy so all applications (browsers, package managers, etc.) route through xray-knife automatically. Previous settings are restored on exit or crash.
+
+```bash
+# Set the system proxy from your database
+xray-knife proxy --mode system --port 9999 --rotate 300
+
+# Set the system proxy with a single config
+xray-knife proxy --mode system -c "vless://..." --port 9999
+```
+> Supports GNOME (dconf), KDE (kwriteconfig), macOS (networksetup), and Windows (registry).
+
+**3. Per-Process Proxy with App Mode (Linux)**
+
+Route only specific applications through the proxy using Linux network namespaces. This creates an isolated network environment where a TUN device captures all traffic and forwards it through the proxy — no system-wide proxy settings required.
+
+> **Requires:** Linux with root privileges (`sudo`).
+
+**Shell Mode** — Drop into a proxied shell. Everything you run inside it goes through the proxy:
+```bash
+# Single config
+sudo xray-knife proxy --mode app -c "vless://..."
+
+# With rotation from your database
+sudo xray-knife proxy --mode app --rotate 300
+```
+```
+$ curl httpbin.org/ip
+{"origin": "PROXY_IP"}
+$ exit   # stops it
+```
+
+**Named Namespace Mode** — Create a persistent namespace that other terminals can join:
+```bash
+# Terminal 1: Start the proxy namespace
+sudo xray-knife proxy --mode app --namespace myproxy -c "vless://..."
+
+# Terminal 2: Run commands inside it
+sudo xray-knife exec myproxy -- curl https://ifconfig.me
+sudo xray-knife exec myproxy -- firefox
+```
 
 ---
 

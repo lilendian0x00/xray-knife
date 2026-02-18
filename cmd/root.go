@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/lilendian0x00/xray-knife/v7/cmd/cfscanner"
+	xkexec "github.com/lilendian0x00/xray-knife/v7/cmd/exec"
 	"github.com/lilendian0x00/xray-knife/v7/cmd/http"
 	"github.com/lilendian0x00/xray-knife/v7/cmd/net"
 	"github.com/lilendian0x00/xray-knife/v7/cmd/parse"
@@ -21,7 +22,7 @@ import (
 var rootCmd = &cobra.Command{
 	Use:     "xray-knife",
 	Short:   "Swiss Army Knife for xray-core & sing-box",
-	Version: "9.0.0",
+	Version: "9.8.7",
 }
 
 // Execute is called by main() to kick everything off.
@@ -40,6 +41,7 @@ func addSubcommandPalettes() {
 	rootCmd.AddCommand(cfscanner.CFscannerCmd)
 	rootCmd.AddCommand(proxy.ProxyCmd)
 	rootCmd.AddCommand(webui.WebUICmd)
+	rootCmd.AddCommand(xkexec.ExecCmd)
 }
 
 // Set up the application's configuration and initialize the database.
