@@ -41,6 +41,11 @@ type proxyCmdConfig struct {
 	blacklistDuration   uint32
 	shell               bool
 	namespaceName       string
+	chain               bool
+	chainLinks          string
+	chainFile           string
+	chainHops           uint8
+	chainRotation       string
 }
 
 // ProxyCmd is the proxy subcommand.
@@ -87,6 +92,31 @@ Use --file, --config, or --stdin to provide configs for a single session without
 				return fmt.Errorf("--shell and --namespace are mutually exclusive")
 			}
 
+			// Validate chain mode flags.
+			if cfg.chainLinks != "" || cfg.chainFile != "" {
+				cfg.chain = true
+			}
+			if cfg.chainRotation != "none" && cfg.chainRotation != "" {
+				if !cfg.chain {
+					return fmt.Errorf("--chain-rotation requires --chain")
+				}
+			}
+			if cfg.chain {
+				if cfg.CoreType == "auto" {
+					return fmt.Errorf("--chain requires an explicit core type (xray or sing-box), not auto")
+				}
+				if cfg.chainHops < 2 {
+					cfg.chainHops = 2
+				}
+				// Fixed chains are incompatible with rotation.
+				if (cfg.chainLinks != "" || cfg.chainFile != "") && cfg.chainRotation != "none" && cfg.chainRotation != "" {
+					return fmt.Errorf("--chain-rotation is incompatible with --chain-links / --chain-file (fixed chains don't rotate)")
+				}
+			}
+			if cfg.chainRotation == "" {
+				cfg.chainRotation = "none"
+			}
+
 			// Create the service configuration from flags
 			serviceConfig := pkgproxy.Config{
 				CoreType:            cfg.CoreType,
@@ -109,6 +139,11 @@ Use --file, --config, or --stdin to provide configs for a single session without
 				BlacklistDuration:   cfg.blacklistDuration,
 				Shell:               cfg.shell,
 				NamespaceName:       cfg.namespaceName,
+				Chain:               cfg.chain,
+				ChainLinks:          cfg.chainLinks,
+				ChainFile:           cfg.chainFile,
+				ChainHops:           cfg.chainHops,
+				ChainRotation:       cfg.chainRotation,
 				ConfigLinks:         links,
 			}
 
@@ -204,8 +239,18 @@ func addFlags(cmd *cobra.Command, cfg *proxyCmdConfig) {
 	flags.BoolVar(&cfg.shell, "shell", false, "Launch an interactive shell inside the proxy namespace (requires --mode app)")
 	flags.StringVar(&cfg.namespaceName, "namespace", "", "Create a named namespace for the proxy (requires --mode app)")
 
+	flags.BoolVar(&cfg.chain, "chain", false, "Enable outbound chaining (multi-hop proxy)")
+	flags.StringVar(&cfg.chainLinks, "chain-links", "", "Fixed chain hops as pipe-separated config links")
+	flags.StringVar(&cfg.chainFile, "chain-file", "", "Fixed chain hops from file (one link per line)")
+	flags.Uint8Var(&cfg.chainHops, "chain-hops", 2, "Number of hops when selecting from pool")
+	flags.StringVar(&cfg.chainRotation, "chain-rotation", "none", "Chain rotation mode: none, exit, full")
+	cmd.RegisterFlagCompletionFunc("chain-rotation", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"none", "exit", "full"}, cobra.ShellCompDirectiveNoFileComp
+	})
+
 	// Mark mutually exclusive flags
 	cmd.MarkFlagsMutuallyExclusive("file", "config", "stdin")
 	cmd.MarkFlagsMutuallyExclusive("inbound-config", "inbound")
 	cmd.MarkFlagsMutuallyExclusive("shell", "namespace")
+	cmd.MarkFlagsMutuallyExclusive("chain-links", "chain-file")
 }

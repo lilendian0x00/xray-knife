@@ -10,7 +10,8 @@ const defaultProxySettings: ProxySettings = {
     batchSize: 0, concurrency: 0, healthCheckInterval: 30, drainTimeout: 0,
     blacklistStrikes: 3, blacklistDuration: 600,
     enableTls: false, tlsCertPath: '', tlsKeyPath: '', tlsSni: '', tlsAlpn: '',
-    transportOptions: { ws: { host: '', path: '/' }, grpc: { serviceName: 'grpc-service', authority: '' }, xhttp: { mode: 'auto', host: '', path: '/' } }
+    transportOptions: { ws: { host: '', path: '/' }, grpc: { serviceName: 'grpc-service', authority: '' }, xhttp: { mode: 'auto', host: '', path: '/' } },
+    chain: false, chainLinks: '', chainHops: 2, chainRotation: 'none'
 };
 const defaultHttpSettings: HttpTesterSettings = {
     threadCount: 50, maxDelay: 5000, coreType: 'auto', destURL: 'https://cloudflare.com/cdn-cgi/trace',

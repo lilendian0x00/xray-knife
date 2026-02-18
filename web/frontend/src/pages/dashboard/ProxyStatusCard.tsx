@@ -5,7 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
     ClipboardCopy, AlertCircle, ServerOff, Timer, ArrowRightLeft,
-    LogIn, LogOut, RefreshCw, MapPin, Tag, Server, Download, Upload, Hourglass, Loader2
+    LogIn, LogOut, RefreshCw, MapPin, Tag, Server, Download, Upload, Hourglass, Loader2,
+    Link2, ArrowDown
 } from 'lucide-react';
 import { type ProxyDetails } from "@/types/dashboard";
 import { toast } from "sonner";
@@ -83,7 +84,7 @@ const StoppedContent = () => (
 );
 
 const RunningContent = ({ details }: { details: ProxyDetails }) => {
-    const { inbound, activeOutbound, rotationInterval, rotationStatus, nextRotationTime, totalConfigs } = details;
+    const { inbound, activeOutbound, rotationInterval, rotationStatus, nextRotationTime, totalConfigs, chainEnabled, chainHops, chainRotation } = details;
     const handleCopy = (label: string, value: string) => navigator.clipboard.writeText(value).then(() => toast.success(`${label} copied!`));
 
     const getRotationStatusBadge = () => {
@@ -186,12 +187,44 @@ const RunningContent = ({ details }: { details: ProxyDetails }) => {
                         )}
                     </div>
                 </div>
+                 {/* Chain Section */}
+                 {chainEnabled && chainHops && chainHops.length > 0 && (
+                    <div className="border rounded-lg p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 font-semibold text-base"><Link2 className="size-4 text-muted-foreground" /><span>Chain ({chainHops.length} hops)</span></div>
+                            {chainRotation && chainRotation !== 'none' && (
+                                <Badge variant="secondary" className="text-xs">{chainRotation === 'exit' ? 'Exit Rotation' : 'Full Rotation'}</Badge>
+                            )}
+                        </div>
+                        <div className="pl-6 space-y-1">
+                            {chainHops.map((hop, i) => (
+                                <div key={i}>
+                                    <div className="flex items-center gap-2 py-1">
+                                        <Badge variant={i === 0 ? 'default' : i === chainHops!.length - 1 ? 'secondary' : 'outline'} className="text-xs min-w-[50px] justify-center">
+                                            {i === 0 ? 'Entry' : i === chainHops!.length - 1 ? 'Exit' : `Hop ${i + 1}`}
+                                        </Badge>
+                                        <Badge variant="outline" className="font-mono text-xs">{hop.Protocol.toUpperCase()}</Badge>
+                                        <span className="font-mono text-xs text-muted-foreground">{hop.Address}:{hop.Port}</span>
+                                        {hop.Remark && <span className="text-xs text-muted-foreground truncate max-w-[200px]">[{hop.Remark}]</span>}
+                                    </div>
+                                    {i < chainHops!.length - 1 && (
+                                        <div className="flex justify-center py-0.5"><ArrowDown className="size-3 text-muted-foreground" /></div>
+                                    )}
+                                </div>
+                            ))}
+                            <div className="flex items-center gap-2 py-1 pt-2 border-t mt-2">
+                                <Badge variant="outline" className="text-xs min-w-[50px] justify-center bg-green-500/10 text-green-500 border-green-500/30">Dest</Badge>
+                                <span className="text-xs text-muted-foreground">Destination</span>
+                            </div>
+                        </div>
+                    </div>
+                 )}
                  {/* Rotation Section */}
                  <div className="border rounded-lg p-4 space-y-3">
                     <div className="flex items-center gap-2 font-semibold text-base"><RefreshCw className="size-4 text-muted-foreground" /><span>Rotation</span></div>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-2 pl-6">
-                        <DetailItem icon={AlertCircle} label="Status">{totalConfigs > 1 ? getRotationStatusBadge() : <Badge variant="outline">Disabled</Badge>}</DetailItem>
-                        {totalConfigs > 1 && <DetailItem icon={Timer} label="Interval"><span className="font-mono text-xs">{rotationInterval}s</span></DetailItem>}
+                        <DetailItem icon={AlertCircle} label="Status">{totalConfigs > 1 || chainEnabled ? getRotationStatusBadge() : <Badge variant="outline">Disabled</Badge>}</DetailItem>
+                        {(totalConfigs > 1 || chainEnabled) && <DetailItem icon={Timer} label="Interval"><span className="font-mono text-xs">{rotationInterval}s</span></DetailItem>}
                         <DetailItem icon={Server} label="Total Configs"><span className="font-mono text-xs">{totalConfigs}</span></DetailItem>
                     </div>
                 </div>

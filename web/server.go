@@ -97,15 +97,24 @@ func (s *Server) Run() error {
 		}
 	}
 
-	// Graceful shutdown with a 10-second timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Stop all managed services (proxy, http-tester, cf-scanner) immediately.
+	// This runs in parallel with the HTTP server shutdown so we don't wait
+	// for the HTTP server to drain before cancelling long-running background work.
+	managerDone := make(chan struct{})
+	go func() {
+		s.manager.Close()
+		close(managerDone)
+	}()
+
+	// Graceful shutdown with a 3-second timeout for in-flight HTTP requests.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		return fmt.Errorf("server forced to shutdown: %w", err)
+		s.logger.Printf("HTTP server forced to shutdown: %v", err)
 	}
 
-	s.manager.Close()
+	<-managerDone
 	s.logger.Println("Server shutdown complete.")
 	return nil
 }

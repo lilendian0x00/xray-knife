@@ -24,6 +24,10 @@ export interface ProxySettings {
         grpc: { serviceName: string; authority: string; };
         xhttp: { mode: string; host: string; path: string; };
     };
+    chain: boolean;
+    chainLinks: string;
+    chainHops: number;
+    chainRotation: 'none' | 'exit' | 'full';
 }
 
 export interface HttpTesterSettings {

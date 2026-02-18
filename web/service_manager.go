@@ -75,12 +75,12 @@ func (sm *ServiceManager) proxyDetailsBroadcaster(hub *Hub) {
 	}
 }
 
-// Close stops running services and background goroutines of the ServiceManager.
+// Close stops all running services and background goroutines of the ServiceManager.
 func (sm *ServiceManager) Close() {
 	// Stop the proxy service first so system proxy settings are restored on shutdown.
-	if proxy, err := sm.getService("proxy"); err == nil {
-		if proxy.Status() == StateRunning || proxy.Status() == StateStarting {
-			proxy.Stop()
+	for _, svc := range sm.services {
+		if svc.Status() == StateRunning || svc.Status() == StateStarting {
+			svc.Stop()
 		}
 	}
 	close(sm.done)

@@ -65,17 +65,25 @@ type Config struct {
 	BlacklistDuration   uint32 `json:"blacklistDuration"`   // seconds to blacklist a config
 	Shell               bool   `json:"shell"`               // launch shell in namespace (app mode)
 	NamespaceName       string `json:"namespaceName"`       // named namespace (app mode)
+	Chain               bool   `json:"chain"`               // enable outbound chaining (multi-hop)
+	ChainLinks          string `json:"chainLinks"`          // pipe-separated fixed chain links
+	ChainFile           string `json:"chainFile"`           // file with fixed chain links (one per line)
+	ChainHops           uint8  `json:"chainHops"`           // number of hops when selecting from pool
+	ChainRotation       string `json:"chainRotation"`       // none, exit, full
 	ConfigLinks         []string
 }
 
 // Details is a snapshot of the running proxy state.
 type Details struct {
-	Inbound          protocol.GeneralConfig `json:"inbound"`
-	ActiveOutbound   *pkghttp.Result        `json:"activeOutbound,omitempty"`
-	RotationStatus   string                 `json:"rotationStatus"` // idle, testing, switching, stalled
-	NextRotationTime time.Time              `json:"nextRotationTime"`
-	RotationInterval uint32                 `json:"rotationInterval"`
-	TotalConfigs     int                    `json:"totalConfigs"`
+	Inbound          protocol.GeneralConfig   `json:"inbound"`
+	ActiveOutbound   *pkghttp.Result          `json:"activeOutbound,omitempty"`
+	RotationStatus   string                   `json:"rotationStatus"` // idle, testing, switching, stalled
+	NextRotationTime time.Time                `json:"nextRotationTime"`
+	RotationInterval uint32                   `json:"rotationInterval"`
+	TotalConfigs     int                      `json:"totalConfigs"`
+	ChainEnabled     bool                     `json:"chainEnabled"`
+	ChainHopInfos    []protocol.GeneralConfig `json:"chainHops,omitempty"`
+	ChainRotation    string                   `json:"chainRotation,omitempty"`
 }
 
 type blacklistEntry struct {
@@ -90,6 +98,7 @@ type Service struct {
 	logger            *log.Logger
 	inbound           protocol.Protocol
 	activeOutbound    *pkghttp.Result
+	activeChainHops   []protocol.Protocol // current chain hops (nil when not chaining)
 	mu                sync.RWMutex
 	rotationStatus    string
 	nextRotationTime  time.Time
@@ -233,6 +242,15 @@ func (s *Service) GetCurrentDetails() *Details {
 		NextRotationTime: s.nextRotationTime,
 		RotationInterval: s.config.RotationInterval,
 		TotalConfigs:     len(s.config.ConfigLinks),
+		ChainEnabled:     s.config.Chain,
+		ChainRotation:    s.config.ChainRotation,
+	}
+	if s.activeChainHops != nil {
+		hopInfos := make([]protocol.GeneralConfig, len(s.activeChainHops))
+		for i, hop := range s.activeChainHops {
+			hopInfos[i] = hop.ConvertToGeneralConfig()
+		}
+		details.ChainHopInfos = hopInfos
 	}
 	return details
 }
@@ -382,6 +400,10 @@ func (s *Service) Run(ctx context.Context, forceRotate <-chan struct{}) error {
 		return s.runAppMode(ctx, forceRotate)
 	}
 
+	if s.config.Chain {
+		return s.runChainMode(ctx, forceRotate)
+	}
+
 	if len(s.config.ConfigLinks) == 1 {
 		return s.runSingleMode(ctx, s.config.ConfigLinks[0])
 	}
@@ -502,7 +524,7 @@ func (s *Service) runRotationMode(ctx context.Context, forceRotate <-chan struct
 
 	// Initial setup
 	s.setRotationStatus("testing")
-	instance, result, err := s.findAndStartWorkingConfig(examiner, "")
+	instance, result, err := s.findAndStartWorkingConfig(ctx, examiner, "")
 	if err != nil {
 		s.logf(customlog.Failure, "Could not find any working config on initial startup. Exiting.")
 		return err
@@ -586,8 +608,11 @@ func (s *Service) runRotationMode(ctx context.Context, forceRotate <-chan struct
 		}
 
 		s.setRotationStatus("testing")
-		instance, result, err := s.findAndStartWorkingConfig(examiner, lastUsedLink)
+		instance, result, err := s.findAndStartWorkingConfig(ctx, examiner, lastUsedLink)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			s.logf(customlog.Warning, "Rotation failed to find a new working config. Keeping the current one. Retrying in 30s...")
 			s.setRotationStatus("stalled")
 			continue // Keep the old instance running and retry sooner
@@ -616,6 +641,7 @@ func (s *Service) runRotationMode(ctx context.Context, forceRotate <-chan struct
 }
 
 func (s *Service) findAndStartWorkingConfig(
+	ctx context.Context,
 	examiner *pkghttp.Examiner,
 	lastUsedLink string,
 ) (protocol.Instance, *pkghttp.Result, error) {
@@ -686,11 +712,16 @@ func (s *Service) findAndStartWorkingConfig(
 		}
 	}()
 
-	testManager.RunTests(context.Background(), linksToTest, resultsChan, func() {
+	testManager.RunTests(ctx, linksToTest, resultsChan, func() {
 		// This callback is for progress, which isn't used here, but is fine to keep.
 	})
 	close(resultsChan)
 	wg.Wait()
+
+	// If the context was cancelled (e.g. Ctrl+C), return immediately.
+	if ctx.Err() != nil {
+		return nil, nil, ctx.Err()
+	}
 
 	sort.Sort(results)
 
@@ -772,6 +803,528 @@ func (s *Service) findAndStartWorkingConfig(
 	}
 
 	return nil, nil, errors.New("failed to find any new working outbound configuration in this batch")
+}
+
+// chainHealthCheck tests whether the current chain is still working by
+// making an HTTP request through the full chain.
+func (s *Service) chainHealthCheck(ctx context.Context) bool {
+	s.mu.RLock()
+	hops := s.activeChainHops
+	s.mu.RUnlock()
+	if len(hops) < 2 {
+		return false
+	}
+
+	timeout := time.Duration(s.config.MaximumAllowedDelay) * time.Millisecond
+	client, instance, err := s.makeChainedHttpClient(ctx, hops, timeout)
+	if err != nil {
+		return false
+	}
+	defer instance.Close()
+
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, "GET", "https://cloudflare.com/cdn-cgi/trace", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+// makeChainedInstance delegates to the concrete core's MakeChainedInstance.
+func (s *Service) makeChainedInstance(ctx context.Context, hops []protocol.Protocol) (protocol.Instance, error) {
+	switch c := s.core.(type) {
+	case *pkgxray.Core:
+		return c.MakeChainedInstance(ctx, hops)
+	case *pkgsingbox.Core:
+		return c.MakeChainedInstance(ctx, hops)
+	default:
+		return nil, fmt.Errorf("chaining is not supported with core type: %T", s.core)
+	}
+}
+
+// makeChainedHttpClient delegates to the concrete core's MakeChainedHttpClient.
+func (s *Service) makeChainedHttpClient(ctx context.Context, hops []protocol.Protocol, maxDelay time.Duration) (*http.Client, protocol.Instance, error) {
+	switch c := s.core.(type) {
+	case *pkgxray.Core:
+		return c.MakeChainedHttpClient(ctx, hops, maxDelay)
+	case *pkgsingbox.Core:
+		return c.MakeChainedHttpClient(ctx, hops, maxDelay)
+	default:
+		return nil, nil, fmt.Errorf("chaining is not supported with core type: %T", s.core)
+	}
+}
+
+// runChainMode runs the proxy in chain mode with optional rotation.
+func (s *Service) runChainMode(ctx context.Context, forceRotate <-chan struct{}) error {
+	isFixedChain := s.config.ChainLinks != "" || s.config.ChainFile != ""
+	rotation := s.config.ChainRotation
+	if rotation == "" {
+		rotation = "none"
+	}
+
+	// Fixed chains never rotate.
+	if isFixedChain {
+		return s.runFixedChainMode(ctx)
+	}
+
+	switch rotation {
+	case "none":
+		return s.runChainNoRotation(ctx)
+	case "exit":
+		return s.runChainExitRotation(ctx, forceRotate)
+	case "full":
+		return s.runChainFullRotation(ctx, forceRotate)
+	default:
+		return fmt.Errorf("unknown chain rotation mode: %s", rotation)
+	}
+}
+
+// runFixedChainMode parses a fixed chain and runs it without rotation.
+func (s *Service) runFixedChainMode(ctx context.Context) error {
+	hops, err := resolveFixedChain(s.core, s.config.ChainLinks, s.config.ChainFile)
+	if err != nil {
+		return fmt.Errorf("failed to resolve fixed chain: %w", err)
+	}
+
+	s.logChainHops(hops)
+
+	instance, err := s.makeChainedInstance(context.Background(), hops)
+	if err != nil {
+		return fmt.Errorf("failed to create chained instance: %w", err)
+	}
+	defer instance.Close()
+
+	if err := instance.Start(); err != nil {
+		return fmt.Errorf("failed to start chained instance: %w", err)
+	}
+
+	s.mu.Lock()
+	s.activeChainHops = hops
+	s.mu.Unlock()
+
+	s.logf(customlog.Success, "Chain proxy started (fixed, %d hops).\n", len(hops))
+	s.signalProxyReady()
+
+	<-ctx.Done()
+	s.logf(customlog.Processing, "Shutting down chain proxy...\n")
+	return nil
+}
+
+// runChainNoRotation selects hops from the pool once and runs without rotation.
+func (s *Service) runChainNoRotation(ctx context.Context) error {
+	numHops := int(s.config.ChainHops)
+	if numHops < 2 {
+		numHops = 2
+	}
+
+	hops, err := selectChainFromPool(s.core, s.config.ConfigLinks, numHops)
+	if err != nil {
+		return fmt.Errorf("failed to select chain from pool: %w", err)
+	}
+
+	s.logChainHops(hops)
+
+	instance, err := s.makeChainedInstance(context.Background(), hops)
+	if err != nil {
+		return fmt.Errorf("failed to create chained instance: %w", err)
+	}
+	defer instance.Close()
+
+	if err := instance.Start(); err != nil {
+		return fmt.Errorf("failed to start chained instance: %w", err)
+	}
+
+	s.mu.Lock()
+	s.activeChainHops = hops
+	s.mu.Unlock()
+
+	s.logf(customlog.Success, "Chain proxy started (no rotation, %d hops).\n", len(hops))
+	s.signalProxyReady()
+
+	<-ctx.Done()
+	s.logf(customlog.Processing, "Shutting down chain proxy...\n")
+	return nil
+}
+
+// runChainExitRotation keeps the first N-1 hops fixed and rotates the exit hop.
+func (s *Service) runChainExitRotation(ctx context.Context, forceRotate <-chan struct{}) error {
+	numHops := int(s.config.ChainHops)
+	if numHops < 2 {
+		numHops = 2
+	}
+
+	// Select initial chain.
+	hops, err := selectChainFromPool(s.core, s.config.ConfigLinks, numHops)
+	if err != nil {
+		return fmt.Errorf("failed to select initial chain from pool: %w", err)
+	}
+
+	// The fixed entry hops are all but the last.
+	fixedHops := make([]protocol.Protocol, len(hops)-1)
+	copy(fixedHops, hops[:len(hops)-1])
+
+	// Test the initial chain.
+	timeout := time.Duration(s.config.MaximumAllowedDelay) * time.Millisecond
+	client, testInst, err := s.makeChainedHttpClient(ctx, hops, timeout)
+	if err != nil {
+		return fmt.Errorf("failed to build initial chain for testing: %w", err)
+	}
+	if !s.testChainViaClient(ctx, client, timeout) {
+		testInst.Close()
+		return fmt.Errorf("initial chain failed health check")
+	}
+	testInst.Close()
+
+	// Start the real instance.
+	var currentInstance protocol.Instance
+	currentInstance, err = s.makeChainedInstance(context.Background(), hops)
+	if err != nil {
+		return fmt.Errorf("failed to create initial chained instance: %w", err)
+	}
+	defer func() {
+		if currentInstance != nil {
+			currentInstance.Close()
+		}
+	}()
+
+	if err := currentInstance.Start(); err != nil {
+		return fmt.Errorf("failed to start initial chained instance: %w", err)
+	}
+
+	s.mu.Lock()
+	s.activeChainHops = hops
+	s.mu.Unlock()
+
+	s.logChainHops(hops)
+	s.logf(customlog.Success, "Chain proxy started (exit rotation, %d hops).\n", len(hops))
+	s.setRotationStatus("idle")
+	s.signalProxyReady()
+
+	var lastExitLink string
+	if len(hops) > 0 {
+		lastExitLink = hops[len(hops)-1].GetLink()
+	}
+
+	// Set up health check ticker.
+	var healthTicker *time.Ticker
+	var healthTickerC <-chan time.Time
+	if s.config.HealthCheckInterval > 0 {
+		healthTicker = time.NewTicker(time.Duration(s.config.HealthCheckInterval) * time.Second)
+		healthTickerC = healthTicker.C
+		defer healthTicker.Stop()
+	}
+
+	for {
+		rotationDuration := time.Duration(s.config.RotationInterval) * time.Second
+		s.mu.Lock()
+		s.nextRotationTime = time.Now().Add(rotationDuration)
+		s.mu.Unlock()
+
+		timer := time.NewTimer(rotationDuration)
+		doRotate := false
+
+	exitWaitLoop:
+		for {
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil
+			case <-forceRotate:
+				s.logf(customlog.Processing, "Manual chain rotation triggered.\n")
+				if !timer.Stop() {
+					<-timer.C
+				}
+				doRotate = true
+				break exitWaitLoop
+			case <-timer.C:
+				doRotate = true
+				break exitWaitLoop
+			case <-healthTickerC:
+				if !s.chainHealthCheck(ctx) {
+					s.logf(customlog.Warning, "Chain health check failed! Triggering rotation.\n")
+					if !timer.Stop() {
+						<-timer.C
+					}
+					doRotate = true
+					break exitWaitLoop
+				}
+			}
+		}
+
+		if !doRotate {
+			continue
+		}
+
+		s.setRotationStatus("testing")
+
+		// Select a new exit hop.
+		newHops, err := selectExitHopFromPool(s.core, s.config.ConfigLinks, fixedHops, lastExitLink)
+		if err != nil {
+			s.logf(customlog.Warning, "Failed to find new exit hop: %v. Keeping current chain.\n", err)
+			s.setRotationStatus("stalled")
+			continue
+		}
+
+		// Test the new chain.
+		testClient, testInst, err := s.makeChainedHttpClient(ctx, newHops, timeout)
+		if err != nil {
+			s.logf(customlog.Warning, "Failed to build new chain for testing: %v\n", err)
+			s.setRotationStatus("stalled")
+			continue
+		}
+		if !s.testChainViaClient(ctx, testClient, timeout) {
+			testInst.Close()
+			s.logf(customlog.Warning, "New chain failed health check. Keeping current chain.\n")
+			s.setRotationStatus("stalled")
+			continue
+		}
+		testInst.Close()
+
+		s.setRotationStatus("switching")
+
+		// Build and start new instance.
+		newInstance, err := s.makeChainedInstance(context.Background(), newHops)
+		if err != nil {
+			s.logf(customlog.Warning, "Failed to create new chained instance: %v\n", err)
+			s.setRotationStatus("stalled")
+			continue
+		}
+		if err := newInstance.Start(); err != nil {
+			newInstance.Close()
+			s.logf(customlog.Warning, "Failed to start new chained instance: %v\n", err)
+			s.setRotationStatus("stalled")
+			continue
+		}
+
+		// Drain old instance.
+		oldInstance := currentInstance
+		drainTimeout := time.Duration(s.config.DrainTimeout) * time.Second
+		if drainTimeout > 0 {
+			go func() {
+				time.Sleep(drainTimeout)
+				oldInstance.Close()
+			}()
+		} else {
+			oldInstance.Close()
+		}
+
+		currentInstance = newInstance
+		hops = newHops
+		lastExitLink = hops[len(hops)-1].GetLink()
+
+		s.mu.Lock()
+		s.activeChainHops = hops
+		s.mu.Unlock()
+
+		s.logChainHops(hops)
+		s.logf(customlog.Success, "Chain exit hop rotated.\n")
+		s.setRotationStatus("idle")
+	}
+}
+
+// runChainFullRotation rotates the entire chain on each cycle.
+func (s *Service) runChainFullRotation(ctx context.Context, forceRotate <-chan struct{}) error {
+	numHops := int(s.config.ChainHops)
+	if numHops < 2 {
+		numHops = 2
+	}
+	timeout := time.Duration(s.config.MaximumAllowedDelay) * time.Millisecond
+
+	// Select and test initial chain.
+	hops, err := s.findWorkingChain(ctx, numHops, timeout)
+	if err != nil {
+		return fmt.Errorf("failed to find initial working chain: %w", err)
+	}
+
+	var currentInstance protocol.Instance
+	currentInstance, err = s.makeChainedInstance(context.Background(), hops)
+	if err != nil {
+		return fmt.Errorf("failed to create initial chained instance: %w", err)
+	}
+	defer func() {
+		if currentInstance != nil {
+			currentInstance.Close()
+		}
+	}()
+
+	if err := currentInstance.Start(); err != nil {
+		return fmt.Errorf("failed to start initial chained instance: %w", err)
+	}
+
+	s.mu.Lock()
+	s.activeChainHops = hops
+	s.mu.Unlock()
+
+	s.logChainHops(hops)
+	s.logf(customlog.Success, "Chain proxy started (full rotation, %d hops).\n", len(hops))
+	s.setRotationStatus("idle")
+	s.signalProxyReady()
+
+	// Set up health check ticker.
+	var healthTicker *time.Ticker
+	var healthTickerC <-chan time.Time
+	if s.config.HealthCheckInterval > 0 {
+		healthTicker = time.NewTicker(time.Duration(s.config.HealthCheckInterval) * time.Second)
+		healthTickerC = healthTicker.C
+		defer healthTicker.Stop()
+	}
+
+	for {
+		rotationDuration := time.Duration(s.config.RotationInterval) * time.Second
+		s.mu.Lock()
+		s.nextRotationTime = time.Now().Add(rotationDuration)
+		s.mu.Unlock()
+
+		timer := time.NewTimer(rotationDuration)
+		doRotate := false
+
+	fullWaitLoop:
+		for {
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil
+			case <-forceRotate:
+				s.logf(customlog.Processing, "Manual chain rotation triggered.\n")
+				if !timer.Stop() {
+					<-timer.C
+				}
+				doRotate = true
+				break fullWaitLoop
+			case <-timer.C:
+				doRotate = true
+				break fullWaitLoop
+			case <-healthTickerC:
+				if !s.chainHealthCheck(ctx) {
+					s.logf(customlog.Warning, "Chain health check failed! Triggering full rotation.\n")
+					if !timer.Stop() {
+						<-timer.C
+					}
+					doRotate = true
+					break fullWaitLoop
+				}
+			}
+		}
+
+		if !doRotate {
+			continue
+		}
+
+		s.setRotationStatus("testing")
+
+		newHops, err := s.findWorkingChain(ctx, numHops, timeout)
+		if err != nil {
+			s.logf(customlog.Warning, "Failed to find new working chain: %v. Keeping current chain.\n", err)
+			s.setRotationStatus("stalled")
+			continue
+		}
+
+		s.setRotationStatus("switching")
+
+		newInstance, err := s.makeChainedInstance(context.Background(), newHops)
+		if err != nil {
+			s.logf(customlog.Warning, "Failed to create new chained instance: %v\n", err)
+			s.setRotationStatus("stalled")
+			continue
+		}
+		if err := newInstance.Start(); err != nil {
+			newInstance.Close()
+			s.logf(customlog.Warning, "Failed to start new chained instance: %v\n", err)
+			s.setRotationStatus("stalled")
+			continue
+		}
+
+		oldInstance := currentInstance
+		drainTimeout := time.Duration(s.config.DrainTimeout) * time.Second
+		if drainTimeout > 0 {
+			go func() {
+				time.Sleep(drainTimeout)
+				oldInstance.Close()
+			}()
+		} else {
+			oldInstance.Close()
+		}
+
+		currentInstance = newInstance
+		hops = newHops
+
+		s.mu.Lock()
+		s.activeChainHops = hops
+		s.mu.Unlock()
+
+		s.logChainHops(hops)
+		s.logf(customlog.Success, "Full chain rotated.\n")
+		s.setRotationStatus("idle")
+	}
+}
+
+// findWorkingChain tries multiple random chain combinations from the pool
+// and returns the first one that passes a health check.
+func (s *Service) findWorkingChain(ctx context.Context, numHops int, timeout time.Duration) ([]protocol.Protocol, error) {
+	maxAttempts := 5
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		hops, err := selectChainFromPool(s.core, s.config.ConfigLinks, numHops)
+		if err != nil {
+			continue
+		}
+
+		client, testInst, err := s.makeChainedHttpClient(ctx, hops, timeout)
+		if err != nil {
+			continue
+		}
+
+		if s.testChainViaClient(ctx, client, timeout) {
+			testInst.Close()
+			return hops, nil
+		}
+		testInst.Close()
+	}
+	return nil, fmt.Errorf("could not find a working chain after %d attempts", maxAttempts)
+}
+
+// testChainViaClient sends a test HTTP request through the given client.
+func (s *Service) testChainViaClient(ctx context.Context, client *http.Client, timeout time.Duration) bool {
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, "GET", "https://cloudflare.com/cdn-cgi/trace", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+// logChainHops logs the details of the chain hops.
+func (s *Service) logChainHops(hops []protocol.Protocol) {
+	s.logf(customlog.Info, "==========CHAIN==========\n")
+	for i, hop := range hops {
+		role := "relay"
+		if i == 0 {
+			role = "entry"
+		} else if i == len(hops)-1 {
+			role = "exit"
+		}
+		g := hop.ConvertToGeneralConfig()
+		if s.logger != nil {
+			s.logger.Printf("Hop %d (%s): %s %s:%s [%s]\n", i+1, role, g.Protocol, g.Address, g.Port, g.Remark)
+		} else {
+			fmt.Printf("  Hop %d (%s): %s %s:%s [%s]\n", i+1, role, g.Protocol, g.Address, g.Port, g.Remark)
+		}
+	}
+	s.logf(customlog.Info, "=========================\n")
 }
 
 func (s *Service) createExaminer() (*pkghttp.Examiner, error) {

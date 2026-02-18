@@ -58,4 +58,7 @@ export interface ProxyDetails {
     nextRotationTime: string; // ISO 8601 date string
     rotationInterval: number;
     totalConfigs: number;
+    chainEnabled: boolean;
+    chainHops?: GeneralConfig[];
+    chainRotation?: string;
 }
