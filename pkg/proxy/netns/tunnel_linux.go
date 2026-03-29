@@ -16,6 +16,7 @@ import (
 	boxOutbound "github.com/sagernet/sing-box/adapter/outbound"
 	boxService "github.com/sagernet/sing-box/adapter/service"
 	"github.com/sagernet/sing-box/dns"
+	dns_transport "github.com/sagernet/sing-box/dns/transport"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/socks"
 	sing_tun "github.com/sagernet/sing-box/protocol/tun"
@@ -93,7 +94,41 @@ func StartTunnel(ctx context.Context, nsName string, cfg Config) (protocol.Insta
 			Tag:     "proxy-out",
 			Options: &socksOpts,
 		}},
+		DNS: &option.DNSOptions{
+			RawDNSOptions: option.RawDNSOptions{
+				Servers: []option.DNSServerOptions{
+					{
+						Type: "tcp",
+						Tag:  "remote-dns",
+						Options: &option.RemoteDNSServerOptions{
+							RawLocalDNSServerOptions: option.RawLocalDNSServerOptions{
+								DialerOptions: option.DialerOptions{
+									Detour: "proxy-out",
+								},
+							},
+							DNSServerAddressOptions: option.DNSServerAddressOptions{
+								Server: "1.1.1.1",
+							},
+						},
+					},
+				},
+				Final: "remote-dns",
+			},
+		},
 		Route: &option.RouteOptions{
+			Rules: []option.Rule{
+				{
+					Type: "default",
+					DefaultOptions: option.DefaultRule{
+						RawDefaultRule: option.RawDefaultRule{
+							Protocol: badoption.Listable[string]{"dns"},
+						},
+						RuleAction: option.RuleAction{
+							Action: "hijack-dns",
+						},
+					},
+				},
+			},
 			Final:               "proxy-out",
 			AutoDetectInterface: true,
 		},
@@ -110,7 +145,10 @@ func StartTunnel(ctx context.Context, nsName string, cfg Config) (protocol.Insta
 	outboundRegistry := boxOutbound.NewRegistry()
 	socks.RegisterOutbound(outboundRegistry)
 
-	boxCtx = box.Context(boxCtx, inboundRegistry, outboundRegistry, endpoint.NewRegistry(), dns.NewTransportRegistry(), boxService.NewRegistry())
+	dnsTransportRegistry := dns.NewTransportRegistry()
+	dns_transport.RegisterTCP(dnsTransportRegistry)
+
+	boxCtx = box.Context(boxCtx, inboundRegistry, outboundRegistry, endpoint.NewRegistry(), dnsTransportRegistry, boxService.NewRegistry())
 
 	instance, err := box.New(box.Options{
 		Options: opts,
