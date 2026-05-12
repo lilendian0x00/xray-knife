@@ -51,6 +51,11 @@ func (m *windowsManager) Get() (*Settings, error) {
 		s.Data["ProxyServer"] = proxyServer
 	}
 
+	proxyOverride, _, err := k.GetStringValue("ProxyOverride")
+	if err == nil {
+		s.Data["ProxyOverride"] = proxyOverride
+	}
+
 	return s, nil
 }
 
@@ -61,7 +66,14 @@ func (m *windowsManager) Set(addr string, port string) error {
 	}
 	defer k.Close()
 
-	proxyServer := fmt.Sprintf("socks=%s:%s", addr, port)
+	// Use the WinINet per-protocol format ("http=host:port;https=...;socks=...")
+	// so HTTP, HTTPS and SOCKS traffic all hit our listener. The xray "system"
+	// inbound speaks HTTP (with CONNECT for HTTPS) and the sing-box one is a
+	// mixed HTTP+SOCKS listener, so pointing all three slots at the same
+	// addr:port works for both cores. The old code wrote just "socks=..." which
+	// made browsers speak SOCKS5 to an HTTP-only listener and silently fail.
+	proxyServer := fmt.Sprintf("http=%s:%s;https=%s:%s;socks=%s:%s",
+		addr, port, addr, port, addr, port)
 
 	if err := k.SetDWordValue("ProxyEnable", 1); err != nil {
 		return fmt.Errorf("failed to set ProxyEnable: %w", err)
@@ -94,6 +106,12 @@ func (m *windowsManager) Restore(prev *Settings) error {
 	if server, ok := prev.Data["ProxyServer"]; ok && server != "" {
 		if err := k.SetStringValue("ProxyServer", server); err != nil {
 			return fmt.Errorf("failed to restore ProxyServer: %w", err)
+		}
+	}
+
+	if override, ok := prev.Data["ProxyOverride"]; ok {
+		if err := k.SetStringValue("ProxyOverride", override); err != nil {
+			return fmt.Errorf("failed to restore ProxyOverride: %w", err)
 		}
 	}
 
