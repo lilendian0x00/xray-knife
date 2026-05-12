@@ -13,6 +13,30 @@ func New() (Manager, error) {
 	return &darwinManager{}, nil
 }
 
+// proxyKinds is the set of macOS proxy preferences we manage.
+// Each entry maps the kind tag (used in Settings.Data keys) to the
+// networksetup get/set/state flags used to read or write that preference.
+//
+// We cover three preferences so the OS routes traffic correctly regardless
+// of which inbound the service is running:
+//   - "web":    HTTP traffic from browsers / NSURLSession consumers
+//   - "https":  HTTPS traffic (browsers honour this independently from "web")
+//   - "socks":  SOCKS-aware apps (Telegram, dev tools, etc.)
+//
+// The xray "system" inbound speaks HTTP (with CONNECT for HTTPS), and the
+// sing-box one is a "mixed" HTTP+SOCKS listener, so pointing all three
+// preferences at the same addr:port works for both cores.
+var proxyKinds = []struct {
+	tag     string
+	getFlag string
+	setFlag string
+	stateFlag string
+}{
+	{"web", "-getwebproxy", "-setwebproxy", "-setwebproxystate"},
+	{"https", "-getsecurewebproxy", "-setsecurewebproxy", "-setsecurewebproxystate"},
+	{"socks", "-getsocksfirewallproxy", "-setsocksfirewallproxy", "-setsocksfirewallproxystate"},
+}
+
 func (m *darwinManager) Get() (*Settings, error) {
 	services, err := activeNetworkServices()
 	if err != nil {
@@ -26,26 +50,27 @@ func (m *darwinManager) Get() (*Settings, error) {
 	s.Data["services"] = strings.Join(services, "|")
 
 	for _, svc := range services {
-		prefix := "svc:" + svc + ":"
-		out, err := exec.Command("networksetup", "-getsocksfirewallproxy", svc).Output()
-		if err != nil {
-			continue
-		}
-		lines := strings.Split(string(out), "\n")
-		for _, line := range lines {
-			parts := strings.SplitN(line, ": ", 2)
-			if len(parts) != 2 {
+		for _, k := range proxyKinds {
+			prefix := "svc:" + svc + ":" + k.tag + ":"
+			out, err := exec.Command("networksetup", k.getFlag, svc).Output()
+			if err != nil {
 				continue
 			}
-			key := strings.TrimSpace(parts[0])
-			val := strings.TrimSpace(parts[1])
-			switch key {
-			case "Enabled":
-				s.Data[prefix+"enabled"] = val
-			case "Server":
-				s.Data[prefix+"server"] = val
-			case "Port":
-				s.Data[prefix+"port"] = val
+			for _, line := range strings.Split(string(out), "\n") {
+				parts := strings.SplitN(line, ": ", 2)
+				if len(parts) != 2 {
+					continue
+				}
+				key := strings.TrimSpace(parts[0])
+				val := strings.TrimSpace(parts[1])
+				switch key {
+				case "Enabled":
+					s.Data[prefix+"enabled"] = val
+				case "Server":
+					s.Data[prefix+"server"] = val
+				case "Port":
+					s.Data[prefix+"port"] = val
+				}
 			}
 		}
 	}
@@ -60,11 +85,13 @@ func (m *darwinManager) Set(addr string, port string) error {
 	}
 
 	for _, svc := range services {
-		if out, err := exec.Command("networksetup", "-setsocksfirewallproxy", svc, addr, port).CombinedOutput(); err != nil {
-			return fmt.Errorf("failed to set SOCKS proxy for %s: %s: %w", svc, string(out), err)
-		}
-		if out, err := exec.Command("networksetup", "-setsocksfirewallproxystate", svc, "on").CombinedOutput(); err != nil {
-			return fmt.Errorf("failed to enable SOCKS proxy for %s: %s: %w", svc, string(out), err)
+		for _, k := range proxyKinds {
+			if out, err := exec.Command("networksetup", k.setFlag, svc, addr, port).CombinedOutput(); err != nil {
+				return fmt.Errorf("failed to set %s proxy for %s: %s: %w", k.tag, svc, string(out), err)
+			}
+			if out, err := exec.Command("networksetup", k.stateFlag, svc, "on").CombinedOutput(); err != nil {
+				return fmt.Errorf("failed to enable %s proxy for %s: %s: %w", k.tag, svc, string(out), err)
+			}
 		}
 	}
 
@@ -83,18 +110,18 @@ func (m *darwinManager) Restore(prev *Settings) error {
 	services := strings.Split(svcList, "|")
 
 	for _, svc := range services {
-		prefix := "svc:" + svc + ":"
-		wasEnabled := prev.Data[prefix+"enabled"]
-		prevServer := prev.Data[prefix+"server"]
-		prevPort := prev.Data[prefix+"port"]
+		for _, k := range proxyKinds {
+			prefix := "svc:" + svc + ":" + k.tag + ":"
+			wasEnabled := prev.Data[prefix+"enabled"]
+			prevServer := prev.Data[prefix+"server"]
+			prevPort := prev.Data[prefix+"port"]
 
-		if wasEnabled == "Yes" && prevServer != "" && prevPort != "" {
-			// Restore to previous SOCKS proxy settings
-			exec.Command("networksetup", "-setsocksfirewallproxy", svc, prevServer, prevPort).Run()
-			exec.Command("networksetup", "-setsocksfirewallproxystate", svc, "on").Run()
-		} else {
-			// Was disabled or empty, just turn it off
-			exec.Command("networksetup", "-setsocksfirewallproxystate", svc, "off").Run()
+			if wasEnabled == "Yes" && prevServer != "" && prevPort != "" {
+				exec.Command("networksetup", k.setFlag, svc, prevServer, prevPort).Run()
+				exec.Command("networksetup", k.stateFlag, svc, "on").Run()
+			} else {
+				exec.Command("networksetup", k.stateFlag, svc, "off").Run()
+			}
 		}
 	}
 
