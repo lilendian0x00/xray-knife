@@ -379,7 +379,7 @@ func (fc *FetchCommand) doFetch(sub *Subscription, subscriptionID sql.NullInt64)
 // parseLinks accepts the subscriptionID to correctly populate the struct
 func (fc *FetchCommand) parseLinks(rawLinks []string, subID sql.NullInt64) []database.SubscriptionConfig {
 	var dbConfigs []database.SubscriptionConfig
-	now := time.Now()
+	now := time.Now().UTC()
 
 	for _, link := range rawLinks {
 		trimmedLink := strings.TrimSpace(link)
@@ -390,7 +390,7 @@ func (fc *FetchCommand) parseLinks(rawLinks []string, subID sql.NullInt64) []dat
 		dbConf := database.SubscriptionConfig{
 			SubscriptionID: subID,
 			ConfigLink:     trimmedLink,
-			LastSeenAt:     sql.NullTime{Time: now, Valid: true},
+			LastSeenAt:     database.NullTime{Time: now, Valid: true},
 		}
 
 		// Parse protocol info with panic recovery — malformed links must not crash the program

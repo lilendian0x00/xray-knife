@@ -26,7 +26,10 @@ func InitDB(dbPath string) error {
 	// - foreign_keys: enforce data integrity
 	// - busy_timeout: wait up to 5s instead of failing immediately on lock contention
 	// - journal_mode=WAL: allow concurrent reads during writes
-	db, err := sqlx.Open("sqlite", dbPath+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
+	// _time_format=sqlite makes the driver write time.Time as a parseable RFC-style
+	// string instead of the default t.String() (which becomes unparseable in non-UTC
+	// zones where the abbreviation is numeric like "+0330").
+	db, err := sqlx.Open("sqlite", dbPath+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_time_format=sqlite")
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}

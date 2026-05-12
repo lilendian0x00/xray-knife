@@ -17,7 +17,7 @@ type Subscription struct {
 	Remark        sql.NullString `db:"remark"`
 	UserAgent     sql.NullString `db:"user_agent"`
 	Enabled       bool           `db:"enabled"`
-	LastFetchedAt sql.NullTime   `db:"last_fetched_at"`
+	LastFetchedAt NullTime       `db:"last_fetched_at"`
 	CreatedAt     time.Time      `db:"created_at"`
 }
 
@@ -28,7 +28,7 @@ type SubscriptionConfig struct {
 	Protocol       sql.NullString `db:"protocol"`
 	Remark         sql.NullString `db:"remark"`
 	AddedAt        time.Time      `db:"added_at"`
-	LastSeenAt     sql.NullTime   `db:"last_seen_at"`
+	LastSeenAt     NullTime       `db:"last_seen_at"`
 }
 
 type HttpTestRun struct {
@@ -120,7 +120,7 @@ func GetSubscriptionByID(id int64) (*Subscription, error) {
 
 func UpdateSubscriptionFetched(id int64, fetchTime time.Time) error {
 	query := `UPDATE subscriptions SET last_fetched_at = ? WHERE id = ?`
-	_, err := DB.ExecContext(context.Background(), query, fetchTime, id)
+	_, err := DB.ExecContext(context.Background(), query, fetchTime.UTC(), id)
 	return err
 }
 
