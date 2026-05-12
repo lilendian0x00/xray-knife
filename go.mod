@@ -1,6 +1,6 @@
 module github.com/lilendian0x00/xray-knife/v9
 
-go 1.26
+go 1.26.3
 
 require (
 	github.com/alitto/pond/v2 v2.5.0
