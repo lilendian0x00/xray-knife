@@ -36,9 +36,11 @@ type proxyCmdConfig struct {
 	batchSize           uint16
 	concurrency         uint16
 	healthCheckInterval uint32
+	healthFailThreshold uint16
 	drainTimeout        uint16
 	blacklistStrikes    uint16
 	blacklistDuration   uint32
+	chainAttempts       uint16
 	shell               bool
 	namespaceName       string
 	chain               bool
@@ -137,9 +139,11 @@ Use --file, --config, or --stdin to provide configs for a single session without
 				BatchSize:           cfg.batchSize,
 				Concurrency:         cfg.concurrency,
 				HealthCheckInterval: cfg.healthCheckInterval,
+				HealthFailThreshold: cfg.healthFailThreshold,
 				DrainTimeout:        cfg.drainTimeout,
 				BlacklistStrikes:    cfg.blacklistStrikes,
 				BlacklistDuration:   cfg.blacklistDuration,
+				ChainAttempts:       cfg.chainAttempts,
 				Shell:               cfg.shell,
 				NamespaceName:       cfg.namespaceName,
 				Chain:               cfg.chain,
@@ -185,7 +189,13 @@ Use --file, --config, or --stdin to provide configs for a single session without
 				go func() {
 					reader := bufio.NewReader(os.Stdin)
 					for {
-						reader.ReadString('\n')
+						// ReadString returns an error on EOF (e.g. when stdin
+						// is /dev/null or a closed pipe). Without this guard
+						// the loop spins, sending forceRotate signals as fast
+						// as the rotation worker can accept them.
+						if _, err := reader.ReadString('\n'); err != nil {
+							return
+						}
 						select {
 						case forceRotateChan <- struct{}{}:
 						case <-ctx.Done():
@@ -238,9 +248,11 @@ func addFlags(cmd *cobra.Command, cfg *proxyCmdConfig) {
 	flags.Uint16VarP(&cfg.batchSize, "batch", "b", 0, "Number of configs to test per rotation (0=auto)")
 	flags.Uint16VarP(&cfg.concurrency, "concurrency", "n", 0, "Number of concurrent test threads (0=auto)")
 	flags.Uint32Var(&cfg.healthCheckInterval, "health-check", 30, "Health check interval in seconds (0=disabled)")
-	flags.Uint16Var(&cfg.drainTimeout, "drain", 0, "Seconds to keep old connection alive during rotation (0=immediate)")
+	flags.Uint16Var(&cfg.healthFailThreshold, "health-fail-threshold", 0, "Consecutive health-check failures before striking the active config (0=default)")
+	flags.Uint16Var(&cfg.drainTimeout, "drain", 0, "Seconds to keep the current outbound serving before switching during rotation (0=switch immediately)")
 	flags.Uint16Var(&cfg.blacklistStrikes, "blacklist-strikes", 3, "Failures before blacklisting a config (0=disabled)")
 	flags.Uint32Var(&cfg.blacklistDuration, "blacklist-duration", 600, "Seconds to blacklist a failed config")
+	flags.Uint16Var(&cfg.chainAttempts, "chain-attempts", 0, "Random chain combinations to try per rotation cycle (0=default)")
 
 	flags.BoolVar(&cfg.shell, "shell", false, "Launch an interactive shell inside the proxy namespace (requires --mode app)")
 	flags.StringVar(&cfg.namespaceName, "namespace", "", "Create a named namespace for the proxy (requires --mode app)")
