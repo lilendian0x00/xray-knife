@@ -3,77 +3,82 @@ package singbox
 import (
 	"context"
 	"fmt"
+	"net/netip"
 
 	"github.com/lilendian0x00/xray-knife/v9/pkg/core/protocol"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/common/json/badoption"
 	"github.com/sagernet/sing/common/logger"
 )
 
+// Tun is a programmatic wrapper around sing-box's option.TunInboundOptions.
+// It is inbound-only and constructed in code (no URL form).
 type Tun struct {
-	// Name of the TUN interface that sing‑box should create.
+	// InterfaceName is the name sing-box assigns to the TUN device.
 	InterfaceName string
 
-	// IPv4 address (CIDR notation) assigned to the interface, e.g. "10.66.66.2/24".
-	Inet4Address string
-	// Optional IPv6 address, e.g. "fdfe:dcba:9876::2/64".
-	Inet6Address string
+	// Address is the list of IPv4/IPv6 prefixes assigned to the interface,
+	// e.g. []netip.Prefix{netip.MustParsePrefix("10.66.66.2/24")}.
+	// Replaces the legacy Inet4Address / Inet6Address fields removed at
+	// sing-box 1.13 final.
+	Address []netip.Prefix
 
-	// MTU for the device. 9000 by default in Sing‑box upstream.
+	// MTU for the device. 9000 is the sing-box upstream default.
 	MTU uint32
 
-	// Whether Sing‑box should automatically add route(s) for 0.0.0.0/0 and ::/0 via the device.
+	// AutoRoute makes sing-box add a 0.0.0.0/0 + ::/0 default route via
+	// the device.
 	AutoRoute bool
-	// Whether the added routes should be STRICT (highest priority / lowest metric).
+
+	// StrictRoute makes the added routes the highest priority.
 	StrictRoute bool
 
-	// Whether layer‑4 sniffing is enabled on packets that enter the stack from this TUN.
-	Sniff bool
+	// RouteExcludeAddress lists prefixes that must NOT be captured by the
+	// TUN routes (typical use: exclude the upstream proxy IP).
+	RouteExcludeAddress []netip.Prefix
 
-	// Which network stack implementation to use: "system" or "gvisor".
-	// Leave empty for the default ("system").  Added here so callers can tweak it.
+	// Stack selects the network stack implementation: "system" or "gvisor".
+	// Empty defaults to "system".
 	Stack string
 
-	// Optional human readable remark – we expose it mainly for symmetry with other inbounds.
+	// Remark is a human-readable description, mirroring other inbounds.
 	Remark string
 }
 
-// -----------------------------------------------------------------------------
-// Protocol interface stubs
-// -----------------------------------------------------------------------------
+func (t *Tun) Name() string { return "tun" }
 
-func (t *Tun) Name() string {
-	return "tun"
-}
-
-// Parse is a no‑op because Tun is constructed programmatically, not from a URL.
+// Parse is a no-op: Tun has no URL representation.
 func (t *Tun) Parse() error { return nil }
 
 func (t *Tun) DetailsStr() string {
-	return fmt.Sprintf("%s (iface=%s, v4=%s, mtu=%d, autoroute=%v)", t.Name(), t.InterfaceName, t.Inet4Address, t.MTU, t.AutoRoute)
+	return fmt.Sprintf("%s (iface=%s, addr=%v, mtu=%d, autoroute=%v, stack=%s)",
+		t.Name(), t.InterfaceName, t.Address, t.MTU, t.AutoRoute, t.Stack)
 }
 
-func (t *Tun) GetLink() string {
-	return t.InterfaceName
-}
+func (t *Tun) GetLink() string { return t.InterfaceName }
 
 func (t *Tun) ConvertToGeneralConfig() protocol.GeneralConfig {
 	return protocol.GeneralConfig{Protocol: t.Name(), Remark: t.Remark}
 }
 
-// CraftInboundOptions converts the Tun struct into the concrete option.Inbound
-// structure expected by Sing‑box core.
+// CraftInboundOptions converts Tun into the concrete option.Inbound expected
+// by sing-box core. Note: traffic sniffing must be configured via a route
+// rule with action "sniff" — the InboundOptions.Sniff* fields were removed
+// in sing-box 1.13 final.
 func (t *Tun) CraftInboundOptions() *option.Inbound {
-
 	opts := option.TunInboundOptions{
 		InterfaceName: t.InterfaceName,
 		MTU:           t.MTU,
+		Address:       badoption.Listable[netip.Prefix](t.Address),
 		AutoRoute:     t.AutoRoute,
 		StrictRoute:   t.StrictRoute,
 		Stack:         t.Stack,
 	}
-
+	if len(t.RouteExcludeAddress) > 0 {
+		opts.RouteExcludeAddress = badoption.Listable[netip.Prefix](t.RouteExcludeAddress)
+	}
 	return &option.Inbound{
 		Type:    t.Name(),
 		Tag:     "TUN_INBOUND",

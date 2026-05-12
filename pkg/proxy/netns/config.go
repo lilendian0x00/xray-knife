@@ -1,5 +1,13 @@
 package netns
 
+import (
+	"fmt"
+	"os"
+)
+
+// Linux IFNAMSIZ - 1 (15 chars max for interface names).
+const ifNameMax = 15
+
 // Config holds settings for the network namespace tunnel setup.
 type Config struct {
 	Name      string // namespace name (empty = auto-generated)
@@ -19,17 +27,32 @@ type Config struct {
 
 // DefaultConfig returns a Config with sensible defaults.
 // proxyPort is the port of the host SOCKS proxy.
-func DefaultConfig(proxyPort uint16) Config {
+// suffix uniquifies veth and namespace names so parallel invocations
+// don't collide. Pass an empty string to use the current PID.
+func DefaultConfig(proxyPort uint16, suffix string) Config {
+	if suffix == "" {
+		suffix = fmt.Sprintf("%d", os.Getpid())
+	}
+	vh := truncName(fmt.Sprintf("xkh-%s", suffix))
+	vn := truncName(fmt.Sprintf("xkn-%s", suffix))
 	return Config{
-		VethHost:  "xk-veth-h",
-		VethNS:    "xk-veth-ns",
+		VethHost:  vh,
+		VethNS:    vn,
 		HostIP:    "10.200.1.1",
 		NSIP:      "10.200.1.2",
 		Subnet:    "/30",
 		TunName:   "tun0",
-		TunAddr:   "10.10.0.1/24",
+		TunAddr:   "10.10.0.1/30",
 		TunMTU:    1500,
 		ProxyAddr: "10.200.1.1",
 		ProxyPort: proxyPort,
 	}
+}
+
+// truncName clamps an interface name to Linux IFNAMSIZ-1.
+func truncName(s string) string {
+	if len(s) > ifNameMax {
+		return s[:ifNameMax]
+	}
+	return s
 }

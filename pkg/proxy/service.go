@@ -107,23 +107,14 @@ type Service struct {
 	blacklist         map[string]*blacklistEntry
 	nsManager         *netns.Namespace   // non-nil when mode == "app"
 	nsTunnel          protocol.Instance  // the sing-box tunnel inside the namespace
+	nsCfg             netns.Config       // resolved netns config (for cleanup)
 	proxyReady        chan struct{}       // closed when the first proxy instance starts
 	proxyReadyOnce    sync.Once
 }
 
 func New(config Config, logger *log.Logger) (*Service, error) {
-	// Crash recovery: restore stale system proxy settings from a previous unclean exit.
-	if stale, err := sysproxy.LoadState(); err == nil && stale != nil {
-		if mgr, mgrErr := sysproxy.New(); mgrErr == nil {
-			mgr.Restore(stale)
-		}
-		sysproxy.ClearState()
-	}
-
-	// Crash recovery: clean up stale network namespace from a previous unclean exit.
-	netns.RecoverFromCrash()
-
-	// App mode validation and overrides.
+	// App mode validation and overrides — run BEFORE any privileged side
+	// effects so unprivileged invocations fail fast without touching state.
 	if config.Mode == "app" {
 		if runtime.GOOS != "linux" {
 			return nil, errors.New("app mode is only supported on Linux")
@@ -140,6 +131,21 @@ func New(config Config, logger *log.Logger) (*Service, error) {
 		config.ListenAddr = "0.0.0.0"
 		config.InboundProtocol = "socks"
 		config.InboundConfigLink = ""
+	}
+
+	// Crash recovery: restore stale system proxy settings from a previous unclean exit.
+	if stale, err := sysproxy.LoadState(); err == nil && stale != nil {
+		if mgr, mgrErr := sysproxy.New(); mgrErr == nil {
+			mgr.Restore(stale)
+		}
+		sysproxy.ClearState()
+	}
+
+	// Crash recovery: clean up stale network namespace from a previous
+	// unclean exit. Only runs in app mode; the function itself also
+	// verifies the recorded owner is no longer running before reclaiming.
+	if config.Mode == "app" {
+		netns.RecoverFromCrash()
 	}
 
 	s := &Service{
@@ -304,7 +310,15 @@ func (s *Service) Close() {
 	// Tear down namespace resources (reverse order: tunnel first, then namespace).
 	if s.nsTunnel != nil {
 		s.logf(customlog.Processing, "Stopping namespace tunnel...\n")
-		s.nsTunnel.Close()
+		if err := s.nsTunnel.Close(); err != nil {
+			s.logf(customlog.Warning, "Tunnel close returned error: %v\n", err)
+		}
+		// Wait briefly for the gvisor TUN device to disappear from the
+		// namespace before we delete the namespace itself; otherwise the
+		// kernel may emit "device busy" warnings or leave a stray link.
+		if s.nsManager != nil {
+			s.nsManager.WaitForLinkGone(s.nsCfg.TunName, 2*time.Second)
+		}
 		s.nsTunnel = nil
 	}
 	if s.nsManager != nil {
@@ -314,7 +328,9 @@ func (s *Service) Close() {
 		} else {
 			s.logf(customlog.Success, "Network namespace cleaned up.\n")
 		}
-		netns.ClearState()
+		if err := netns.ClearState(); err != nil {
+			s.logf(customlog.Warning, "Failed to clear namespace state: %v\n", err)
+		}
 		s.nsManager = nil
 	}
 
@@ -356,12 +372,17 @@ func (s *Service) setupAppMode(ctx context.Context) error {
 	}
 
 	port, _ := strconv.ParseUint(s.config.ListenPort, 10, 16)
-	nsCfg := netns.DefaultConfig(uint16(port))
+	// Derive a unique suffix for veth names from the PID so parallel
+	// `xray-knife proxy --mode app` invocations don't collide on the
+	// shared "xk-veth-h"/"xk-veth-ns" constants.
+	nsCfg := netns.DefaultConfig(uint16(port), strconv.Itoa(os.Getpid()))
 	nsCfg.Name = nsName
 	nsCfg.SocksUser = socksUser
 	nsCfg.SocksPass = socksPass
+	s.nsCfg = nsCfg
 
-	// Persist state for crash recovery.
+	// Persist state for crash recovery (Pid + BootID are stamped by
+	// SaveState; RecoverFromCrash uses them to skip live owners).
 	if err := netns.SaveState(&netns.State{
 		Name:     nsName,
 		VethHost: nsCfg.VethHost,

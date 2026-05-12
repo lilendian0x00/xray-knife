@@ -5,10 +5,12 @@ package netns
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/exec"
 	"runtime"
+	"time"
 
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
@@ -34,6 +36,16 @@ func Setup(cfg Config) (*Namespace, error) {
 		return nil, fmt.Errorf("failed to get host namespace: %w", err)
 	}
 	defer hostNS.Close()
+	// Guarantee the OS thread returns to the host namespace on every exit
+	// path; failing to do so would leak the target namespace into the Go
+	// scheduler's thread pool and corrupt syscalls on other goroutines.
+	defer func() {
+		if rerr := netns.Set(hostNS); rerr != nil {
+			log.Printf("netns: failed to restore host namespace: %v; killing thread", rerr)
+			// Thread is in an unknown NS — terminate it rather than recycle.
+			runtime.Goexit()
+		}
+	}()
 
 	// Create a new named namespace. This also switches the current
 	// OS thread into the new namespace.
@@ -191,6 +203,49 @@ func (n *Namespace) Run(ctx context.Context, args []string) error {
 	return cmd.Run()
 }
 
+// WaitForLinkGone blocks (up to timeout) until the given interface name is
+// no longer present inside the namespace. Used to make sure a sing-box TUN
+// device has been fully torn down before deleting the namespace, avoiding
+// "device busy" / leftover-link warnings from the kernel.
+func (n *Namespace) WaitForLinkGone(ifname string, timeout time.Duration) {
+	if ifname == "" {
+		return
+	}
+	deadline := time.Now().Add(timeout)
+	hostNS, err := netns.Get()
+	if err != nil {
+		return
+	}
+	defer hostNS.Close()
+
+	nsPath := fmt.Sprintf("/var/run/netns/%s", n.name)
+	targetNS, err := netns.GetFromPath(nsPath)
+	if err != nil {
+		return
+	}
+	defer targetNS.Close()
+
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if err := netns.Set(targetNS); err != nil {
+		return
+	}
+	defer func() {
+		if rerr := netns.Set(hostNS); rerr != nil {
+			log.Printf("netns: failed to restore host namespace in WaitForLinkGone: %v; killing thread", rerr)
+			runtime.Goexit()
+		}
+	}()
+
+	for time.Now().Before(deadline) {
+		if _, err := netlink.LinkByName(ifname); err != nil {
+			// Link is gone.
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // CleanupNamespace deletes a named network namespace.
 func CleanupNamespace(name string) {
 	if name == "" {
@@ -213,10 +268,17 @@ func CleanupVeth(name string) {
 }
 
 // RecoverFromCrash checks for a stale state file left by a previous
-// unclean exit and cleans up the orphaned namespace and veth.
+// unclean exit and cleans up the orphaned namespace and veth — but only
+// if the recorded owner is no longer running. This prevents a second
+// xray-knife process from tearing down resources owned by a live first
+// process.
 func RecoverFromCrash() {
 	state, err := LoadState()
 	if err != nil || state == nil {
+		return
+	}
+	if stateOwnerAlive(state) {
+		// Owner still running — leave its resources alone.
 		return
 	}
 	CleanupVeth(state.VethHost)
