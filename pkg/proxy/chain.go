@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"fmt"
-	"math/rand"
 	"strings"
 
 	"github.com/lilendian0x00/xray-knife/v9/pkg/core"
@@ -51,7 +50,9 @@ func resolveFixedChain(c core.Core, chainLinks string, chainFile string) ([]prot
 }
 
 // selectChainFromPool randomly selects numHops distinct configs from pool
-// and parses them into protocols.
+// and parses them into protocols. Walks the whole shuffled pool rather than
+// just the first numHops, so a few unparseable links don't quietly shorten
+// the chain.
 func selectChainFromPool(c core.Core, pool []string, numHops int) ([]protocol.Protocol, error) {
 	if numHops < 2 {
 		return nil, fmt.Errorf("chain requires at least 2 hops, got %d", numHops)
@@ -60,22 +61,25 @@ func selectChainFromPool(c core.Core, pool []string, numHops int) ([]protocol.Pr
 		return nil, fmt.Errorf("pool has %d configs but chain requires %d hops", len(pool), numHops)
 	}
 
-	// Fisher-Yates shuffle to select numHops distinct indices.
 	indices := make([]int, len(pool))
 	for i := range indices {
 		indices[i] = i
 	}
-	rand.Shuffle(len(indices), func(i, j int) { indices[i], indices[j] = indices[j], indices[i] })
+	rng := newLocalRand()
+	rng.Shuffle(len(indices), func(i, j int) { indices[i], indices[j] = indices[j], indices[i] })
 
 	hops := make([]protocol.Protocol, 0, numHops)
-	for _, idx := range indices[:numHops] {
+	for _, idx := range indices {
+		if len(hops) >= numHops {
+			break
+		}
 		link := strings.TrimSpace(pool[idx])
 		if link == "" {
 			continue
 		}
 		p, err := c.CreateProtocol(link)
 		if err != nil {
-			continue // skip unparseable links
+			continue
 		}
 		if err := p.Parse(); err != nil {
 			continue
@@ -83,8 +87,8 @@ func selectChainFromPool(c core.Core, pool []string, numHops int) ([]protocol.Pr
 		hops = append(hops, p)
 	}
 
-	if len(hops) < 2 {
-		return nil, fmt.Errorf("could not build a chain of %d hops from pool (only %d valid)", numHops, len(hops))
+	if len(hops) < numHops {
+		return nil, fmt.Errorf("only %d of %d hops parsed from a pool of %d", len(hops), numHops, len(pool))
 	}
 
 	return hops, nil
@@ -120,7 +124,8 @@ func selectExitHopFromPool(c core.Core, pool []string, fixedHops []protocol.Prot
 	}
 
 	// Shuffle and try to parse one.
-	rand.Shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
+	rng := newLocalRand()
+	rng.Shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
 
 	for _, link := range candidates {
 		p, err := c.CreateProtocol(link)

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	osexec "os/exec"
 	"runtime"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	"github.com/fatih/color"
+	xproxy "golang.org/x/net/proxy"
 
 	"github.com/lilendian0x00/xray-knife/v9/database"
 	"github.com/lilendian0x00/xray-knife/v9/pkg/core"
@@ -30,6 +33,32 @@ import (
 	"github.com/lilendian0x00/xray-knife/v9/utils/customlog"
 	"github.com/xtls/xray-core/common/uuid"
 )
+
+// Rotation tuning defaults.
+const (
+	// minRotationInterval is a floor on --rotate; anything tighter spins the
+	// loop without giving tests room to finish.
+	minRotationInterval uint32 = 5
+	// defaultChainAttempts is how many random chains we'll try before giving
+	// up on a rotation cycle.
+	defaultChainAttempts int = 5
+	// defaultHealthFailThresh is how many consecutive health-check misses
+	// it takes to count the outbound as actually broken. A single flaky
+	// probe shouldn't be enough to blacklist a working config.
+	defaultHealthFailThresh = 3
+	// defaultSocksCredLen is the length of the auto-generated SOCKS
+	// username/password used when no inbound link is supplied. 16 chars of
+	// alphanumeric is enough that the inbound port can be safely exposed on
+	// 0.0.0.0 in app mode without becoming a brute-force target.
+	defaultSocksCredLen int = 16
+)
+
+// newLocalRand hands back a math/rand source seeded per call. Lets the
+// rotation and chain-selection paths shuffle without piling onto the global
+// source — they get called from multiple goroutines in the web service.
+func newLocalRand() *rand.Rand {
+	return rand.New(rand.NewSource(time.Now().UnixNano() ^ int64(os.Getpid())))
+}
 
 // Config holds all the settings for the proxy service.
 type Config struct {
@@ -60,9 +89,11 @@ type Config struct {
 	BatchSize           uint16 `json:"batchSize"`           // configs to test per rotation (0=auto)
 	Concurrency         uint16 `json:"concurrency"`         // concurrent test threads (0=auto)
 	HealthCheckInterval uint32 `json:"healthCheckInterval"` // seconds between health checks (0=disabled)
-	DrainTimeout        uint16 `json:"drainTimeout"`        // seconds to keep old connection alive during rotation (0=immediate)
+	HealthFailThreshold uint16 `json:"healthFailThreshold"` // consecutive health-check failures before strike (0=auto)
+	DrainTimeout        uint16 `json:"drainTimeout"`        // seconds to keep current outbound serving before switching (0=immediate switch)
 	BlacklistStrikes    uint16 `json:"blacklistStrikes"`    // failures before blacklisting (0=disabled)
 	BlacklistDuration   uint32 `json:"blacklistDuration"`   // seconds to blacklist a config
+	ChainAttempts       uint16 `json:"chainAttempts"`       // attempts to find a working chain (0=default 5)
 	Shell               bool   `json:"shell"`               // launch shell in namespace (app mode)
 	NamespaceName       string `json:"namespaceName"`       // named namespace (app mode)
 	Chain               bool   `json:"chain"`               // enable outbound chaining (multi-hop)
@@ -124,6 +155,21 @@ type Service struct {
 }
 
 func New(config Config, logger *log.Logger) (*Service, error) {
+	// Catch a bad port now rather than letting the core or the namespace
+	// tunnel blow up halfway through setup.
+	if config.ListenPort == "" {
+		return nil, errors.New("listen port is required")
+	}
+	if _, err := strconv.ParseUint(config.ListenPort, 10, 16); err != nil {
+		return nil, fmt.Errorf("invalid listen port %q: %w", config.ListenPort, err)
+	}
+
+	// --rotate 0 used to drop us into a tight loop; clamp very small values
+	// to a sane floor instead.
+	if config.RotationInterval > 0 && config.RotationInterval < minRotationInterval {
+		config.RotationInterval = minRotationInterval
+	}
+
 	// App mode validation and overrides — run BEFORE any privileged side
 	// effects so unprivileged invocations fail fast without touching state.
 	if config.Mode == "app" {
@@ -137,8 +183,10 @@ func New(config Config, logger *log.Logger) (*Service, error) {
 		if !config.Shell && config.NamespaceName == "" {
 			config.Shell = true
 		}
-		// Force SOCKS inbound on 0.0.0.0 so the namespace can reach the proxy
-		// through the veth pair.
+		// The namespace reaches the proxy via the veth pair, but the veth
+		// host endpoint doesn't exist yet at bind time — so we have to
+		// listen on 0.0.0.0 and rely on the generated SOCKS credentials
+		// for access control.
 		config.ListenAddr = "0.0.0.0"
 		config.InboundProtocol = "socks"
 		config.InboundConfigLink = ""
@@ -157,6 +205,11 @@ func New(config Config, logger *log.Logger) (*Service, error) {
 	// verifies the recorded owner is no longer running before reclaiming.
 	if config.Mode == "app" {
 		netns.RecoverFromCrash()
+		if logger != nil {
+			logger.Printf("WARNING: app mode binds SOCKS listener on 0.0.0.0:%s; rely on the generated SOCKS credentials or restrict via firewall.\n", config.ListenPort)
+		} else {
+			customlog.Printf(customlog.Warning, "app mode binds SOCKS listener on 0.0.0.0:%s; rely on the generated SOCKS credentials or restrict via firewall.\n", config.ListenPort)
+		}
 	}
 
 	s := &Service{
@@ -181,12 +234,9 @@ func New(config Config, logger *log.Logger) (*Service, error) {
 		s.logf(customlog.Success, "Loaded %d configs from the database for rotation pool.\n", len(s.config.ConfigLinks))
 	}
 
-	// Deduplicate config links to avoid wasting bandwidth testing the same config twice.
-	var dupsRemoved int
-	s.config.ConfigLinks, dupsRemoved = pkghttp.DeduplicateLinks(s.config.ConfigLinks)
-	if dupsRemoved > 0 {
-		s.logf(customlog.Info, "Removed %d duplicate configs from pool (%d unique remain).\n", dupsRemoved, len(s.config.ConfigLinks))
-	}
+	// Run pool assignment through setPool so the dedup pass stays in one
+	// place; a future live-reload path will want this too.
+	s.setPool(s.config.ConfigLinks)
 
 	coreOpts := core.FactoryOptions{
 		InsecureTLS:   config.InsecureTLS,
@@ -291,7 +341,10 @@ func (s *Service) logf(logType customlog.Type, format string, v ...interface{}) 
 	}
 }
 
-// healthCheck tests whether the active outbound connection is still working.
+// healthCheck pokes the live local listener so we exercise both sides of
+// the proxy (the inbound is just as likely to wedge as the outbound). When
+// the inbound speaks something exotic that no standard client can reach,
+// it falls back to the older outbound-only test.
 func (s *Service) healthCheck(ctx context.Context) bool {
 	s.mu.RLock()
 	activeOutbound := s.activeOutbound
@@ -301,12 +354,79 @@ func (s *Service) healthCheck(ctx context.Context) bool {
 	}
 
 	timeout := time.Duration(s.config.MaximumAllowedDelay) * time.Millisecond
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+
+	if client, ok := s.makeLocalProxyClient(timeout); ok {
+		return doHealthGET(ctx, client, timeout)
+	}
+
+	// Fallback: outbound-only test via a fresh instance.
 	client, instance, err := s.core.MakeHttpClient(ctx, activeOutbound.Protocol, timeout)
 	if err != nil {
 		return false
 	}
 	defer instance.Close()
+	return doHealthGET(ctx, client, timeout)
+}
 
+// makeLocalProxyClient returns an http.Client wired up to talk to the
+// inbound listener directly. Returns ok=false when the inbound isn't
+// something a vanilla SOCKS5/HTTP client can speak.
+func (s *Service) makeLocalProxyClient(timeout time.Duration) (*http.Client, bool) {
+	addr := s.config.ListenAddr
+	if addr == "0.0.0.0" || addr == "" {
+		addr = "127.0.0.1"
+	}
+	target := net.JoinHostPort(addr, s.config.ListenPort)
+
+	switch in := s.inbound.(type) {
+	case *pkgxray.Socks:
+		return socksHealthClient(target, in.Username, in.Password, timeout), true
+	case *pkgsingbox.Socks:
+		return socksHealthClient(target, in.Username, in.Password, timeout), true
+	case *pkgxray.Http, *pkgsingbox.Http:
+		proxyURL, err := url.Parse("http://" + target)
+		if err != nil {
+			return nil, false
+		}
+		tr := &http.Transport{
+			Proxy:                 http.ProxyURL(proxyURL),
+			DisableKeepAlives:     true,
+			ResponseHeaderTimeout: timeout,
+		}
+		return &http.Client{Transport: tr, Timeout: timeout}, true
+	default:
+		return nil, false
+	}
+}
+
+func socksHealthClient(target, user, pass string, timeout time.Duration) *http.Client {
+	var auth *xproxy.Auth
+	if user != "" || pass != "" {
+		auth = &xproxy.Auth{User: user, Password: pass}
+	}
+	dialer, err := xproxy.SOCKS5("tcp", target, auth, &net.Dialer{Timeout: timeout})
+	if err != nil {
+		return nil
+	}
+	tr := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			// xproxy.Dialer doesn't expose a DialContext form, so honor the
+			// ctx deadline approximately via the outer Client timeout.
+			return dialer.Dial(network, addr)
+		},
+		DisableKeepAlives:     true,
+		ResponseHeaderTimeout: timeout,
+	}
+	return &http.Client{Transport: tr, Timeout: timeout}
+}
+
+func doHealthGET(ctx context.Context, client *http.Client, timeout time.Duration) bool {
+	if client == nil {
+		return false
+	}
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, "GET", "https://cloudflare.com/cdn-cgi/trace", nil)
@@ -319,6 +439,36 @@ func (s *Service) healthCheck(ctx context.Context) bool {
 	}
 	resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
+}
+
+// setPool installs links as the rotation pool, stripping duplicates first.
+// All pool assignment goes through here so a future live-reload path can't
+// reintroduce dupes.
+func (s *Service) setPool(links []string) {
+	unique, removed := pkghttp.DeduplicateLinks(links)
+	s.config.ConfigLinks = unique
+	if removed > 0 {
+		s.logf(customlog.Info, "Removed %d duplicate configs from pool (%d unique remain).\n", removed, len(unique))
+	}
+}
+
+// recordStrike bumps the failure counter for link and, once strikes reach
+// the configured threshold, marks it blacklisted for BlacklistDuration
+// seconds. Safe to call with an empty link or when blacklisting is disabled.
+func (s *Service) recordStrike(link, reason string) {
+	if s.config.BlacklistStrikes == 0 || link == "" {
+		return
+	}
+	entry, exists := s.blacklist[link]
+	if !exists {
+		entry = &blacklistEntry{}
+		s.blacklist[link] = entry
+	}
+	entry.strikes++
+	if entry.strikes >= int(s.config.BlacklistStrikes) && entry.blacklistedUntil.IsZero() {
+		entry.blacklistedUntil = time.Now().Add(time.Duration(s.config.BlacklistDuration) * time.Second)
+		s.logf(customlog.Warning, "Blacklisted %s for %ds after %d strikes (%s)\n", link, s.config.BlacklistDuration, entry.strikes, reason)
+	}
 }
 
 // Close restores the system proxy settings if they were modified, and cleans up state.
@@ -462,12 +612,17 @@ func (s *Service) runAppMode(ctx context.Context, forceRotate <-chan struct{}) e
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
-	// Run the underlying proxy (single or rotation) in a goroutine.
+	// Pick the right runner for the namespace's proxy. Chain mode and the
+	// single-config path both need to be honored here; the namespace just
+	// happens to be the outer container around them.
 	errCh := make(chan error, 1)
 	go func() {
-		if len(s.config.ConfigLinks) == 1 {
+		switch {
+		case s.config.Chain:
+			errCh <- s.runChainMode(runCtx, forceRotate)
+		case len(s.config.ConfigLinks) == 1:
 			errCh <- s.runSingleMode(runCtx, s.config.ConfigLinks[0])
-		} else {
+		default:
 			errCh <- s.runRotationMode(runCtx, forceRotate)
 		}
 	}()
@@ -533,11 +688,15 @@ func (s *Service) runSingleMode(ctx context.Context, link string) error {
 	}
 	s.logf(customlog.Info, "============================\n")
 
-	instance, err := s.core.MakeInstance(context.Background(), outbound)
+	instance, err := s.core.MakeInstance(ctx, outbound)
 	if err != nil {
 		return fmt.Errorf("error making instance: %w", err)
 	}
-	defer instance.Close()
+	defer func() {
+		if instance != nil {
+			instance.Close()
+		}
+	}()
 
 	if err := instance.Start(); err != nil {
 		return fmt.Errorf("error starting instance: %w", err)
@@ -545,9 +704,51 @@ func (s *Service) runSingleMode(ctx context.Context, link string) error {
 	s.logf(customlog.Success, "Started listening for new connections...\n")
 	s.signalProxyReady()
 
-	<-ctx.Done() // Wait for shutdown signal
-	s.logf(customlog.Processing, "Shutting down proxy...\n")
-	return nil
+	// Single-config mode can't rotate to a different outbound when its one
+	// connection dies, but we can at least try to bring the same outbound
+	// back up if the local listener stops responding. Disabled when
+	// HealthCheckInterval is 0.
+	var healthTickerC <-chan time.Time
+	if s.config.HealthCheckInterval > 0 {
+		t := time.NewTicker(time.Duration(s.config.HealthCheckInterval) * time.Second)
+		healthTickerC = t.C
+		defer t.Stop()
+	}
+	threshold := int(s.config.HealthFailThreshold)
+	if threshold <= 0 {
+		threshold = defaultHealthFailThresh
+	}
+	fails := 0
+
+	for {
+		select {
+		case <-ctx.Done():
+			s.logf(customlog.Processing, "Shutting down proxy...\n")
+			return nil
+		case <-healthTickerC:
+			if s.healthCheck(ctx) {
+				fails = 0
+				continue
+			}
+			fails++
+			s.logf(customlog.Warning, "Health check failed (%d/%d) in single-config mode.", fails, threshold)
+			if fails < threshold {
+				continue
+			}
+			fails = 0
+			s.logf(customlog.Processing, "Restarting outbound instance...")
+			instance.Close()
+			newInst, err := s.core.MakeInstance(ctx, outbound)
+			if err != nil {
+				return fmt.Errorf("failed to rebuild instance after health failure: %w", err)
+			}
+			if err := newInst.Start(); err != nil {
+				newInst.Close()
+				return fmt.Errorf("failed to restart instance after health failure: %w", err)
+			}
+			instance = newInst
+		}
+	}
 }
 
 func (s *Service) runRotationMode(ctx context.Context, forceRotate <-chan struct{}) error {
@@ -565,11 +766,11 @@ func (s *Service) runRotationMode(ctx context.Context, forceRotate <-chan struct
 
 	var lastUsedLink string
 
-	// Initial setup
-	s.setRotationStatus("testing")
-	instance, result, err := s.findAndStartWorkingConfig(ctx, examiner, "")
+	// Initial setup — no old listener to release yet.
+	s.setRotationStatus("rotating")
+	instance, result, err := s.findAndStartWorkingConfig(ctx, examiner, "", nil)
 	if err != nil {
-		s.logf(customlog.Failure, "Could not find any working config on initial startup. Exiting.")
+		s.logf(customlog.Failure, "No working config found on startup: %v", err)
 		return err
 	}
 	currentInstance = instance
@@ -577,7 +778,7 @@ func (s *Service) runRotationMode(ctx context.Context, forceRotate <-chan struct
 	s.setRotationStatus("idle")
 	s.signalProxyReady()
 
-	// Set up health check ticker if enabled
+	// Health-check ticker is optional; a zero interval disables it.
 	var healthTicker *time.Ticker
 	var healthTickerC <-chan time.Time
 	if s.config.HealthCheckInterval > 0 {
@@ -586,13 +787,19 @@ func (s *Service) runRotationMode(ctx context.Context, forceRotate <-chan struct
 		defer healthTicker.Stop()
 	}
 
+	healthFailThreshold := int(s.config.HealthFailThreshold)
+	if healthFailThreshold <= 0 {
+		healthFailThreshold = defaultHealthFailThresh
+	}
+	healthFails := 0
+
 	for {
 		rotationDuration := time.Duration(s.config.RotationInterval) * time.Second
 		s.mu.RLock()
 		isStalled := s.rotationStatus == "stalled"
 		s.mu.RUnlock()
 		if isStalled {
-			rotationDuration = 30 * time.Second // Shorter retry interval if stalled
+			rotationDuration = 30 * time.Second // back off a bit when we couldn't find anything
 		}
 
 		s.mu.Lock()
@@ -604,7 +811,7 @@ func (s *Service) runRotationMode(ctx context.Context, forceRotate <-chan struct
 		timer := time.NewTimer(rotationDuration)
 
 		doRotate := false
-		waitLoop:
+	waitLoop:
 		for {
 			select {
 			case <-ctx.Done():
@@ -612,9 +819,7 @@ func (s *Service) runRotationMode(ctx context.Context, forceRotate <-chan struct
 				return nil
 			case <-forceRotate:
 				s.logf(customlog.Processing, "Manual rotation triggered.")
-				if !timer.Stop() {
-					<-timer.C
-				}
+				timer.Stop()
 				doRotate = true
 				break waitLoop
 			case <-timer.C:
@@ -622,27 +827,22 @@ func (s *Service) runRotationMode(ctx context.Context, forceRotate <-chan struct
 				doRotate = true
 				break waitLoop
 			case <-healthTickerC:
-				if !s.healthCheck(ctx) {
-					s.logf(customlog.Warning, "Health check failed! Triggering immediate rotation.")
-					// Record a blacklist strike for the active config
-					if s.config.BlacklistStrikes > 0 && lastUsedLink != "" {
-						entry, exists := s.blacklist[lastUsedLink]
-						if !exists {
-							entry = &blacklistEntry{}
-							s.blacklist[lastUsedLink] = entry
-						}
-						entry.strikes++
-						if entry.strikes >= int(s.config.BlacklistStrikes) {
-							entry.blacklistedUntil = time.Now().Add(time.Duration(s.config.BlacklistDuration) * time.Second)
-							s.logf(customlog.Warning, "Blacklisted failed active config for %ds: %s\n", s.config.BlacklistDuration, lastUsedLink)
-						}
-					}
-					if !timer.Stop() {
-						<-timer.C
-					}
-					doRotate = true
-					break waitLoop
+				if s.healthCheck(ctx) {
+					healthFails = 0
+					continue
 				}
+				healthFails++
+				s.logf(customlog.Warning, "Health check failed (%d/%d).", healthFails, healthFailThreshold)
+				if healthFails < healthFailThreshold {
+					continue
+				}
+				// Threshold reached: record a strike against the current
+				// outbound and trigger a rotation.
+				s.recordStrike(lastUsedLink, "health check failed")
+				healthFails = 0
+				timer.Stop()
+				doRotate = true
+				break waitLoop
 			}
 		}
 
@@ -650,47 +850,75 @@ func (s *Service) runRotationMode(ctx context.Context, forceRotate <-chan struct
 			continue
 		}
 
-		s.setRotationStatus("testing")
-		instance, result, err := s.findAndStartWorkingConfig(ctx, examiner, lastUsedLink)
+		s.setRotationStatus("rotating")
+
+		// releaseOld runs synchronously just before the new instance binds
+		// its inbound port. Doing it in-line means the two listeners can't
+		// fight over the same port — which is what happened when the old
+		// connection was closed asynchronously. DrainTimeout, when set, is
+		// the dwell time we spend on the current outbound before flipping
+		// over; it shows up as a short blip in listener availability.
+		releaseOld := func() {
+			if currentInstance == nil {
+				return
+			}
+			if drain := time.Duration(s.config.DrainTimeout) * time.Second; drain > 0 {
+				s.logf(customlog.Processing, "Holding current outbound for %v before switching...", drain)
+				select {
+				case <-time.After(drain):
+				case <-ctx.Done():
+				}
+			}
+			currentInstance.Close()
+			currentInstance = nil
+		}
+
+		instance, result, err := s.findAndStartWorkingConfig(ctx, examiner, lastUsedLink, releaseOld)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
-			s.logf(customlog.Warning, "Rotation failed to find a new working config. Keeping the current one. Retrying in 30s...")
-			s.setRotationStatus("stalled")
-			continue // Keep the old instance running and retry sooner
-		}
-
-		s.setRotationStatus("switching")
-		s.logf(customlog.Success, "Switching to new outbound: %s", result.ConfigLink)
-
-		if currentInstance != nil {
-			oldInstance := currentInstance
-			drainTimeout := time.Duration(s.config.DrainTimeout) * time.Second
-			if drainTimeout > 0 {
-				s.logf(customlog.Processing, "Draining old connection for %v...", drainTimeout)
-				go func() {
-					time.Sleep(drainTimeout)
-					oldInstance.Close()
-				}()
+			if currentInstance == nil {
+				s.logf(customlog.Warning, "Rotation failed and old listener already released: %v. Retrying soon.", err)
 			} else {
-				oldInstance.Close()
+				s.logf(customlog.Warning, "Rotation failed: %v. Keeping current outbound.", err)
 			}
+			s.setRotationStatus("stalled")
+			continue
 		}
+
+		s.logf(customlog.Success, "Switched to: %s", result.ConfigLink)
 		currentInstance = instance
 		lastUsedLink = result.ConfigLink
 		s.setRotationStatus("idle")
 	}
 }
 
+// findAndStartWorkingConfig probes a batch from the pool and brings up the
+// first candidate that survives Start. releasePort, when non-nil, fires
+// once right before the first Start attempt; the rotation loop uses it to
+// close the previous instance so the new one can claim the inbound port.
 func (s *Service) findAndStartWorkingConfig(
 	ctx context.Context,
 	examiner *pkghttp.Examiner,
 	lastUsedLink string,
+	releasePort func(),
 ) (protocol.Instance, *pkghttp.Result, error) {
 	availableLinks := make([]string, len(s.config.ConfigLinks))
 	copy(availableLinks, s.config.ConfigLinks)
-	rand.Shuffle(len(availableLinks), func(i, j int) { availableLinks[i], availableLinks[j] = availableLinks[j], availableLinks[i] })
+	rng := newLocalRand()
+	rng.Shuffle(len(availableLinks), func(i, j int) { availableLinks[i], availableLinks[j] = availableLinks[j], availableLinks[i] })
+
+	// Drop the previous outbound from the candidate set so we don't waste a
+	// test slot on it and then discard it at selection time.
+	if lastUsedLink != "" {
+		for i, link := range availableLinks {
+			if link == lastUsedLink {
+				availableLinks = append(availableLinks[:i], availableLinks[i+1:]...)
+				break
+			}
+		}
+	}
 
 	// Filter out blacklisted configs
 	if s.config.BlacklistStrikes > 0 {
@@ -768,52 +996,57 @@ func (s *Service) findAndStartWorkingConfig(
 
 	sort.Sort(results)
 
-	// Record strikes for failed configs in the blacklist
-	if s.config.BlacklistStrikes > 0 {
-		for _, res := range results {
-			if res.Status != "passed" && res.ConfigLink != "" {
-				entry, exists := s.blacklist[res.ConfigLink]
-				if !exists {
-					entry = &blacklistEntry{}
-					s.blacklist[res.ConfigLink] = entry
-				}
-				entry.strikes++
-				if entry.strikes >= int(s.config.BlacklistStrikes) {
-					entry.blacklistedUntil = time.Now().Add(time.Duration(s.config.BlacklistDuration) * time.Second)
-					s.logf(customlog.Warning, "Blacklisted config for %ds (%d strikes): %s\n", s.config.BlacklistDuration, entry.strikes, res.ConfigLink)
-				}
+	// Strike anything that failed in the examiner so persistently broken
+	// configs eventually leave the rotation pool.
+	for _, res := range results {
+		if res.Status != "passed" && res.ConfigLink != "" {
+			reason := res.Status
+			if res.Reason != "" {
+				reason = res.Reason
 			}
+			s.recordStrike(res.ConfigLink, reason)
 		}
 	}
 
+	portReleased := false
 	for _, res := range results {
-		// This check is now safe because we know `res.Protocol` is non-nil if status is "passed".
-		if res.Status == "passed" && res.Protocol != nil && res.ConfigLink != lastUsedLink {
-			s.logf(customlog.Success, "Found working config: %s (Delay: %dms)\n", res.ConfigLink, res.Delay)
-			s.logf(customlog.Info, "==========OUTBOUND==========")
-			if s.logger != nil {
-				g := res.Protocol.ConvertToGeneralConfig()
-				s.logger.Printf("Protocol: %s\nRemark: %s\nAddr: %s:%s\nLink: %s\n", g.Protocol, g.Remark, g.Address, g.Port, g.OrigLink)
-			} else {
-				fmt.Printf("%v", res.Protocol.DetailsStr())
-			}
-			s.logf(customlog.Info, "============================\n")
-
-			instance, err := s.core.MakeInstance(context.Background(), res.Protocol)
-			if err != nil {
-				s.logf(customlog.Failure, "Error making core instance with '%s': %v\n", res.ConfigLink, err)
-				continue
-			}
-			if err := instance.Start(); err != nil {
-				instance.Close()
-				s.logf(customlog.Failure, "Error starting core instance with '%s': %v\n", res.ConfigLink, err)
-				continue
-			}
-			s.mu.Lock()
-			s.activeOutbound = res
-			s.mu.Unlock()
-			return instance, res, nil
+		if res.Status != "passed" || res.Protocol == nil {
+			continue
 		}
+		s.logf(customlog.Success, "Found working config: %s (Delay: %dms)\n", res.ConfigLink, res.Delay)
+		s.logf(customlog.Info, "==========OUTBOUND==========")
+		if s.logger != nil {
+			g := res.Protocol.ConvertToGeneralConfig()
+			s.logger.Printf("Protocol: %s\nRemark: %s\nAddr: %s:%s\nLink: %s\n", g.Protocol, g.Remark, g.Address, g.Port, g.OrigLink)
+		} else {
+			fmt.Printf("%v", res.Protocol.DetailsStr())
+		}
+		s.logf(customlog.Info, "============================\n")
+
+		// Build the instance first — that part does not touch the network.
+		instance, err := s.core.MakeInstance(ctx, res.Protocol)
+		if err != nil {
+			s.logf(customlog.Failure, "Error making core instance with '%s': %v\n", res.ConfigLink, err)
+			s.recordStrike(res.ConfigLink, fmt.Sprintf("MakeInstance: %v", err))
+			continue
+		}
+		// Hand the port over from the old listener right before the new one
+		// tries to bind. Only do this once per call so a sequence of Start
+		// failures doesn't bounce in and out of "no listener".
+		if !portReleased && releasePort != nil {
+			releasePort()
+			portReleased = true
+		}
+		if err := instance.Start(); err != nil {
+			instance.Close()
+			s.logf(customlog.Failure, "Error starting core instance with '%s': %v\n", res.ConfigLink, err)
+			s.recordStrike(res.ConfigLink, fmt.Sprintf("Start: %v", err))
+			continue
+		}
+		s.mu.Lock()
+		s.activeOutbound = res
+		s.mu.Unlock()
+		return instance, res, nil
 	}
 
 	// FIX #3: Provide a useful error message summarizing the failures.
@@ -848,8 +1081,9 @@ func (s *Service) findAndStartWorkingConfig(
 	return nil, nil, errors.New("failed to find any new working outbound configuration in this batch")
 }
 
-// chainHealthCheck tests whether the current chain is still working by
-// making an HTTP request through the full chain.
+// chainHealthCheck is the chain-mode twin of healthCheck — probe through
+// the live listener first, only spin up a temporary chained instance when
+// the inbound type leaves us no other choice.
 func (s *Service) chainHealthCheck(ctx context.Context) bool {
 	s.mu.RLock()
 	hops := s.activeChainHops
@@ -859,24 +1093,20 @@ func (s *Service) chainHealthCheck(ctx context.Context) bool {
 	}
 
 	timeout := time.Duration(s.config.MaximumAllowedDelay) * time.Millisecond
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+
+	if client, ok := s.makeLocalProxyClient(timeout); ok {
+		return doHealthGET(ctx, client, timeout)
+	}
+
 	client, instance, err := s.makeChainedHttpClient(ctx, hops, timeout)
 	if err != nil {
 		return false
 	}
 	defer instance.Close()
-
-	reqCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, "GET", "https://cloudflare.com/cdn-cgi/trace", nil)
-	if err != nil {
-		return false
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return false
-	}
-	resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
+	return doHealthGET(ctx, client, timeout)
 }
 
 // makeChainedInstance delegates to the concrete core's MakeChainedInstance.
@@ -937,7 +1167,7 @@ func (s *Service) runFixedChainMode(ctx context.Context) error {
 
 	s.logChainHops(hops)
 
-	instance, err := s.makeChainedInstance(context.Background(), hops)
+	instance, err := s.makeChainedInstance(ctx, hops)
 	if err != nil {
 		return fmt.Errorf("failed to create chained instance: %w", err)
 	}
@@ -973,7 +1203,7 @@ func (s *Service) runChainNoRotation(ctx context.Context) error {
 
 	s.logChainHops(hops)
 
-	instance, err := s.makeChainedInstance(context.Background(), hops)
+	instance, err := s.makeChainedInstance(ctx, hops)
 	if err != nil {
 		return fmt.Errorf("failed to create chained instance: %w", err)
 	}
@@ -1026,7 +1256,7 @@ func (s *Service) runChainExitRotation(ctx context.Context, forceRotate <-chan s
 
 	// Start the real instance.
 	var currentInstance protocol.Instance
-	currentInstance, err = s.makeChainedInstance(context.Background(), hops)
+	currentInstance, err = s.makeChainedInstance(ctx, hops)
 	if err != nil {
 		return fmt.Errorf("failed to create initial chained instance: %w", err)
 	}
@@ -1080,9 +1310,7 @@ func (s *Service) runChainExitRotation(ctx context.Context, forceRotate <-chan s
 				return nil
 			case <-forceRotate:
 				s.logf(customlog.Processing, "Manual chain rotation triggered.\n")
-				if !timer.Stop() {
-					<-timer.C
-				}
+				timer.Stop()
 				doRotate = true
 				break exitWaitLoop
 			case <-timer.C:
@@ -1091,9 +1319,7 @@ func (s *Service) runChainExitRotation(ctx context.Context, forceRotate <-chan s
 			case <-healthTickerC:
 				if !s.chainHealthCheck(ctx) {
 					s.logf(customlog.Warning, "Chain health check failed! Triggering rotation.\n")
-					if !timer.Stop() {
-						<-timer.C
-					}
+					timer.Stop()
 					doRotate = true
 					break exitWaitLoop
 				}
@@ -1104,57 +1330,60 @@ func (s *Service) runChainExitRotation(ctx context.Context, forceRotate <-chan s
 			continue
 		}
 
-		s.setRotationStatus("testing")
+		s.setRotationStatus("rotating")
 
-		// Select a new exit hop.
+		// Pick a fresh exit hop that isn't already in the chain or the one
+		// we're rotating away from.
 		newHops, err := selectExitHopFromPool(s.core, s.config.ConfigLinks, fixedHops, lastExitLink)
 		if err != nil {
-			s.logf(customlog.Warning, "Failed to find new exit hop: %v. Keeping current chain.\n", err)
+			s.logf(customlog.Warning, "No new exit hop available: %v. Keeping current chain.\n", err)
 			s.setRotationStatus("stalled")
 			continue
 		}
 
-		// Test the new chain.
+		// Probe the candidate chain end-to-end before we touch the live one.
 		testClient, testInst, err := s.makeChainedHttpClient(ctx, newHops, timeout)
 		if err != nil {
-			s.logf(customlog.Warning, "Failed to build new chain for testing: %v\n", err)
+			s.logf(customlog.Warning, "Could not build candidate chain for testing: %v\n", err)
 			s.setRotationStatus("stalled")
 			continue
 		}
 		if !s.testChainViaClient(ctx, testClient, timeout) {
 			testInst.Close()
-			s.logf(customlog.Warning, "New chain failed health check. Keeping current chain.\n")
+			s.logf(customlog.Warning, "Candidate chain failed health check. Keeping current chain.\n")
 			s.setRotationStatus("stalled")
 			continue
 		}
 		testInst.Close()
 
-		s.setRotationStatus("switching")
-
-		// Build and start new instance.
-		newInstance, err := s.makeChainedInstance(context.Background(), newHops)
+		// Build the new instance first (cheap, no socket use), free the old
+		// listener, then bind the new one. Same ordering as the non-chain
+		// loop — both new and old instances configure the same inbound
+		// port, so they can't be alive at once.
+		newInstance, err := s.makeChainedInstance(ctx, newHops)
 		if err != nil {
-			s.logf(customlog.Warning, "Failed to create new chained instance: %v\n", err)
+			s.logf(customlog.Warning, "Could not create new chained instance: %v\n", err)
 			s.setRotationStatus("stalled")
 			continue
 		}
+
+		if currentInstance != nil {
+			if drain := time.Duration(s.config.DrainTimeout) * time.Second; drain > 0 {
+				s.logf(customlog.Processing, "Holding current chain for %v before switching...", drain)
+				select {
+				case <-time.After(drain):
+				case <-ctx.Done():
+				}
+			}
+			currentInstance.Close()
+			currentInstance = nil
+		}
+
 		if err := newInstance.Start(); err != nil {
 			newInstance.Close()
-			s.logf(customlog.Warning, "Failed to start new chained instance: %v\n", err)
+			s.logf(customlog.Warning, "Could not start new chained instance: %v\n", err)
 			s.setRotationStatus("stalled")
 			continue
-		}
-
-		// Drain old instance.
-		oldInstance := currentInstance
-		drainTimeout := time.Duration(s.config.DrainTimeout) * time.Second
-		if drainTimeout > 0 {
-			go func() {
-				time.Sleep(drainTimeout)
-				oldInstance.Close()
-			}()
-		} else {
-			oldInstance.Close()
 		}
 
 		currentInstance = newInstance
@@ -1186,7 +1415,7 @@ func (s *Service) runChainFullRotation(ctx context.Context, forceRotate <-chan s
 	}
 
 	var currentInstance protocol.Instance
-	currentInstance, err = s.makeChainedInstance(context.Background(), hops)
+	currentInstance, err = s.makeChainedInstance(ctx, hops)
 	if err != nil {
 		return fmt.Errorf("failed to create initial chained instance: %w", err)
 	}
@@ -1235,9 +1464,7 @@ func (s *Service) runChainFullRotation(ctx context.Context, forceRotate <-chan s
 				return nil
 			case <-forceRotate:
 				s.logf(customlog.Processing, "Manual chain rotation triggered.\n")
-				if !timer.Stop() {
-					<-timer.C
-				}
+				timer.Stop()
 				doRotate = true
 				break fullWaitLoop
 			case <-timer.C:
@@ -1246,9 +1473,7 @@ func (s *Service) runChainFullRotation(ctx context.Context, forceRotate <-chan s
 			case <-healthTickerC:
 				if !s.chainHealthCheck(ctx) {
 					s.logf(customlog.Warning, "Chain health check failed! Triggering full rotation.\n")
-					if !timer.Stop() {
-						<-timer.C
-					}
+					timer.Stop()
 					doRotate = true
 					break fullWaitLoop
 				}
@@ -1259,39 +1484,39 @@ func (s *Service) runChainFullRotation(ctx context.Context, forceRotate <-chan s
 			continue
 		}
 
-		s.setRotationStatus("testing")
+		s.setRotationStatus("rotating")
 
 		newHops, err := s.findWorkingChain(ctx, numHops, timeout)
 		if err != nil {
-			s.logf(customlog.Warning, "Failed to find new working chain: %v. Keeping current chain.\n", err)
+			s.logf(customlog.Warning, "No new working chain: %v. Keeping current chain.\n", err)
 			s.setRotationStatus("stalled")
 			continue
 		}
 
-		s.setRotationStatus("switching")
-
-		newInstance, err := s.makeChainedInstance(context.Background(), newHops)
+		newInstance, err := s.makeChainedInstance(ctx, newHops)
 		if err != nil {
-			s.logf(customlog.Warning, "Failed to create new chained instance: %v\n", err)
+			s.logf(customlog.Warning, "Could not create new chained instance: %v\n", err)
 			s.setRotationStatus("stalled")
 			continue
 		}
+
+		if currentInstance != nil {
+			if drain := time.Duration(s.config.DrainTimeout) * time.Second; drain > 0 {
+				s.logf(customlog.Processing, "Holding current chain for %v before switching...", drain)
+				select {
+				case <-time.After(drain):
+				case <-ctx.Done():
+				}
+			}
+			currentInstance.Close()
+			currentInstance = nil
+		}
+
 		if err := newInstance.Start(); err != nil {
 			newInstance.Close()
-			s.logf(customlog.Warning, "Failed to start new chained instance: %v\n", err)
+			s.logf(customlog.Warning, "Could not start new chained instance: %v\n", err)
 			s.setRotationStatus("stalled")
 			continue
-		}
-
-		oldInstance := currentInstance
-		drainTimeout := time.Duration(s.config.DrainTimeout) * time.Second
-		if drainTimeout > 0 {
-			go func() {
-				time.Sleep(drainTimeout)
-				oldInstance.Close()
-			}()
-		} else {
-			oldInstance.Close()
 		}
 
 		currentInstance = newInstance
@@ -1308,9 +1533,14 @@ func (s *Service) runChainFullRotation(ctx context.Context, forceRotate <-chan s
 }
 
 // findWorkingChain tries multiple random chain combinations from the pool
-// and returns the first one that passes a health check.
+// and returns the first one that passes a health check. The attempt budget
+// is configurable via Config.ChainAttempts so callers with small pools (or
+// flaky relays) can tune it.
 func (s *Service) findWorkingChain(ctx context.Context, numHops int, timeout time.Duration) ([]protocol.Protocol, error) {
-	maxAttempts := 5
+	maxAttempts := int(s.config.ChainAttempts)
+	if maxAttempts <= 0 {
+		maxAttempts = defaultChainAttempts
+	}
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -1380,6 +1610,9 @@ func (s *Service) createExaminer() (*pkghttp.Examiner, error) {
 		TestEndpointHttpMethod: "GET",
 		DoSpeedtest:            false,
 		DoIPInfo:               true,
+		// Keep test-time dials on the same interface the live outbound
+		// uses, otherwise a passing test can hide a runtime --bind failure.
+		BindInterface: s.config.BindInterface,
 	})
 }
 
@@ -1391,6 +1624,19 @@ func (s *Service) createInbound() (protocol.Protocol, error) {
 		}
 		if err := inbound.Parse(); err != nil {
 			return nil, fmt.Errorf("failed to parse inbound config link: %w", err)
+		}
+		// In system mode the OS proxy settings will point at this listener,
+		// and browsers / most apps only talk HTTP or SOCKS. Reject anything
+		// fancier up front so we don't end up advertising an unreachable
+		// proxy to the rest of the system.
+		if s.config.Mode == "system" {
+			switch inbound.(type) {
+			case *pkgxray.Http, *pkgxray.Socks, *pkgsingbox.Http, *pkgsingbox.Socks:
+				// OK
+			default:
+				g := inbound.ConvertToGeneralConfig()
+				return nil, fmt.Errorf("system mode requires an http or socks inbound, got %q", g.Protocol)
+			}
 		}
 		return inbound, nil
 	}
@@ -1429,11 +1675,11 @@ func (s *Service) createInbound() (protocol.Protocol, error) {
 func createXrayInbound(cfg Config, uuid string) (protocol.Protocol, error) {
 	switch cfg.InboundProtocol {
 	case "socks":
-		user, err := utils.GeneratePassword(4)
+		user, err := utils.GeneratePassword(defaultSocksCredLen)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate socks username: %w", err)
 		}
-		pass, err := utils.GeneratePassword(4)
+		pass, err := utils.GeneratePassword(defaultSocksCredLen)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate socks password: %w", err)
 		}
@@ -1521,11 +1767,11 @@ func createXrayInbound(cfg Config, uuid string) (protocol.Protocol, error) {
 func createSingboxInbound(cfg Config) (protocol.Protocol, error) {
 	// Currently, only SOCKS is implemented for Singbox inbound in this logic
 	if cfg.InboundProtocol == "socks" {
-		user, err := utils.GeneratePassword(4)
+		user, err := utils.GeneratePassword(defaultSocksCredLen)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate socks username: %w", err)
 		}
-		pass, err := utils.GeneratePassword(4)
+		pass, err := utils.GeneratePassword(defaultSocksCredLen)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate socks password: %w", err)
 		}
