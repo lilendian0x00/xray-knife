@@ -37,6 +37,10 @@ type Core struct {
 	Log     logger.ContextLogger
 
 	AllowInsecure bool
+
+	// BindInterface, when set, pins all outbound sing-box dials to the
+	// named OS interface via RouteOptions.DefaultInterface.
+	BindInterface string
 }
 
 func (c *Core) Name() string {
@@ -58,6 +62,14 @@ func WithCustomLogLevel(logOptions option.LogOptions) ServiceOption {
 			Options: logOptions,
 		})
 		c.Log = l.Logger()
+	}
+}
+
+// WithBindInterface configures the OS interface to bind outbound
+// sing-box dials to. Empty string disables binding.
+func WithBindInterface(iface string) ServiceOption {
+	return func(c *Core) {
+		c.BindInterface = iface
 	}
 }
 
@@ -90,6 +102,18 @@ func NewSingboxService(verbose bool, allowInsecure bool, opts ...ServiceOption) 
 	}
 
 	return s
+}
+
+// applyBind injects the configured BindInterface into the option tree
+// so every outbound dial is pinned to that OS interface.
+func (c *Core) applyBind(opts *option.Options) {
+	if c == nil || c.BindInterface == "" {
+		return
+	}
+	if opts.Route == nil {
+		opts.Route = &option.RouteOptions{}
+	}
+	opts.Route.DefaultInterface = c.BindInterface
 }
 
 type FakeInstance struct {
@@ -138,6 +162,8 @@ func (c *Core) MakeInstance(ctx context.Context, outbound protocol.Protocol) (pr
 		opts.Inbounds = append(opts.Inbounds, *c.Inbound)
 	}
 
+	c.applyBind(&opts)
+
 	singboxInstance, err := box.New(box.Options{
 		Options: opts,
 		Context: ctx,
@@ -175,6 +201,8 @@ func (c *Core) MakeHttpClient(ctx context.Context, outbound protocol.Protocol, m
 			Level:    "trace",
 		}
 	}
+
+	c.applyBind(&opts)
 
 	ctx = service.ContextWithDefaultRegistry(ctx)
 	outboundRegistry := boxOutbound.NewRegistry()

@@ -366,8 +366,8 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 			v.TlsFingerprint = "chrome"
 		}
 		s.TLSSettings = &conf.TLSConfig{
-			Fingerprint: v.TlsFingerprint,
-			Insecure:    allowInsecure,
+			Fingerprint:   v.TlsFingerprint,
+			AllowInsecure: allowInsecure,
 		}
 		if v.SNI != "" {
 			s.TLSSettings.ServerName = v.SNI
@@ -384,21 +384,42 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 	}
 
 	out.StreamSetting = s
-	oset := json.RawMessage(fmt.Sprintf(`{
-  "vnext": [
-    {
-      "address": "%s",
-      "port": %v,
-      "users": [
-        {
-          "id": "%s",
-          "alterId": %v,
-          "security": "%s"
-        }
-      ]
-    }
-  ]
-}`, v.Address, v.Port, v.ID, v.Aid, v.Security))
+
+	// Build Settings via json.Marshal on a typed map so addresses/IDs
+	// containing special chars cannot corrupt the JSON output.
+	portStr := fmt.Sprintf("%v", v.Port)
+	portNum, err := strconv.ParseUint(portStr, 10, 16)
+	if err != nil {
+		return nil, fmt.Errorf("invalid port %q: %w", portStr, err)
+	}
+	aidStr := fmt.Sprintf("%v", v.Aid)
+	aidNum, err := strconv.ParseUint(aidStr, 10, 32)
+	if err != nil {
+		aidNum = 0
+	}
+	security := v.Security
+	if security == "" {
+		security = "auto"
+	}
+	settingsBytes, err := json.Marshal(map[string]interface{}{
+		"vnext": []map[string]interface{}{
+			{
+				"address": v.Address,
+				"port":    portNum,
+				"users": []map[string]interface{}{
+					{
+						"id":       v.ID,
+						"alterId":  aidNum,
+						"security": security,
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal vmess settings: %w", err)
+	}
+	oset := json.RawMessage(settingsBytes)
 	out.Settings = &oset
 	return out, nil
 }

@@ -20,8 +20,10 @@ func TestWireguard_GetLink(t *testing.T) {
 			link: "wireguard://ANOTHER_SECRET_KEY@example.com:51820?address=192.168.1.5%2F24&publickey=ANOTHER_PUBLIC_KEY#Simple-Config",
 		},
 		{
+			// IPv6 host must be bracketed per RFC 3986; Go 1.26's url.Parse
+			// became stricter about this.
 			name: "Dual Stack Address",
-			link: "wireguard://DUAL_STACK_SECRET@2a01::1:1234?address=172.16.0.2%2F32,fd00::2%2F128&publickey=DUAL_STACK_PUBLIC#Dual%20Stack",
+			link: "wireguard://DUAL_STACK_SECRET@[2a01::1]:1234?address=172.16.0.2%2F32,fd00::2%2F128&publickey=DUAL_STACK_PUBLIC#Dual%20Stack",
 		},
 	}
 

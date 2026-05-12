@@ -359,8 +359,8 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 			t.TlsFingerprint = "chrome"
 		}
 		s.TLSSettings = &conf.TLSConfig{
-			Fingerprint: t.TlsFingerprint,
-			Insecure:    insecure,
+			Fingerprint:   t.TlsFingerprint,
+			AllowInsecure: insecure,
 		}
 
 		if t.SNI != "" {
@@ -383,18 +383,30 @@ func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDe
 	}
 
 	out.StreamSetting = s
-	oset := json.RawMessage(fmt.Sprintf(`{
-  "servers": [
-    {
-      "address": "%s",
-      "method": "chacha20",
-      "port": %v,
-	  "password": "%s",
-	  "ota": false,
-	  "flow": "%s"
-    }
-  ]
-}`, t.Address, t.Port, t.Password, t.Flow))
+
+	// Build Settings via json.Marshal on a typed map to avoid JSON injection
+	// when password/address contain special chars, and to keep the output
+	// schema-clean (no bogus "method"/"ota" fields that aren't in
+	// xray-core's TrojanServerTarget).
+	portNum, err := strconv.ParseUint(t.Port, 10, 16)
+	if err != nil {
+		return nil, fmt.Errorf("invalid port %q: %w", t.Port, err)
+	}
+	server := map[string]interface{}{
+		"address":  t.Address,
+		"port":     portNum,
+		"password": t.Password,
+	}
+	if t.Flow != "" {
+		server["flow"] = t.Flow
+	}
+	settingsBytes, err := json.Marshal(map[string]interface{}{
+		"servers": []map[string]interface{}{server},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal trojan settings: %w", err)
+	}
+	oset := json.RawMessage(settingsBytes)
 	out.Settings = &oset
 	return out, nil
 }

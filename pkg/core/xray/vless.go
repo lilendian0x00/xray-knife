@@ -407,8 +407,8 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 			fp = "chrome"
 		}
 		s.TLSSettings = &conf.TLSConfig{
-			Fingerprint: fp,
-			Insecure:    insecureFlag,
+			Fingerprint:   fp,
+			AllowInsecure: insecureFlag,
 		}
 		if v.SNI != "" {
 			s.TLSSettings.ServerName = v.SNI
@@ -435,23 +435,36 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 	}
 
 	out.StreamSetting = s
-	oset := json.RawMessage(fmt.Sprintf(`{
-  "vnext": [
-    {
-      "address": "%s",
-      "port": %s, 
-      "users": [
-        {
-          "id": "%s",
-		  "alterId": 0,
-          "security": "auto",
-          "flow": "%s",
-          "encryption": "none"
-        }
-      ]
-    }
-  ]
-}`, v.Address, v.Port, v.ID, v.Flow))
+
+	// Build Settings via json.Marshal on a typed map so passwords/UUIDs
+	// containing quotes don't corrupt the output, and so we don't
+	// hand-roll fields that aren't in xray-core's schema. VLESS has no
+	// "alterId" field; drop the dead entry from the legacy template.
+	portNum, err := strconv.ParseUint(v.Port, 10, 16)
+	if err != nil {
+		return nil, fmt.Errorf("invalid port %q: %w", v.Port, err)
+	}
+	user := map[string]interface{}{
+		"id":         v.ID,
+		"security":   "auto",
+		"encryption": "none",
+	}
+	if v.Flow != "" {
+		user["flow"] = v.Flow
+	}
+	settingsBytes, err := json.Marshal(map[string]interface{}{
+		"vnext": []map[string]interface{}{
+			{
+				"address": v.Address,
+				"port":    portNum,
+				"users":   []map[string]interface{}{user},
+			},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal vless settings: %w", err)
+	}
+	oset := json.RawMessage(settingsBytes)
 	out.Settings = &oset
 	return out, nil
 }

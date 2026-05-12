@@ -46,6 +46,9 @@ type proxyCmdConfig struct {
 	chainFile           string
 	chainHops           uint8
 	chainRotation       string
+	bindInterface       string
+	dns                 string
+	dnsType             string
 }
 
 // ProxyCmd is the proxy subcommand.
@@ -144,6 +147,9 @@ Use --file, --config, or --stdin to provide configs for a single session without
 				ChainFile:           cfg.chainFile,
 				ChainHops:           cfg.chainHops,
 				ChainRotation:       cfg.chainRotation,
+				BindInterface:       cfg.bindInterface,
+				DNS:                 cfg.dns,
+				DNSType:             cfg.dnsType,
 				ConfigLinks:         links,
 			}
 
@@ -244,6 +250,12 @@ func addFlags(cmd *cobra.Command, cfg *proxyCmdConfig) {
 	flags.StringVar(&cfg.chainFile, "chain-file", "", "Fixed chain hops from file (one link per line)")
 	flags.Uint8Var(&cfg.chainHops, "chain-hops", 2, "Number of hops when selecting from pool")
 	flags.StringVar(&cfg.chainRotation, "chain-rotation", "none", "Chain rotation mode: none, exit, full")
+	flags.StringVar(&cfg.bindInterface, "bind", "", "Bind outbound dials to a specific OS interface (e.g. eth0). Linux: needs CAP_NET_RAW.")
+	flags.StringVar(&cfg.dns, "dns", "1.1.1.1", "DNS resolver used inside the app-mode tunnel (ip, ip:port, or https://host/path for --dns-type=https)")
+	flags.StringVar(&cfg.dnsType, "dns-type", "udp", "DNS transport for the app-mode tunnel: udp, tcp, tls, https")
+	cmd.RegisterFlagCompletionFunc("dns-type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"udp", "tcp", "tls", "https"}, cobra.ShellCompDirectiveNoFileComp
+	})
 	cmd.RegisterFlagCompletionFunc("chain-rotation", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"none", "exit", "full"}, cobra.ShellCompDirectiveNoFileComp
 	})

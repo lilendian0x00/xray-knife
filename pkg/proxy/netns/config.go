@@ -23,6 +23,13 @@ type Config struct {
 	ProxyPort uint16 // host proxy port
 	SocksUser string // SOCKS auth username for the host proxy
 	SocksPass string // SOCKS auth password for the host proxy
+	// DNS is the remote DNS server used for hijacked queries inside the
+	// tunnel. Defaults to "1.1.1.1". May be "ip", "ip:port", or for
+	// type=https a URL host with optional /path.
+	DNS string
+	// DNSType selects the DNS transport: udp, tcp, tls, https.
+	// Defaults to "udp".
+	DNSType string
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -46,6 +53,8 @@ func DefaultConfig(proxyPort uint16, suffix string) Config {
 		TunMTU:    1500,
 		ProxyAddr: "10.200.1.1",
 		ProxyPort: proxyPort,
+		DNS:       "1.1.1.1",
+		DNSType:   "udp",
 	}
 }
 

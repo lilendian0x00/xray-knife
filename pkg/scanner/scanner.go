@@ -23,6 +23,7 @@ import (
 	"github.com/lilendian0x00/xray-knife/v9/database"
 	"github.com/lilendian0x00/xray-knife/v9/pkg/core"
 	"github.com/lilendian0x00/xray-knife/v9/pkg/core/protocol"
+	"github.com/lilendian0x00/xray-knife/v9/pkg/netbind"
 	"github.com/lilendian0x00/xray-knife/v9/utils"
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/http2"
@@ -69,7 +70,22 @@ type ScannerConfig struct {
 	InsecureTLS          bool     `json:"insecureTLS"`
 	Resume               bool     `json:"resume"`
 	SaveToDB             bool     `json:"saveToDB"`
-	OnIPScannedCallback  func()  `json:"-"` // Instance-scoped callback for progress reporting
+	// Port is the TCP port to probe on each scanned IP. Defaults to 443
+	// when zero. Cloudflare's edge accepts TLS on alternate ports
+	// (2053, 2083, 2087, 2096, 8443) which is useful when 443 is blocked.
+	Port int `json:"port"`
+	// BindInterface pins outbound dials (both raw and core-based) to a
+	// specific OS interface. Empty disables binding.
+	BindInterface       string `json:"bindInterface,omitempty"`
+	OnIPScannedCallback func() `json:"-"` // Instance-scoped callback for progress reporting
+}
+
+// scanPort returns the configured port, falling back to 443.
+func (c *ScannerConfig) scanPort() int {
+	if c.Port <= 0 || c.Port > 65535 {
+		return 443
+	}
+	return c.Port
 }
 
 // ScannerService is the main engine for scanning.
@@ -81,6 +97,7 @@ type ScannerService struct {
 	selectedCoreMap map[string]core.Core
 	initialResults  []*ScanResult
 	scannedIPs      map[string]bool
+	binder          *netbind.Binder // nil when not configured
 }
 
 // notifyIPScanned calls the instance callback if set, otherwise falls back to the global.
@@ -118,10 +135,15 @@ func (r *ScanResult) PrepareForMarshal() {
 
 // NewScannerService builds a scanner service from the given config, resuming previous results if asked.
 func NewScannerService(config ScannerConfig, logger *log.Logger) (*ScannerService, error) {
+	binder, err := netbind.New(config.BindInterface)
+	if err != nil {
+		return nil, fmt.Errorf("cfscanner: %w", err)
+	}
 	s := &ScannerService{
 		config:     config,
 		logger:     logger,
 		scannedIPs: make(map[string]bool),
+		binder:     binder,
 	}
 
 	if s.config.Resume {
@@ -163,8 +185,13 @@ func NewScannerService(config ScannerConfig, logger *log.Logger) (*ScannerServic
 	}
 
 	if s.config.ConfigLink != "" {
-		s.xrayCore = core.CoreFactory(core.XrayCoreType, s.config.InsecureTLS, s.config.Verbose)
-		s.singboxCore = core.CoreFactory(core.SingboxCoreType, s.config.InsecureTLS, s.config.Verbose)
+		coreOpts := core.FactoryOptions{
+			InsecureTLS:   s.config.InsecureTLS,
+			Verbose:       s.config.Verbose,
+			BindInterface: s.config.BindInterface,
+		}
+		s.xrayCore = core.CoreFactoryWith(core.XrayCoreType, coreOpts)
+		s.singboxCore = core.CoreFactoryWith(core.SingboxCoreType, coreOpts)
 		s.selectedCoreMap = map[string]core.Core{
 			protocol.VmessIdentifier: s.xrayCore, protocol.VlessIdentifier: s.xrayCore,
 			protocol.ShadowsocksIdentifier: s.xrayCore, protocol.TrojanIdentifier: s.xrayCore,
@@ -476,11 +503,13 @@ func (s *ScannerService) runSpeedTest(ctx context.Context, allResults []*ScanRes
 }
 
 func (s *ScannerService) createDialerWithRetry(ip string, retries int) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	port := s.config.scanPort()
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		dialer := &net.Dialer{
 			Timeout: time.Duration(s.config.RequestTimeout) * time.Millisecond,
 		}
-		targetAddr := fmt.Sprintf("%s:%d", ip, 443)
+		s.binder.ApplyDialer(dialer)
+		targetAddr := net.JoinHostPort(ip, fmt.Sprintf("%d", port))
 		var lastErr error
 
 		for i := 0; i <= retries; i++ {
@@ -488,7 +517,7 @@ func (s *ScannerService) createDialerWithRetry(ip string, retries int) func(ctx 
 				return nil, ctx.Err()
 			}
 			if s.config.Verbose && i > 0 {
-				s.logger.Printf("Retrying connection to %s (attempt %d/%d)...", ip, i+1, retries+1)
+				s.logger.Printf("Retrying connection to %s (attempt %d/%d)...", targetAddr, i+1, retries+1)
 			}
 			conn, err := dialer.DialContext(ctx, network, targetAddr)
 			if err == nil {
@@ -499,7 +528,7 @@ func (s *ScannerService) createDialerWithRetry(ip string, retries int) func(ctx 
 				time.Sleep(200 * time.Millisecond)
 			}
 		}
-		return nil, fmt.Errorf("all %d connection attempts to %s failed, last error: %w", retries+1, ip, lastErr)
+		return nil, fmt.Errorf("all %d connection attempts to %s failed, last error: %w", retries+1, targetAddr, lastErr)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/netip"
 	"runtime"
+	"strings"
 
 	"github.com/lilendian0x00/xray-knife/v9/pkg/core/protocol"
 
@@ -24,6 +25,62 @@ import (
 	"github.com/sagernet/sing/service"
 	"github.com/vishvananda/netns"
 )
+
+// buildDNSServer constructs the sing-box DNSServerOptions for the configured
+// resolver and transport. It also returns a function that registers the
+// matching transport(s) on a TransportRegistry, since each transport type
+// needs its own Register call.
+func buildDNSServer(cfg Config) (option.DNSServerOptions, func(*dns.TransportRegistry), error) {
+	dnsAddr := strings.TrimSpace(cfg.DNS)
+	if dnsAddr == "" {
+		dnsAddr = "1.1.1.1"
+	}
+	dnsType := strings.ToLower(strings.TrimSpace(cfg.DNSType))
+	if dnsType == "" {
+		dnsType = "udp"
+	}
+
+	remote := option.RemoteDNSServerOptions{
+		RawLocalDNSServerOptions: option.RawLocalDNSServerOptions{
+			DialerOptions: option.DialerOptions{Detour: "proxy-out"},
+		},
+		DNSServerAddressOptions: option.DNSServerAddressOptions{Server: dnsAddr},
+	}
+
+	srv := option.DNSServerOptions{Tag: "remote-dns", Type: dnsType}
+
+	switch dnsType {
+	case "udp":
+		srv.Options = &remote
+		return srv, func(r *dns.TransportRegistry) { dns_transport.RegisterUDP(r) }, nil
+	case "tcp":
+		srv.Options = &remote
+		return srv, func(r *dns.TransportRegistry) { dns_transport.RegisterTCP(r) }, nil
+	case "tls":
+		srv.Options = &option.RemoteTLSDNSServerOptions{RemoteDNSServerOptions: remote}
+		return srv, func(r *dns.TransportRegistry) { dns_transport.RegisterTLS(r) }, nil
+	case "https":
+		// Strip optional leading scheme so cfg.DNS can be either
+		// "1.1.1.1" or "https://1.1.1.1/dns-query".
+		path := "/dns-query"
+		host := dnsAddr
+		if strings.HasPrefix(host, "https://") {
+			host = strings.TrimPrefix(host, "https://")
+			if i := strings.Index(host, "/"); i >= 0 {
+				path = host[i:]
+				host = host[:i]
+			}
+		}
+		remote.Server = host
+		srv.Options = &option.RemoteHTTPSDNSServerOptions{
+			RemoteTLSDNSServerOptions: option.RemoteTLSDNSServerOptions{RemoteDNSServerOptions: remote},
+			Path:                      path,
+		}
+		return srv, func(r *dns.TransportRegistry) { dns_transport.RegisterHTTPS(r) }, nil
+	default:
+		return option.DNSServerOptions{}, nil, fmt.Errorf("unsupported dns-type %q (allowed: udp, tcp, tls, https)", dnsType)
+	}
+}
 
 const tunInboundTag = "tun-in"
 
@@ -113,6 +170,11 @@ func buildAndStartTunnel(ctx context.Context, nsName string, cfg Config) (protoc
 		},
 	}
 
+	dnsServer, registerDNS, err := buildDNSServer(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	opts := option.Options{
 		Inbounds: []option.Inbound{{
 			Type:    "tun",
@@ -126,23 +188,8 @@ func buildAndStartTunnel(ctx context.Context, nsName string, cfg Config) (protoc
 		}},
 		DNS: &option.DNSOptions{
 			RawDNSOptions: option.RawDNSOptions{
-				Servers: []option.DNSServerOptions{
-					{
-						Type: "tcp",
-						Tag:  "remote-dns",
-						Options: &option.RemoteDNSServerOptions{
-							RawLocalDNSServerOptions: option.RawLocalDNSServerOptions{
-								DialerOptions: option.DialerOptions{
-									Detour: "proxy-out",
-								},
-							},
-							DNSServerAddressOptions: option.DNSServerAddressOptions{
-								Server: "1.1.1.1",
-							},
-						},
-					},
-				},
-				Final: "remote-dns",
+				Servers: []option.DNSServerOptions{dnsServer},
+				Final:   "remote-dns",
 			},
 		},
 		Route: &option.RouteOptions{
@@ -198,7 +245,7 @@ func buildAndStartTunnel(ctx context.Context, nsName string, cfg Config) (protoc
 	socks.RegisterOutbound(outboundRegistry)
 
 	dnsTransportRegistry := dns.NewTransportRegistry()
-	dns_transport.RegisterTCP(dnsTransportRegistry)
+	registerDNS(dnsTransportRegistry)
 
 	boxCtx = box.Context(boxCtx, inboundRegistry, outboundRegistry, endpoint.NewRegistry(), dnsTransportRegistry, boxService.NewRegistry())
 

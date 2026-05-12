@@ -30,13 +30,28 @@ type Core interface {
 	SetInbound(inbound protocol.Protocol) error
 }
 
+// FactoryOptions configures core construction. Zero value is equivalent
+// to the legacy CoreFactory(coreType, false, false) call.
+type FactoryOptions struct {
+	InsecureTLS bool
+	Verbose     bool
+	// BindInterface pins all outbound dials of the constructed core to
+	// the named OS interface (e.g. "eth0"). Empty disables binding.
+	BindInterface string
+}
+
 // CoreFactory is the factory method to create concrete cores.
 func CoreFactory(coreType CoreType, insecureTLS bool, verbose bool) Core {
+	return CoreFactoryWith(coreType, FactoryOptions{InsecureTLS: insecureTLS, Verbose: verbose})
+}
+
+// CoreFactoryWith creates a core using the provided FactoryOptions.
+func CoreFactoryWith(coreType CoreType, opts FactoryOptions) Core {
 	switch coreType {
 	case XrayCoreType:
-		return xray.NewXrayService(verbose, insecureTLS)
+		return xray.NewXrayService(opts.Verbose, opts.InsecureTLS, xray.WithBindInterface(opts.BindInterface))
 	case SingboxCoreType:
-		return singbox.NewSingboxService(verbose, insecureTLS)
+		return singbox.NewSingboxService(opts.Verbose, opts.InsecureTLS, singbox.WithBindInterface(opts.BindInterface))
 	default:
 		return nil
 	}
@@ -54,9 +69,15 @@ func (c *AutomaticCore) Name() string {
 }
 
 func NewAutomaticCore(verbose bool, allowInsecure bool) Core {
+	return NewAutomaticCoreWith(FactoryOptions{InsecureTLS: allowInsecure, Verbose: verbose})
+}
+
+// NewAutomaticCoreWith builds an AutomaticCore with the given options
+// (e.g. a BindInterface that should apply to both xray and sing-box).
+func NewAutomaticCoreWith(opts FactoryOptions) Core {
 	return &AutomaticCore{
-		xrayCore:    xray.NewXrayService(verbose, allowInsecure),
-		singboxCore: singbox.NewSingboxService(verbose, allowInsecure),
+		xrayCore:    xray.NewXrayService(opts.Verbose, opts.InsecureTLS, xray.WithBindInterface(opts.BindInterface)),
+		singboxCore: singbox.NewSingboxService(opts.Verbose, opts.InsecureTLS, singbox.WithBindInterface(opts.BindInterface)),
 	}
 }
 

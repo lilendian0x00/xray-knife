@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"sync"
 	"time"
 
 	"github.com/lilendian0x00/xray-knife/v9/pkg/core/protocol"
+	"github.com/lilendian0x00/xray-knife/v9/pkg/netbind"
 
 	"github.com/xtls/xray-core/app/dispatcher"
 	applog "github.com/xtls/xray-core/app/log"
@@ -16,12 +19,52 @@ import (
 	xraynet "github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/common/serial"
 	"github.com/xtls/xray-core/core"
+	"github.com/xtls/xray-core/transport/internet"
 
 	// The following deps are necessary as they register handlers in their init functions.
 	_ "github.com/xtls/xray-core/app/dispatcher"
 	_ "github.com/xtls/xray-core/app/proxyman/inbound"
 	_ "github.com/xtls/xray-core/app/proxyman/outbound"
 )
+
+// bindRegistration guards xray-core's process-global dial controller so
+// we register at most one bind-to-interface hook per process.
+var (
+	bindRegisterOnce  sync.Once
+	bindRegisterErr   error
+	bindCurrentIface  string
+	bindRegisterMutex sync.Mutex
+)
+
+// registerBindController installs a process-wide dial controller that
+// pins outbound xray-core sockets to the given interface. Idempotent
+// across calls with the same interface; calls with a different interface
+// after the first are no-ops (xray-core's controller list is append-only
+// and global, so changing it mid-process would stack multiple binders).
+func registerBindController(iface string) error {
+	if iface == "" {
+		return nil
+	}
+	bindRegisterMutex.Lock()
+	defer bindRegisterMutex.Unlock()
+	if bindCurrentIface != "" {
+		if bindCurrentIface == iface {
+			return nil
+		}
+		return fmt.Errorf("xray: bind interface already set to %q, cannot switch to %q", bindCurrentIface, iface)
+	}
+	binder, err := netbind.New(iface)
+	if err != nil {
+		return err
+	}
+	bindRegisterOnce.Do(func() {
+		bindRegisterErr = internet.RegisterDialerController(binder.Control())
+		if bindRegisterErr == nil {
+			bindCurrentIface = iface
+		}
+	})
+	return bindRegisterErr
+}
 
 // noOpHandler discards all log messages.
 type noOpHandler struct{}
@@ -37,6 +80,11 @@ type Core struct {
 	LogLevel commlog.Severity
 
 	AllowInsecure bool
+
+	// BindInterface, when set, pins all outbound xray-core dials to the
+	// named OS interface (e.g. "eth0"). Registered as a process-global
+	// dial controller on the first NewXrayService call.
+	BindInterface string
 }
 
 func (c *Core) Name() string {
@@ -56,6 +104,14 @@ func WithInbound(inbound Protocol) ServiceOption {
 	return func(c *Core) {
 		//i := inbound.(Protocol)
 		c.Inbound = inbound
+	}
+}
+
+// WithBindInterface configures the OS interface to bind all outbound
+// xray-core dials to. Empty string disables binding.
+func WithBindInterface(iface string) ServiceOption {
+	return func(c *Core) {
+		c.BindInterface = iface
 	}
 }
 
@@ -80,6 +136,15 @@ func NewXrayService(verbose bool, allowInsecure bool, opts ...ServiceOption) *Co
 
 	for _, opt := range opts {
 		opt(s)
+	}
+
+	if s.BindInterface != "" {
+		if err := registerBindController(s.BindInterface); err != nil {
+			// Don't abort core creation: the caller may lack CAP_NET_RAW
+			// but still want xray-core for non-bound paths. Surface the
+			// failure on stderr so the user knows binding is not active.
+			fmt.Fprintf(os.Stderr, "xray bind-interface setup failed: %v\n", err)
+		}
 	}
 
 	return s

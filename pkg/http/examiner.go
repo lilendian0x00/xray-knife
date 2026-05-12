@@ -18,6 +18,7 @@ import (
 
 	"github.com/lilendian0x00/xray-knife/v9/pkg/core"
 	"github.com/lilendian0x00/xray-knife/v9/pkg/core/protocol"
+	"github.com/lilendian0x00/xray-knife/v9/pkg/netbind"
 )
 
 // ProtocolInfo holds basic, serializable information about a protocol.
@@ -70,6 +71,10 @@ type Examiner struct {
 	SpeedtestKbAmount      uint64
 	Retries                uint8
 
+	// BindInterface pins outbound core dials to a specific OS interface.
+	// Empty disables binding.
+	BindInterface string
+
 	Logger *log.Logger `json:"-"`
 }
 
@@ -90,6 +95,7 @@ type Options struct {
 	TestEndpointHttpMethod string `json:"httpMethod"`
 	SpeedtestKbAmount      uint64 `json:"speedtestAmount"`
 	Retries                uint8  `json:"retries"`
+	BindInterface          string `json:"bindInterface,omitempty"`
 	Logger                 *log.Logger `json:"-"`
 }
 
@@ -129,6 +135,12 @@ func NewExaminer(opts Options) (*Examiner, error) {
 	}
 
 	e.Retries = opts.Retries
+	e.BindInterface = opts.BindInterface
+	if e.BindInterface != "" {
+		if _, err := netbind.New(e.BindInterface); err != nil {
+			return nil, fmt.Errorf("examiner: %w", err)
+		}
+	}
 
 	// Set logger: use provided logger or default to stdout
 	if opts.Logger != nil {
@@ -137,15 +149,20 @@ func NewExaminer(opts Options) (*Examiner, error) {
 		e.Logger = log.New(os.Stdout, "", 0)
 	}
 
+	factoryOpts := core.FactoryOptions{
+		InsecureTLS:   e.InsecureTLS,
+		Verbose:       e.Verbose,
+		BindInterface: e.BindInterface,
+	}
 	switch opts.Core {
 	case "xray":
-		e.Core = core.CoreFactory(core.XrayCoreType, e.InsecureTLS, e.Verbose)
+		e.Core = core.CoreFactoryWith(core.XrayCoreType, factoryOpts)
 	case "singbox", "sing-box":
-		e.Core = core.CoreFactory(core.SingboxCoreType, e.InsecureTLS, e.Verbose)
+		e.Core = core.CoreFactoryWith(core.SingboxCoreType, factoryOpts)
 	case "auto":
 		fallthrough
 	default:
-		e.Core = core.NewAutomaticCore(e.Verbose, e.InsecureTLS)
+		e.Core = core.NewAutomaticCoreWith(factoryOpts)
 	}
 
 	if e.Core == nil {

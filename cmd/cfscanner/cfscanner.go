@@ -45,6 +45,14 @@ pass a file containing one subnet per line.`,
 		}
 		cliConfig.Subnets = allSubnets
 
+		if cliConfig.Port <= 0 || cliConfig.Port > 65535 {
+			customlog.Printf(customlog.Failure, "Invalid --port %d, must be 1..65535.\n", cliConfig.Port)
+			return
+		}
+		if cliConfig.Port != 443 {
+			customlog.Printf(customlog.Info, "Scanning on custom port %d (not 443).\n", cliConfig.Port)
+		}
+
 		if !cliConfig.Resume {
 			if err := os.Remove(cliConfig.OutputFile); err != nil && !os.IsNotExist(err) {
 				customlog.Printf(customlog.Failure, "Failed to clear previous results file %s: %v\n", cliConfig.OutputFile, err)
@@ -124,6 +132,8 @@ func init() {
 	CFscannerCmd.Flags().BoolVarP(&cliConfig.InsecureTLS, "insecure", "E", false, "Allow insecure TLS connections for the proxy config")
 	CFscannerCmd.Flags().BoolVar(&cliConfig.Resume, "resume", false, "Resume scan from previous results (file or DB)")
 	CFscannerCmd.Flags().BoolVar(&cliConfig.SaveToDB, "save-db", false, "Save scan results to the database")
+	CFscannerCmd.Flags().IntVarP(&cliConfig.Port, "port", "P", 443, "TCP port to scan (Cloudflare also accepts 2053, 2083, 2087, 2096, 8443)")
+	CFscannerCmd.Flags().StringVar(&cliConfig.BindInterface, "bind", "", "Bind outbound dials to a specific OS interface (e.g. eth0). Linux: needs CAP_NET_RAW.")
 
 	_ = CFscannerCmd.MarkFlagRequired("subnets")
 }

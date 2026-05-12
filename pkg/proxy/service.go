@@ -70,7 +70,18 @@ type Config struct {
 	ChainFile           string `json:"chainFile"`           // file with fixed chain links (one per line)
 	ChainHops           uint8  `json:"chainHops"`           // number of hops when selecting from pool
 	ChainRotation       string `json:"chainRotation"`       // none, exit, full
-	ConfigLinks         []string
+	// BindInterface pins outbound dials to a specific OS interface
+	// (e.g. "eth0"). Useful when the host has multiple interfaces and
+	// traffic must take a specific path regardless of the kernel's
+	// default route.
+	BindInterface string `json:"bindInterface,omitempty"`
+	// DNS overrides the resolver inside the app-mode tunnel.
+	// Empty = use netns.DefaultConfig (1.1.1.1).
+	DNS string `json:"dns,omitempty"`
+	// DNSType chooses the DNS transport inside the app-mode tunnel:
+	// udp, tcp, tls, https. Empty = use netns.DefaultConfig (udp).
+	DNSType     string `json:"dnsType,omitempty"`
+	ConfigLinks []string
 }
 
 // Details is a snapshot of the running proxy state.
@@ -177,11 +188,16 @@ func New(config Config, logger *log.Logger) (*Service, error) {
 		s.logf(customlog.Info, "Removed %d duplicate configs from pool (%d unique remain).\n", dupsRemoved, len(s.config.ConfigLinks))
 	}
 
+	coreOpts := core.FactoryOptions{
+		InsecureTLS:   config.InsecureTLS,
+		Verbose:       config.Verbose,
+		BindInterface: config.BindInterface,
+	}
 	switch config.CoreType {
 	case "xray":
-		s.core = core.CoreFactory(core.XrayCoreType, config.InsecureTLS, config.Verbose)
+		s.core = core.CoreFactoryWith(core.XrayCoreType, coreOpts)
 	case "sing-box":
-		s.core = core.CoreFactory(core.SingboxCoreType, config.InsecureTLS, config.Verbose)
+		s.core = core.CoreFactoryWith(core.SingboxCoreType, coreOpts)
 	default:
 		return nil, fmt.Errorf("allowed core types: (xray, sing-box), got: %s", config.CoreType)
 	}
@@ -379,6 +395,12 @@ func (s *Service) setupAppMode(ctx context.Context) error {
 	nsCfg.Name = nsName
 	nsCfg.SocksUser = socksUser
 	nsCfg.SocksPass = socksPass
+	if s.config.DNS != "" {
+		nsCfg.DNS = s.config.DNS
+	}
+	if s.config.DNSType != "" {
+		nsCfg.DNSType = s.config.DNSType
+	}
 	s.nsCfg = nsCfg
 
 	// Persist state for crash recovery (Pid + BootID are stamped by

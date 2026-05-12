@@ -59,6 +59,7 @@ type Config struct {
 	Retries             uint16
 	Ping                bool
 	PingInterval        uint16
+	BindInterface       string
 }
 
 func validateConfig(cfg *Config) error {
@@ -120,6 +121,7 @@ Use --from-db to test configs from the database library.`,
 				TestEndpoint:           config.DestURL,
 				TestEndpointHttpMethod: config.HTTPMethod,
 				SpeedtestKbAmount:      config.SpeedtestAmount,
+				BindInterface:          config.BindInterface,
 			})
 			if err != nil {
 				return fmt.Errorf("failed to create examiner: %w", err)
@@ -275,6 +277,7 @@ func handleMultipleConfigs(examiner *pkghttp.Examiner, config *Config, links []s
 		TestEndpoint:           config.DestURL,
 		TestEndpointHttpMethod: config.HTTPMethod,
 		SpeedtestKbAmount:      config.SpeedtestAmount,
+		BindInterface:          config.BindInterface,
 	}
 	optsJson, err := json.Marshal(opts)
 	if err != nil {
@@ -449,6 +452,8 @@ func addFlags(cmd *cobra.Command, config *Config) {
 
 	flags.BoolVar(&config.Ping, "ping", false, "Enable continuous HTTP ping mode for a single config")
 	flags.Uint16Var(&config.PingInterval, "interval", 1000, "Interval between pings in milliseconds (ms)")
+
+	flags.StringVar(&config.BindInterface, "bind", "", "Bind outbound dials to a specific OS interface (e.g. eth0). Linux: needs CAP_NET_RAW.")
 
 	// DB flags
 	flags.BoolVar(&config.FromDB, "from-db", false, "Test configs from the database")
