@@ -51,6 +51,14 @@ type proxyCmdConfig struct {
 	bindInterface       string
 	dns                 string
 	dnsType             string
+	// host-tun mode
+	hostTunAck       bool
+	hostTunDeadman   uint16
+	hostTunExclude   string
+	hostTunName      string
+	hostTunAddr      string
+	hostTunMTU       uint32
+	hostTunNoPrivate bool
 }
 
 // ProxyCmd is the proxy subcommand.
@@ -95,6 +103,20 @@ Use --file, --config, or --stdin to provide configs for a single session without
 			}
 			if cfg.shell && cfg.namespaceName != "" {
 				return fmt.Errorf("--shell and --namespace are mutually exclusive")
+			}
+
+			// Validate host-tun mode flags.
+			if cfg.mode == "host-tun" {
+				if !cfg.hostTunAck {
+					return fmt.Errorf("--mode host-tun requires --i-might-lose-ssh (this mode replaces the default route and can kill your SSH session)")
+				}
+				if cfg.bindInterface == "" {
+					return fmt.Errorf("--mode host-tun requires --bind <iface> (the physical NIC; sing-box pins its outbound dials to it)")
+				}
+			} else {
+				if cfg.hostTunAck {
+					return fmt.Errorf("--i-might-lose-ssh requires --mode host-tun")
+				}
 			}
 
 			// Validate chain mode flags.
@@ -155,6 +177,13 @@ Use --file, --config, or --stdin to provide configs for a single session without
 				DNS:                 cfg.dns,
 				DNSType:             cfg.dnsType,
 				ConfigLinks:         links,
+				HostTunAck:          cfg.hostTunAck,
+				HostTunDeadman:      cfg.hostTunDeadman,
+				HostTunExclude:      cfg.hostTunExclude,
+				HostTunName:         cfg.hostTunName,
+				HostTunAddr:         cfg.hostTunAddr,
+				HostTunMTU:          cfg.hostTunMTU,
+				HostTunExcludePrivate: !cfg.hostTunNoPrivate,
 			}
 
 				// Create the new proxy service
@@ -167,7 +196,12 @@ Use --file, --config, or --stdin to provide configs for a single session without
 			// Set up context for graceful shutdown
 			ctx, cancel := context.WithCancel(context.Background())
 			signalChan := make(chan os.Signal, 1)
-			signal.Notify(signalChan, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+			// SIGHUP must be caught: when this is host-tun running over
+			// SSH and the SSH session drops, the kernel sends SIGHUP to
+			// the controlling process group. Without catching it, the
+			// process dies before service.Close() can tear down the TUN
+			// and routing rules — leaving the VPS unreachable.
+			signal.Notify(signalChan, os.Interrupt, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 			defer func() {
 				signal.Stop(signalChan)
 				cancel()
@@ -232,9 +266,9 @@ func addFlags(cmd *cobra.Command, cfg *proxyCmdConfig) {
 	flags.StringVarP(&cfg.inboundUUID, "uuid", "g", "random", "Inbound custom UUID to use (default: random)")
 
 	flags.StringVarP(&cfg.inboundConfigLink, "inbound-config", "I", "", "Custom config link for the inbound proxy")
-	flags.StringVarP(&cfg.mode, "mode", "m", "inbound", "Proxy operating mode: inbound, system, or app (per-process namespace)")
+	flags.StringVarP(&cfg.mode, "mode", "m", "inbound", "Proxy operating mode: inbound, system, app (per-process namespace), or host-tun (capture all host traffic — Linux only, DANGEROUS over SSH)")
 	cmd.RegisterFlagCompletionFunc("mode", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string{"inbound", "system", "app"}, cobra.ShellCompDirectiveNoFileComp
+		return []string{"inbound", "system", "app", "host-tun"}, cobra.ShellCompDirectiveNoFileComp
 	})
 
 	flags.StringVarP(&cfg.CoreType, "core", "z", "xray", "Core type: (xray, sing-box)")
@@ -271,6 +305,14 @@ func addFlags(cmd *cobra.Command, cfg *proxyCmdConfig) {
 	cmd.RegisterFlagCompletionFunc("chain-rotation", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"none", "exit", "full"}, cobra.ShellCompDirectiveNoFileComp
 	})
+
+	flags.BoolVar(&cfg.hostTunAck, "i-might-lose-ssh", false, "Required ack for --mode host-tun. Confirms you understand this can kill your active SSH session.")
+	flags.Uint16Var(&cfg.hostTunDeadman, "host-tun-deadman", 60, "Seconds to wait for ENTER after host-tun comes up before auto-teardown (0 = disable)")
+	flags.StringVar(&cfg.hostTunExclude, "host-tun-exclude", "", "Comma-separated extra CIDRs to exclude from host-tun capture")
+	flags.StringVar(&cfg.hostTunName, "host-tun-name", "xkt0", "TUN interface name for host-tun mode")
+	flags.StringVar(&cfg.hostTunAddr, "host-tun-addr", "198.18.0.1/30", "TUN address/CIDR for host-tun mode (RFC 2544 by default to avoid LAN collision)")
+	flags.Uint32Var(&cfg.hostTunMTU, "host-tun-mtu", 1500, "TUN MTU for host-tun mode")
+	flags.BoolVar(&cfg.hostTunNoPrivate, "host-tun-include-private", false, "Capture RFC1918 / private LAN traffic too (default: excluded). Risky over LAN.")
 
 	// Mark mutually exclusive flags
 	cmd.MarkFlagsMutuallyExclusive("file", "config", "stdin")

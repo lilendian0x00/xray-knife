@@ -27,6 +27,7 @@ import (
 	pkgsingbox "github.com/lilendian0x00/xray-knife/v9/pkg/core/singbox"
 	pkgxray "github.com/lilendian0x00/xray-knife/v9/pkg/core/xray"
 	pkghttp "github.com/lilendian0x00/xray-knife/v9/pkg/http"
+	"github.com/lilendian0x00/xray-knife/v9/pkg/proxy/hosttun"
 	"github.com/lilendian0x00/xray-knife/v9/pkg/proxy/netns"
 	"github.com/lilendian0x00/xray-knife/v9/pkg/proxy/sysproxy"
 	"github.com/lilendian0x00/xray-knife/v9/utils"
@@ -113,6 +114,15 @@ type Config struct {
 	// udp, tcp, tls, https. Empty = use netns.DefaultConfig (udp).
 	DNSType     string `json:"dnsType,omitempty"`
 	ConfigLinks []string
+
+	// host-tun mode fields. Only honored when Mode == "host-tun".
+	HostTunAck            bool   `json:"hostTunAck,omitempty"`
+	HostTunDeadman        uint16 `json:"hostTunDeadman,omitempty"`
+	HostTunExclude        string `json:"hostTunExclude,omitempty"`
+	HostTunName           string `json:"hostTunName,omitempty"`
+	HostTunAddr           string `json:"hostTunAddr,omitempty"`
+	HostTunMTU            uint32 `json:"hostTunMTU,omitempty"`
+	HostTunExcludePrivate bool   `json:"hostTunExcludePrivate,omitempty"`
 }
 
 // Details is a snapshot of the running proxy state.
@@ -150,7 +160,9 @@ type Service struct {
 	nsManager         *netns.Namespace   // non-nil when mode == "app"
 	nsTunnel          protocol.Instance  // the sing-box tunnel inside the namespace
 	nsCfg             netns.Config       // resolved netns config (for cleanup)
-	proxyReady        chan struct{}       // closed when the first proxy instance starts
+	hostTunInstance   protocol.Instance  // non-nil when mode == "host-tun"
+	hostTunCfg        hosttun.Config     // resolved host-tun config (for logging)
+	proxyReady        chan struct{}      // closed when the first proxy instance starts
 	proxyReadyOnce    sync.Once
 }
 
@@ -198,6 +210,34 @@ func New(config Config, logger *log.Logger) (*Service, error) {
 			mgr.Restore(stale)
 		}
 		sysproxy.ClearState()
+	}
+
+	// host-tun mode validation. Fail fast before touching state.
+	if config.Mode == "host-tun" {
+		if runtime.GOOS != "linux" {
+			return nil, errors.New("host-tun mode is only supported on Linux")
+		}
+		if os.Getuid() != 0 {
+			return nil, errors.New("host-tun mode requires root privileges. Run with sudo")
+		}
+		if !config.HostTunAck {
+			return nil, errors.New("host-tun mode requires HostTunAck=true (CLI: --i-might-lose-ssh)")
+		}
+		if config.BindInterface == "" {
+			return nil, errors.New("host-tun mode requires BindInterface (CLI: --bind <iface>)")
+		}
+		// Refuse host-tun + deadman when stdin isn't a tty: the deadman
+		// ENTER prompt is unanswerable from /dev/null. Forces the user
+		// to either run interactively, or pass --host-tun-deadman 0 and
+		// detach (tmux/setsid/systemd).
+		if config.HostTunDeadman > 0 && !hosttun.StdinIsTTY() {
+			return nil, errors.New("host-tun deadman > 0 requires an interactive terminal on stdin; for unattended use pass --host-tun-deadman 0 and run under tmux/setsid/systemd")
+		}
+		// Force SOCKS inbound on loopback. host-tun's TUN dials this
+		// over lo; anything else risks a routing loop.
+		config.ListenAddr = "127.0.0.1"
+		config.InboundProtocol = "socks"
+		config.InboundConfigLink = ""
 	}
 
 	// Crash recovery: clean up stale network namespace from a previous
@@ -473,6 +513,13 @@ func (s *Service) recordStrike(link, reason string) {
 
 // Close restores the system proxy settings if they were modified, and cleans up state.
 func (s *Service) Close() {
+	// Tear down host-tun first so its routes go away before the
+	// upstream proxy listener does.
+	if s.hostTunInstance != nil {
+		s.logf(customlog.Processing, "Stopping host-tun tunnel...\n")
+		s.teardownHostTun()
+	}
+
 	// Tear down namespace resources (reverse order: tunnel first, then namespace).
 	if s.nsTunnel != nil {
 		s.logf(customlog.Processing, "Stopping namespace tunnel...\n")
@@ -510,6 +557,175 @@ func (s *Service) Close() {
 		sysproxy.ClearState()
 		s.sysProxyManager = nil
 	}
+}
+
+// setupHostTun builds the exclusion list, runs preflight, then starts
+// the host-tun sing-box instance in the root network namespace. Caller
+// must already have a local SOCKS listener up (we dial 127.0.0.1).
+func (s *Service) setupHostTun(ctx context.Context) error {
+	// Extract SOCKS credentials from the inbound for the tunnel's dial.
+	var socksUser, socksPass string
+	switch in := s.inbound.(type) {
+	case *pkgsingbox.Socks:
+		socksUser = in.Username
+		socksPass = in.Password
+	case *pkgxray.Socks:
+		socksUser = in.Username
+		socksPass = in.Password
+	}
+
+	port, _ := strconv.ParseUint(s.config.ListenPort, 10, 16)
+	htCfg := hosttun.DefaultConfig(uint16(port))
+	htCfg.PhysIface = s.config.BindInterface
+	htCfg.SocksUser = socksUser
+	htCfg.SocksPass = socksPass
+	if s.config.HostTunName != "" {
+		htCfg.TunName = s.config.HostTunName
+	}
+	if s.config.HostTunAddr != "" {
+		htCfg.TunAddr = s.config.HostTunAddr
+	}
+	if s.config.HostTunMTU != 0 {
+		htCfg.TunMTU = s.config.HostTunMTU
+	}
+	if s.config.DNS != "" {
+		htCfg.DNS = s.config.DNS
+	}
+	if s.config.DNSType != "" {
+		htCfg.DNSType = s.config.DNSType
+	}
+
+	// Build extra exclude list from user flag and (optionally) RFC1918.
+	var extra []string
+	if s.config.HostTunExclude != "" {
+		for _, c := range strings.Split(s.config.HostTunExclude, ",") {
+			c = strings.TrimSpace(c)
+			if c != "" {
+				extra = append(extra, c)
+			}
+		}
+	}
+	if s.config.HostTunExcludePrivate {
+		extra = append(extra,
+			"10.0.0.0/8",
+			"172.16.0.0/12",
+			"192.168.0.0/16",
+			"fc00::/7",
+		)
+	}
+
+	excludes, sshIP, warns := hosttun.BuildExcludes(
+		ctx,
+		s.config.BindInterface,
+		s.config.ConfigLinks,
+		extra,
+		3*time.Second,
+	)
+	htCfg.RouteExcludeCIDRs = excludes
+	s.hostTunCfg = htCfg
+
+	for _, w := range warns {
+		s.logf(customlog.Warning, "host-tun excludes: %s\n", w)
+	}
+	if sshIP != "" {
+		s.logf(customlog.Info, "host-tun: SSH client %s detected via $SSH_CONNECTION; excluding from TUN.\n", sshIP)
+	} else {
+		s.logf(customlog.Info, "host-tun: $SSH_CONNECTION not set; skipping SSH exclusion (not running over SSH?)\n")
+	}
+	s.logf(customlog.Info, "host-tun: %d destinations excluded from TUN capture.\n", len(excludes))
+
+	// Preflight: refuse to bring up TUN if the planned name already
+	// exists, or if the route to the SSH client is already broken.
+	if err := hosttun.Preflight(ctx, sshIP, htCfg.TunName); err != nil {
+		return fmt.Errorf("host-tun preflight: %w", err)
+	}
+
+	s.logf(customlog.Processing, "host-tun: starting TUN %s on %s ...\n", htCfg.TunName, htCfg.TunAddr)
+	inst, err := hosttun.Start(ctx, htCfg)
+	if err != nil {
+		return fmt.Errorf("host-tun start: %w", err)
+	}
+	s.hostTunInstance = inst
+	s.logf(customlog.Success, "host-tun: tunnel up.\n")
+	return nil
+}
+
+// runHostTunMode brings up the local SOCKS proxy, then the host-wide TUN,
+// then runs the deadman timer; if the user fails to ACK in time, tears
+// the TUN down to restore SSH.
+func (s *Service) runHostTunMode(ctx context.Context, forceRotate <-chan struct{}) error {
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		switch {
+		case s.config.Chain:
+			errCh <- s.runChainMode(runCtx, forceRotate)
+		case len(s.config.ConfigLinks) == 1:
+			errCh <- s.runSingleMode(runCtx, s.config.ConfigLinks[0])
+		default:
+			errCh <- s.runRotationMode(runCtx, forceRotate)
+		}
+	}()
+
+	// Wait for the local listener to be ready.
+	select {
+	case <-s.proxyReady:
+	case err := <-errCh:
+		return err
+	}
+
+	if err := s.setupHostTun(ctx); err != nil {
+		runCancel()
+		<-errCh
+		return err
+	}
+
+	// Deadman switch: prompt user to press ENTER within the configured
+	// window. If they don't, tear down TUN (restore SSH path).
+	deadmanDur := time.Duration(s.config.HostTunDeadman) * time.Second
+	if deadmanDur > 0 {
+		s.logf(customlog.Warning, "%s", hosttun.DeadmanInstructions(deadmanDur))
+		confirm := make(chan struct{}, 1)
+		go func() {
+			var buf [1]byte
+			if _, err := os.Stdin.Read(buf[:]); err == nil {
+				select {
+				case confirm <- struct{}{}:
+				default:
+				}
+			}
+		}()
+		switch hosttun.RunDeadman(ctx, deadmanDur, confirm) {
+		case hosttun.DeadmanExpired:
+			s.logf(customlog.Failure, "host-tun: deadman timer expired without confirmation. Tearing down to restore SSH.\n")
+			s.teardownHostTun()
+			runCancel()
+			<-errCh
+			return fmt.Errorf("host-tun: deadman expired")
+		case hosttun.DeadmanCanceled:
+			return <-errCh
+		case hosttun.DeadmanConfirmed:
+			s.logf(customlog.Success, "host-tun: confirmed. Running until Ctrl+C.\n")
+		}
+	} else {
+		s.logf(customlog.Warning, "host-tun: deadman disabled. SSH loss is irrecoverable without console access.\n")
+	}
+
+	return <-errCh
+}
+
+// teardownHostTun closes the host-tun sing-box instance. Safe to call
+// multiple times.
+func (s *Service) teardownHostTun() {
+	if s.hostTunInstance == nil {
+		return
+	}
+	if err := s.hostTunInstance.Close(); err != nil {
+		s.logf(customlog.Warning, "host-tun close returned error: %v\n", err)
+	}
+	s.hostTunInstance = nil
 }
 
 // signalProxyReady is called once after the first proxy instance is started
@@ -591,6 +807,10 @@ func (s *Service) Run(ctx context.Context, forceRotate <-chan struct{}) error {
 
 	if s.config.Mode == "app" {
 		return s.runAppMode(ctx, forceRotate)
+	}
+
+	if s.config.Mode == "host-tun" {
+		return s.runHostTunMode(ctx, forceRotate)
 	}
 
 	if s.config.Chain {
