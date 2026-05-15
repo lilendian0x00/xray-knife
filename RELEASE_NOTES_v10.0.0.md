@@ -39,10 +39,15 @@ flags must appear after the subcommand name.
 - `xray-knife proxy --help` and per-subcommand `--help` now show only
   the relevant flag set. The 33-flag wall is gone.
 - `--shell` / `--namespace` are visible only on `proxy app`.
-- `--i-might-lose-ssh` and `--tun-*` are visible only on `proxy tun`.
-- `--i-might-lose-ssh` and `--bind` are now marked required on `tun`,
-  so cobra rejects bad invocations at parse time instead of failing
-  inside the service after partial setup.
+- `--tun-*` flags are visible only on `proxy tun`.
+- `--bind` is now marked required on `tun`, so cobra rejects bad
+  invocations at parse time instead of failing inside the service
+  after partial setup.
+- The `--i-might-lose-ssh` acknowledgement flag has been removed.
+  The deadman switch (`--tun-deadman`, 60s default), the RFC 2544
+  default TUN CIDR (198.18.0.0/15), and the default exclusion of
+  RFC1918 private ranges together provide sufficient SSH-safety
+  without requiring a typed acknowledgement.
 - The "no configs in database" error now hints at both `subs fetch`
   AND `--config / --file / --stdin`.
 - Each subcommand has an `Examples:` block.

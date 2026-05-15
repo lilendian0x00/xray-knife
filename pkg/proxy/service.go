@@ -116,7 +116,6 @@ type Config struct {
 	ConfigLinks []string
 
 	// host-tun mode fields. Only honored when Mode == "host-tun".
-	HostTunAck            bool   `json:"hostTunAck,omitempty"`
 	HostTunDeadman        uint16 `json:"hostTunDeadman,omitempty"`
 	HostTunExclude        string `json:"hostTunExclude,omitempty"`
 	HostTunName           string `json:"hostTunName,omitempty"`
@@ -219,9 +218,6 @@ func New(config Config, logger *log.Logger) (*Service, error) {
 		}
 		if os.Getuid() != 0 {
 			return nil, errors.New("host-tun mode requires root privileges. Run with sudo")
-		}
-		if !config.HostTunAck {
-			return nil, errors.New("host-tun mode requires HostTunAck=true (CLI: --i-might-lose-ssh)")
 		}
 		if config.BindInterface == "" {
 			return nil, errors.New("host-tun mode requires BindInterface (CLI: --bind <iface>)")

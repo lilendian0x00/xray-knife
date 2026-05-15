@@ -88,7 +88,6 @@ type appCfg struct {
 }
 
 type tunCfg struct {
-	hostTunAck            bool
 	hostTunDeadman        uint16
 	hostTunExclude        string
 	hostTunName           string
@@ -249,7 +248,6 @@ func buildPkgConfig(
 		cfg.NamespaceName = app.namespaceName
 	}
 	if tun != nil {
-		cfg.HostTunAck = tun.hostTunAck
 		cfg.HostTunDeadman = tun.hostTunDeadman
 		cfg.HostTunExclude = tun.hostTunExclude
 		cfg.HostTunName = tun.hostTunName

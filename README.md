@@ -225,10 +225,10 @@ sudo xray-knife exec myproxy -- firefox
 
 **4. Host-Wide TUN Capture (Linux)**
 
-Capture every packet leaving the host through a TUN device. Replaces the default route. Dangerous over SSH — pass `--i-might-lose-ssh` to acknowledge.
+Capture every packet leaving the host through a TUN device. Replaces the default route. The `--tun-deadman` switch (60s default), the RFC 2544 default TUN CIDR, and private-LAN exclusion together keep SSH and LAN traffic on the original interface.
 
 ```bash
-sudo xray-knife proxy tun --bind eth0 --i-might-lose-ssh
+sudo xray-knife proxy tun --bind eth0
 ```
 
 ---
