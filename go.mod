@@ -1,4 +1,4 @@
-module github.com/lilendian0x00/xray-knife/v9
+module github.com/lilendian0x00/xray-knife/v10
 
 go 1.26.3
 
@@ -21,6 +21,7 @@ require (
 	golang.org/x/crypto v0.49.0
 	golang.org/x/net v0.52.0
 	golang.org/x/sys v0.42.0
+	golang.org/x/term v0.41.0
 	modernc.org/sqlite v1.38.0
 )
 
@@ -103,7 +104,6 @@ require (
 	golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93 // indirect
 	golang.org/x/mod v0.33.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/term v0.41.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 	golang.org/x/time v0.12.0 // indirect
 	golang.org/x/tools v0.42.0 // indirect

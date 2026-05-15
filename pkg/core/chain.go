@@ -3,7 +3,7 @@ package core
 import (
 	"fmt"
 
-	"github.com/lilendian0x00/xray-knife/v9/pkg/core/protocol"
+	"github.com/lilendian0x00/xray-knife/v10/pkg/core/protocol"
 )
 
 // ChainConfig holds the parsed chain of proxy hops.

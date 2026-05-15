@@ -9,9 +9,9 @@ import (
 	"strings"
 	"syscall"
 
-	pkgproxy "github.com/lilendian0x00/xray-knife/v9/pkg/proxy"
-	"github.com/lilendian0x00/xray-knife/v9/utils"
-	"github.com/lilendian0x00/xray-knife/v9/utils/customlog"
+	pkgproxy "github.com/lilendian0x00/xray-knife/v10/pkg/proxy"
+	"github.com/lilendian0x00/xray-knife/v10/utils"
+	"github.com/lilendian0x00/xray-knife/v10/utils/customlog"
 
 	"github.com/spf13/cobra"
 )

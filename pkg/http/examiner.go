@@ -16,9 +16,9 @@ import (
 
 	"github.com/fatih/color"
 
-	"github.com/lilendian0x00/xray-knife/v9/pkg/core"
-	"github.com/lilendian0x00/xray-knife/v9/pkg/core/protocol"
-	"github.com/lilendian0x00/xray-knife/v9/pkg/netbind"
+	"github.com/lilendian0x00/xray-knife/v10/pkg/core"
+	"github.com/lilendian0x00/xray-knife/v10/pkg/core/protocol"
+	"github.com/lilendian0x00/xray-knife/v10/pkg/netbind"
 )
 
 // ProtocolInfo holds basic, serializable information about a protocol.

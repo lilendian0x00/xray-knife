@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/lilendian0x00/xray-knife/v9/cmd"
+	"github.com/lilendian0x00/xray-knife/v10/cmd"
 )
 
 func main() {

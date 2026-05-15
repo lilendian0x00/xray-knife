@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lilendian0x00/xray-knife/v9/pkg/core/protocol"
-	"github.com/lilendian0x00/xray-knife/v9/pkg/netbind"
+	"github.com/lilendian0x00/xray-knife/v10/pkg/core/protocol"
+	"github.com/lilendian0x00/xray-knife/v10/pkg/netbind"
 
 	"github.com/xtls/xray-core/app/dispatcher"
 	applog "github.com/xtls/xray-core/app/log"

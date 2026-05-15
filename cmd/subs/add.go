@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net/url"
 
-	"github.com/lilendian0x00/xray-knife/v9/database"
-	"github.com/lilendian0x00/xray-knife/v9/utils/customlog"
+	"github.com/lilendian0x00/xray-knife/v10/database"
+	"github.com/lilendian0x00/xray-knife/v10/utils/customlog"
 	"github.com/spf13/cobra"
 )
 
