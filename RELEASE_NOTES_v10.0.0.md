@@ -1,59 +1,37 @@
-# v10.0.0 — Proxy CLI restructure (BREAKING)
+# v10.0.0 — Proxy CLI Cleanup (Breaking)
 
-The `proxy` command has been split into four mode-specific subcommands.
-The `--mode` flag is gone, `host-tun` is renamed to `tun`, and the
-`--host-tun-*` flags are renamed to `--tun-*`.
+`xray-knife proxy` has been reshaped. One mode flag became four
+subcommands. `host-tun` got a shorter name. Help output is no longer
+a wall of flags.
 
-## Breaking changes
-
-### `--mode` removed; use subcommands
+## Quick migration
 
 | Old | New |
 |---|---|
-| `xray-knife proxy` (defaulted to inbound) | `xray-knife proxy inbound` |
+| `xray-knife proxy` | `xray-knife proxy inbound` |
 | `xray-knife proxy --mode inbound` | `xray-knife proxy inbound` |
 | `xray-knife proxy --mode system` | `xray-knife proxy system` |
 | `xray-knife proxy --mode app --shell` | `xray-knife proxy app --shell` |
 | `xray-knife proxy --mode host-tun ...` | `xray-knife proxy tun ...` |
+| `--host-tun-deadman` (etc.) | `--tun-deadman` (etc.) |
 
-### `host-tun` renamed to `tun`; flag prefix renamed
+If you typed `--mode` in a script, swap it for the matching subcommand.
+Drop the `host-` prefix from any tun flags.
 
-| Old flag | New flag |
-|---|---|
-| `--host-tun-deadman` | `--tun-deadman` |
-| `--host-tun-exclude` | `--tun-exclude` |
-| `--host-tun-name` | `--tun-name` |
-| `--host-tun-addr` | `--tun-addr` |
-| `--host-tun-mtu` | `--tun-mtu` |
-| `--host-tun-include-private` | `--tun-include-private` |
+## What changed
 
-### Persistent flags
+**Subcommands replace `--mode`.** Pick one: `inbound`, `system`, `app`, `tun`. Each shows only its own flags in `--help`.
 
-`--core`, `--config`, `--file`, `--stdin`, `--addr`, `--port`,
-`--verbose`, `--insecure` are now persistent on the `proxy` parent.
-They may appear before or after the subcommand name. Mode-specific
-flags must appear after the subcommand name.
+**`host-tun` is now `tun`.** All `--host-tun-*` flags drop the `host-` prefix.
 
-## UX improvements
+**Shared flags moved to the parent.** `--core`, `--config`, `--file`, `--stdin`, `--addr`, `--port`, `--verbose`, `--insecure` work before or after the subcommand name. Mode-specific flags must come after the subcommand.
 
-- `xray-knife proxy --help` and per-subcommand `--help` now show only
-  the relevant flag set. The 33-flag wall is gone.
-- `--shell` / `--namespace` are visible only on `proxy app`.
-- `--tun-*` flags are visible only on `proxy tun`.
-- `--bind` is now marked required on `tun`, so cobra rejects bad
-  invocations at parse time instead of failing inside the service
-  after partial setup.
-- The `--i-might-lose-ssh` acknowledgement flag has been removed.
-  The deadman switch (`--tun-deadman`, 60s default), the RFC 2544
-  default TUN CIDR (198.18.0.0/15), and the default exclusion of
-  RFC1918 private ranges together provide sufficient SSH-safety
-  without requiring a typed acknowledgement.
-- The "no configs in database" error now hints at both `subs fetch`
-  AND `--config / --file / --stdin`.
-- Each subcommand has an `Examples:` block.
+**`--i-might-lose-ssh` is gone.** The deadman timer (`--tun-deadman`, 60s by default), the safe TUN CIDR (RFC 2544), and the default skip of LAN traffic already keep SSH alive. No typed acknowledgement needed.
 
-## Migration
+**`--bind` is now required on `tun`.** Bad invocations get rejected at parse time, not after half the tunnel is up.
 
-Update any scripts or systemd units that invoke `xray-knife proxy
---mode X` to use the subcommand form. The old `--mode` flag now
-produces a clear `unknown flag: --mode` error.
+**Cleaner help.** `xray-knife proxy --help` no longer dumps 33 flags. Each subcommand's help is short and on-topic.
+
+**Better empty-DB error.** Tells you both options: run `subs fetch`, or pass `--config / --file / --stdin`.
+
+**Examples on every subcommand.** Real invocations, not just flag lists.
