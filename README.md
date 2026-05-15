@@ -169,12 +169,14 @@ Run a local proxy that intelligently manages and rotates your outbound connectio
 
 Start a local SOCKS5 proxy on port `9999`. It will load all enabled configs from your database and automatically rotate to the best-performing one every 5 minutes (300 seconds).
 
+> **v10 breaking change:** the `--mode` flag is gone — use the subcommand form (`xray-knife proxy inbound`, etc.). `host-tun` is renamed to `tun` and `--host-tun-*` flags are renamed to `--tun-*`. See [RELEASE_NOTES_v10.0.0.md](RELEASE_NOTES_v10.0.0.md) for the full migration table.
+
 ```bash
 # Proxy to configs from a file
-xray-knife proxy --inbound socks -f ./configs.txt --port 9999 --rotate 300
+xray-knife proxy inbound -f ./configs.txt --port 9999 --rotate 300
 
 # Proxy to configs from your database
-xray-knife proxy --inbound socks --port 9999 --rotate 300
+xray-knife proxy inbound --port 9999 --rotate 300
 ```
 > **Pro Tip:** While the proxy is running, simply press `Enter` in the terminal to force an immediate rotation to the next available fast configuration.
 
@@ -184,10 +186,10 @@ Set the OS-level proxy so all applications (browsers, package managers, etc.) ro
 
 ```bash
 # Set the system proxy from your database
-xray-knife proxy --mode system --port 9999 --rotate 300
+xray-knife proxy system --port 9999 --rotate 300
 
 # Set the system proxy with a single config
-xray-knife proxy --mode system -c "vless://..." --port 9999
+xray-knife proxy system -c "vless://..." --port 9999
 ```
 > Supports GNOME (dconf), KDE (kwriteconfig), macOS (networksetup), and Windows (registry).
 
@@ -200,10 +202,10 @@ Route only specific applications through the proxy using Linux network namespace
 **Shell Mode** — Drop into a proxied shell. Everything you run inside it goes through the proxy:
 ```bash
 # Single config
-sudo xray-knife proxy --mode app -c "vless://..."
+sudo xray-knife proxy app -c "vless://..."
 
 # With rotation from your database
-sudo xray-knife proxy --mode app --rotate 300
+sudo xray-knife proxy app --rotate 300
 ```
 ```
 $ curl httpbin.org/ip
@@ -214,11 +216,19 @@ $ exit   # stops it
 **Named Namespace Mode** — Create a persistent namespace that other terminals can join:
 ```bash
 # Terminal 1: Start the proxy namespace
-sudo xray-knife proxy --mode app --namespace myproxy -c "vless://..."
+sudo xray-knife proxy app --namespace myproxy -c "vless://..."
 
 # Terminal 2: Run commands inside it
 sudo xray-knife exec myproxy -- curl https://ifconfig.me
 sudo xray-knife exec myproxy -- firefox
+```
+
+**4. Host-Wide TUN Capture (Linux)**
+
+Capture every packet leaving the host through a TUN device. Replaces the default route. Dangerous over SSH — pass `--i-might-lose-ssh` to acknowledge.
+
+```bash
+sudo xray-knife proxy tun --bind eth0 --i-might-lose-ssh
 ```
 
 ---
