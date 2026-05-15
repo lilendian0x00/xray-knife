@@ -169,7 +169,7 @@ Run a local proxy that intelligently manages and rotates your outbound connectio
 
 Start a local SOCKS5 proxy on port `9999`. It will load all enabled configs from your database and automatically rotate to the best-performing one every 5 minutes (300 seconds).
 
-> **v10 breaking change:** the `--mode` flag is gone — use the subcommand form (`xray-knife proxy inbound`, etc.). `host-tun` is renamed to `tun` and `--host-tun-*` flags are renamed to `--tun-*`. See [RELEASE_NOTES_v10.0.0.md](RELEASE_NOTES_v10.0.0.md) for the full migration table.
+> **v10 breaking change:** the `--mode` flag is gone — use the subcommand form (`xray-knife proxy inbound`, etc.). `host-tun` is renamed to `tun` and `--host-tun-*` flags are renamed to `--tun-*`.
 
 ```bash
 # Proxy to configs from a file
