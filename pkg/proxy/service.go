@@ -268,7 +268,7 @@ func New(config Config, logger *log.Logger) (*Service, error) {
 			return nil, fmt.Errorf("could not fetch configs from database: %w", err)
 		}
 		if len(dbLinks) == 0 {
-			return nil, errors.New("no configs found in the database. Use 'subs fetch' to populate it")
+			return nil, errors.New("no configs in database. Run 'xray-knife subs fetch --all' to populate, or pass --config / --file / --stdin")
 		}
 		s.config.ConfigLinks = dbLinks
 		s.logf(customlog.Success, "Loaded %d configs from the database for rotation pool.\n", len(s.config.ConfigLinks))
