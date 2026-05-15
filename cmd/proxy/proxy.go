@@ -1,322 +1,54 @@
 package proxy
 
 import (
-	"bufio"
-	"context"
-	"fmt"
-	"os"
-	"os/signal"
-	"strings"
-	"syscall"
-
-	pkgproxy "github.com/lilendian0x00/xray-knife/v9/pkg/proxy"
-	"github.com/lilendian0x00/xray-knife/v9/utils"
-	"github.com/lilendian0x00/xray-knife/v9/utils/customlog"
-
 	"github.com/spf13/cobra"
 )
 
-// proxyCmdConfig holds the configuration for the proxy command from flags
-type proxyCmdConfig struct {
-	CoreType            string
-	rotationInterval    uint32
-	inboundProtocol     string
-	inboundTransport    string
-	inboundUUID         string
-	mode                string
-	configLinksFile     string
-	readConfigFromSTDIN bool
-	listenAddr          string
-	listenPort          string
-	configLink          string
-	verbose             bool
-	insecureTLS         bool
-	maximumAllowedDelay uint16
-	inboundConfigLink   string
-	batchSize           uint16
-	concurrency         uint16
-	healthCheckInterval uint32
-	healthFailThreshold uint16
-	drainTimeout        uint16
-	blacklistStrikes    uint16
-	blacklistDuration   uint32
-	chainAttempts       uint16
-	shell               bool
-	namespaceName       string
-	chain               bool
-	chainLinks          string
-	chainFile           string
-	chainHops           uint8
-	chainRotation       string
-	bindInterface       string
-	dns                 string
-	dnsType             string
-	// host-tun mode
-	hostTunAck       bool
-	hostTunDeadman   uint16
-	hostTunExclude   string
-	hostTunName      string
-	hostTunAddr      string
-	hostTunMTU       uint32
-	hostTunNoPrivate bool
-}
-
-// ProxyCmd is the proxy subcommand.
+// ProxyCmd is the parent for the proxy subcommand family.
+//
+// Bare `xray-knife proxy` prints help (no RunE — cobra default).
+// All real work lives in the four subcommands: inbound, system,
+// app, tun.
 var ProxyCmd = newProxyCommand()
 
 func newProxyCommand() *cobra.Command {
-	cfg := &proxyCmdConfig{}
-
 	cmd := &cobra.Command{
 		Use:   "proxy",
-		Short: "Run a local inbound proxy that tunnels traffic through a remote configuration. Supports automatic rotation.",
-		Long: `Runs a local proxy service using configurations from the database by default.
-Use --file, --config, or --stdin to provide configs for a single session without using the database.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Get config links if provided via flags, otherwise leave empty.
-			var links []string
-			var err error
-			if cfg.configLinksFile != "" {
-				links = utils.ParseFileByNewline(cfg.configLinksFile)
-			} else if cfg.configLink != "" {
-				links = []string{cfg.configLink}
-			} else if cfg.readConfigFromSTDIN {
-				scanner := bufio.NewScanner(os.Stdin)
-				fmt.Println("Reading config links from STDIN (press CTRL+D when done):")
-				for scanner.Scan() {
-					if trimmed := strings.TrimSpace(scanner.Text()); trimmed != "" {
-						links = append(links, trimmed)
-					}
-				}
-				if err := scanner.Err(); err != nil {
-					return fmt.Errorf("error reading from stdin: %w", err)
-				}
-			}
-			// If links slice is empty, the service will automatically fetch from the DB.
+		Short: "Run a local proxy that tunnels traffic through a remote configuration. Supports rotation and multiple operating modes.",
+		Long: `Run a proxy in one of four modes:
 
-			// Validate app mode flags.
-			if cfg.shell && cfg.mode != "app" {
-				return fmt.Errorf("--shell requires --mode app")
-			}
-			if cfg.namespaceName != "" && cfg.mode != "app" {
-				return fmt.Errorf("--namespace requires --mode app")
-			}
-			if cfg.shell && cfg.namespaceName != "" {
-				return fmt.Errorf("--shell and --namespace are mutually exclusive")
-			}
+  inbound  — local listener (default for most use cases)
+  system   — local listener + register as the OS system proxy
+  app      — per-process Linux network namespace (--shell / --namespace)
+  tun      — host-wide TUN capture (Linux only, DANGEROUS over SSH)
 
-			// Validate host-tun mode flags.
-			if cfg.mode == "host-tun" {
-				if !cfg.hostTunAck {
-					return fmt.Errorf("--mode host-tun requires --i-might-lose-ssh (this mode replaces the default route and can kill your SSH session)")
-				}
-				if cfg.bindInterface == "" {
-					return fmt.Errorf("--mode host-tun requires --bind <iface> (the physical NIC; sing-box pins its outbound dials to it)")
-				}
-			} else {
-				if cfg.hostTunAck {
-					return fmt.Errorf("--i-might-lose-ssh requires --mode host-tun")
-				}
-			}
-
-			// Validate chain mode flags.
-			if cfg.chainLinks != "" || cfg.chainFile != "" {
-				cfg.chain = true
-			}
-			if cfg.chainRotation != "none" && cfg.chainRotation != "" {
-				if !cfg.chain {
-					return fmt.Errorf("--chain-rotation requires --chain")
-				}
-			}
-			if cfg.chain {
-				if cfg.CoreType == "auto" {
-					return fmt.Errorf("--chain requires an explicit core type (xray or sing-box), not auto")
-				}
-				if cfg.chainHops < 2 {
-					cfg.chainHops = 2
-				}
-				// Fixed chains are incompatible with rotation.
-				if (cfg.chainLinks != "" || cfg.chainFile != "") && cfg.chainRotation != "none" && cfg.chainRotation != "" {
-					return fmt.Errorf("--chain-rotation is incompatible with --chain-links / --chain-file (fixed chains don't rotate)")
-				}
-			}
-			if cfg.chainRotation == "" {
-				cfg.chainRotation = "none"
-			}
-
-			// Create the service configuration from flags
-			serviceConfig := pkgproxy.Config{
-				CoreType:            cfg.CoreType,
-				InboundProtocol:     cfg.inboundProtocol,
-				InboundTransport:    cfg.inboundTransport,
-				InboundUUID:         cfg.inboundUUID,
-				ListenAddr:          cfg.listenAddr,
-				ListenPort:          cfg.listenPort,
-				InboundConfigLink:   cfg.inboundConfigLink,
-				Mode:                cfg.mode,
-				Verbose:             cfg.verbose,
-				InsecureTLS:         cfg.insecureTLS,
-				RotationInterval:    cfg.rotationInterval,
-				MaximumAllowedDelay: cfg.maximumAllowedDelay,
-				BatchSize:           cfg.batchSize,
-				Concurrency:         cfg.concurrency,
-				HealthCheckInterval: cfg.healthCheckInterval,
-				HealthFailThreshold: cfg.healthFailThreshold,
-				DrainTimeout:        cfg.drainTimeout,
-				BlacklistStrikes:    cfg.blacklistStrikes,
-				BlacklistDuration:   cfg.blacklistDuration,
-				ChainAttempts:       cfg.chainAttempts,
-				Shell:               cfg.shell,
-				NamespaceName:       cfg.namespaceName,
-				Chain:               cfg.chain,
-				ChainLinks:          cfg.chainLinks,
-				ChainFile:           cfg.chainFile,
-				ChainHops:           cfg.chainHops,
-				ChainRotation:       cfg.chainRotation,
-				BindInterface:       cfg.bindInterface,
-				DNS:                 cfg.dns,
-				DNSType:             cfg.dnsType,
-				ConfigLinks:         links,
-				HostTunAck:          cfg.hostTunAck,
-				HostTunDeadman:      cfg.hostTunDeadman,
-				HostTunExclude:      cfg.hostTunExclude,
-				HostTunName:         cfg.hostTunName,
-				HostTunAddr:         cfg.hostTunAddr,
-				HostTunMTU:          cfg.hostTunMTU,
-				HostTunExcludePrivate: !cfg.hostTunNoPrivate,
-			}
-
-				// Create the new proxy service
-			service, err := pkgproxy.New(serviceConfig, nil)
-			if err != nil {
-				return err
-			}
-			defer service.Close()
-
-			// Set up context for graceful shutdown
-			ctx, cancel := context.WithCancel(context.Background())
-			signalChan := make(chan os.Signal, 1)
-			// SIGHUP must be caught: when this is host-tun running over
-			// SSH and the SSH session drops, the kernel sends SIGHUP to
-			// the controlling process group. Without catching it, the
-			// process dies before service.Close() can tear down the TUN
-			// and routing rules — leaving the VPS unreachable.
-			signal.Notify(signalChan, os.Interrupt, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-			defer func() {
-				signal.Stop(signalChan)
-				cancel()
-			}()
-			go func() {
-				select {
-				case sig := <-signalChan:
-					customlog.Printf(customlog.Processing, "Received signal: %v. Shutting down...\n", sig)
-					cancel()
-				case <-ctx.Done():
-				}
-			}()
-
-			// Set up channel for manual rotation.
-			// Skip the stdin reader in app+shell mode because the shell
-			// takes over stdin.
-			forceRotateChan := make(chan struct{})
-			if service.ConfigCount() > 1 && !cfg.shell {
-				go func() {
-					reader := bufio.NewReader(os.Stdin)
-					for {
-						// ReadString returns an error on EOF (e.g. when stdin
-						// is /dev/null or a closed pipe). Without this guard
-						// the loop spins, sending forceRotate signals as fast
-						// as the rotation worker can accept them.
-						if _, err := reader.ReadString('\n'); err != nil {
-							return
-						}
-						select {
-						case forceRotateChan <- struct{}{}:
-						case <-ctx.Done():
-							return
-						}
-					}
-				}()
-			}
-
-			// Run the service
-			return service.Run(ctx, forceRotateChan)
-		},
+Configurations are read from --config / --file / --stdin or, if none of
+those are provided, from the local subscription database (populate with
+'xray-knife subs fetch').`,
 	}
 
-	addFlags(cmd, cfg)
-	return cmd
-}
-
-// addFlags configures all the command-line flags
-func addFlags(cmd *cobra.Command, cfg *proxyCmdConfig) {
-	flags := cmd.Flags()
-	flags.BoolVarP(&cfg.readConfigFromSTDIN, "stdin", "i", false, "Read config link(s) from STDIN")
-	flags.StringVarP(&cfg.configLinksFile, "file", "f", "", "Read config links from a file")
-	flags.StringVarP(&cfg.configLink, "config", "c", "", "The single xray/sing-box config link to use")
-
-	flags.Uint32VarP(&cfg.rotationInterval, "rotate", "t", 300, "How often to rotate outbounds (seconds)")
-	flags.Uint16VarP(&cfg.maximumAllowedDelay, "mdelay", "d", 3000, "Maximum allowed delay (ms) for testing configs during rotation")
-
-	flags.StringVarP(&cfg.listenAddr, "addr", "a", "127.0.0.1", "Listen ip address for the proxy server")
-	flags.StringVarP(&cfg.listenPort, "port", "p", "9999", "Listen port number for the proxy server")
-
-	flags.StringVarP(&cfg.inboundProtocol, "inbound", "j", "socks", "Inbound protocol to use (vless, vmess, socks)")
-	flags.StringVarP(&cfg.inboundTransport, "transport", "u", "tcp", "Inbound transport to use (tcp, ws, grpc, xhttp)")
-	flags.StringVarP(&cfg.inboundUUID, "uuid", "g", "random", "Inbound custom UUID to use (default: random)")
-
-	flags.StringVarP(&cfg.inboundConfigLink, "inbound-config", "I", "", "Custom config link for the inbound proxy")
-	flags.StringVarP(&cfg.mode, "mode", "m", "inbound", "Proxy operating mode: inbound, system, app (per-process namespace), or host-tun (capture all host traffic — Linux only, DANGEROUS over SSH)")
-	cmd.RegisterFlagCompletionFunc("mode", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string{"inbound", "system", "app", "host-tun"}, cobra.ShellCompDirectiveNoFileComp
-	})
-
-	flags.StringVarP(&cfg.CoreType, "core", "z", "xray", "Core type: (xray, sing-box)")
+	flags := cmd.PersistentFlags()
+	flags.StringVarP(&pf.coreType, "core", "z", "xray", "Core type: (xray, sing-box)")
 	cmd.RegisterFlagCompletionFunc("core", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"xray", "sing-box"}, cobra.ShellCompDirectiveNoFileComp
 	})
+	flags.StringVarP(&pf.configLink, "config", "c", "", "The single xray/sing-box config link to use")
+	flags.StringVarP(&pf.configFile, "file", "f", "", "Read config links from a file")
+	flags.BoolVarP(&pf.readFromSTDIN, "stdin", "i", false, "Read config link(s) from STDIN")
+	flags.StringVarP(&pf.listenAddr, "addr", "a", "127.0.0.1", "Listen ip address for the proxy server")
+	flags.StringVarP(&pf.listenPort, "port", "p", "9999", "Listen port number for the proxy server")
+	flags.BoolVarP(&pf.verbose, "verbose", "v", false, "Enable verbose logging for the selected core")
+	flags.BoolVarP(&pf.insecureTLS, "insecure", "e", false, "Allow insecure TLS connections (e.g., self-signed certs)")
 
-	flags.BoolVarP(&cfg.verbose, "verbose", "v", false, "Enable verbose logging for the selected core")
-	flags.BoolVarP(&cfg.insecureTLS, "insecure", "e", false, "Allow insecure TLS connections (e.g., self-signed certs)")
+	cmd.MarkFlagsMutuallyExclusive("config", "file", "stdin")
 
-	flags.Uint16VarP(&cfg.batchSize, "batch", "b", 0, "Number of configs to test per rotation (0=auto)")
-	flags.Uint16VarP(&cfg.concurrency, "concurrency", "n", 0, "Number of concurrent test threads (0=auto)")
-	flags.Uint32Var(&cfg.healthCheckInterval, "health-check", 30, "Health check interval in seconds (0=disabled)")
-	flags.Uint16Var(&cfg.healthFailThreshold, "health-fail-threshold", 0, "Consecutive health-check failures before striking the active config (0=default)")
-	flags.Uint16Var(&cfg.drainTimeout, "drain", 0, "Seconds to keep the current outbound serving before switching during rotation (0=switch immediately)")
-	flags.Uint16Var(&cfg.blacklistStrikes, "blacklist-strikes", 3, "Failures before blacklisting a config (0=disabled)")
-	flags.Uint32Var(&cfg.blacklistDuration, "blacklist-duration", 600, "Seconds to blacklist a failed config")
-	flags.Uint16Var(&cfg.chainAttempts, "chain-attempts", 0, "Random chain combinations to try per rotation cycle (0=default)")
+	addSubcommandPalettes(cmd)
+	return cmd
+}
 
-	flags.BoolVar(&cfg.shell, "shell", false, "Launch an interactive shell inside the proxy namespace (requires --mode app)")
-	flags.StringVar(&cfg.namespaceName, "namespace", "", "Create a named namespace for the proxy (requires --mode app)")
-
-	flags.BoolVar(&cfg.chain, "chain", false, "Enable outbound chaining (multi-hop proxy)")
-	flags.StringVar(&cfg.chainLinks, "chain-links", "", "Fixed chain hops as pipe-separated config links")
-	flags.StringVar(&cfg.chainFile, "chain-file", "", "Fixed chain hops from file (one link per line)")
-	flags.Uint8Var(&cfg.chainHops, "chain-hops", 2, "Number of hops when selecting from pool")
-	flags.StringVar(&cfg.chainRotation, "chain-rotation", "none", "Chain rotation mode: none, exit, full")
-	flags.StringVar(&cfg.bindInterface, "bind", "", "Bind outbound dials to a specific OS interface (e.g. eth0). Linux: needs CAP_NET_RAW.")
-	flags.StringVar(&cfg.dns, "dns", "1.1.1.1", "DNS resolver used inside the app-mode tunnel (ip, ip:port, or https://host/path for --dns-type=https)")
-	flags.StringVar(&cfg.dnsType, "dns-type", "udp", "DNS transport for the app-mode tunnel: udp, tcp, tls, https")
-	cmd.RegisterFlagCompletionFunc("dns-type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string{"udp", "tcp", "tls", "https"}, cobra.ShellCompDirectiveNoFileComp
-	})
-	cmd.RegisterFlagCompletionFunc("chain-rotation", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string{"none", "exit", "full"}, cobra.ShellCompDirectiveNoFileComp
-	})
-
-	flags.BoolVar(&cfg.hostTunAck, "i-might-lose-ssh", false, "Required ack for --mode host-tun. Confirms you understand this can kill your active SSH session.")
-	flags.Uint16Var(&cfg.hostTunDeadman, "host-tun-deadman", 60, "Seconds to wait for ENTER after host-tun comes up before auto-teardown (0 = disable)")
-	flags.StringVar(&cfg.hostTunExclude, "host-tun-exclude", "", "Comma-separated extra CIDRs to exclude from host-tun capture")
-	flags.StringVar(&cfg.hostTunName, "host-tun-name", "xkt0", "TUN interface name for host-tun mode")
-	flags.StringVar(&cfg.hostTunAddr, "host-tun-addr", "198.18.0.1/30", "TUN address/CIDR for host-tun mode (RFC 2544 by default to avoid LAN collision)")
-	flags.Uint32Var(&cfg.hostTunMTU, "host-tun-mtu", 1500, "TUN MTU for host-tun mode")
-	flags.BoolVar(&cfg.hostTunNoPrivate, "host-tun-include-private", false, "Capture RFC1918 / private LAN traffic too (default: excluded). Risky over LAN.")
-
-	// Mark mutually exclusive flags
-	cmd.MarkFlagsMutuallyExclusive("file", "config", "stdin")
-	cmd.MarkFlagsMutuallyExclusive("inbound-config", "inbound")
-	cmd.MarkFlagsMutuallyExclusive("shell", "namespace")
-	cmd.MarkFlagsMutuallyExclusive("chain-links", "chain-file")
+func addSubcommandPalettes(cmd *cobra.Command) {
+	cmd.AddCommand(InboundCmd)
+	cmd.AddCommand(SystemCmd)
+	cmd.AddCommand(AppCmd)
+	cmd.AddCommand(TunCmd)
 }
