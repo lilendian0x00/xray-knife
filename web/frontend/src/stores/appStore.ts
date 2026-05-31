@@ -25,10 +25,10 @@ const defaultCfScannerSettings: CfScannerSettings = {
 const defaultMITMDFSettings: MITMDFSettings = {
     certPath: 'mycert.crt', keyPath: 'mycert.key', listenPort: 10808, socks5Port: 10808,
     groups: [
-        { name: 'google', enabled: true, frontDomain: 'www.google.com', extraDomains: ['googlevideo.com', 'youtube.com', 'dns.google'] },
-        { name: 'meta', enabled: true, frontDomain: 'www.microsoft.com', extraDomains: ['instagram.com', 'facebook.com', 'whatsapp.com', 'fb.com', 'meta.com'] },
-        { name: 'fastly', enabled: true, frontDomain: 'github.githubassets.com', extraDomains: ['reddit.com', 'fastly.com', 'github.com', 'cnn.com', 'buzzfeed.com'] },
-        { name: 'dns', enabled: true, frontDomain: 'www.microsoft.com', extraDomains: [] },
+        { name: 'google', enabled: true, frontDomain: 'www.google.com', extraDomains: ['geosite:google', 'googlevideo.com'] },
+        { name: 'meta', enabled: true, frontDomain: 'www.microsoft.com', extraDomains: ['geosite:meta', 'static.cdninstagram.com'] },
+        { name: 'fastly', enabled: true, frontDomain: 'github.githubassets.com', extraDomains: ['geosite:fastly', 'geosite:reddit', 'geosite:cnn', 'buzzfeed.com'] },
+        { name: 'dns', enabled: true, frontDomain: 'www.microsoft.com', extraDomains: ['dns.google', 'cloudflare-dns.com', 'one.one.one.one'] },
     ],
     extraIRDomains: [],
 };

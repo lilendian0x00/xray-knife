@@ -22,7 +22,7 @@ var defaultGroups = []GroupConfig{
 		Enabled:     true,
 		FrontDomain: "www.google.com",
 		ExtraDomains: []string{
-			"googlevideo.com", "youtube.com", "dns.google",
+			"geosite:google", "googlevideo.com",
 		},
 	},
 	{
@@ -30,8 +30,7 @@ var defaultGroups = []GroupConfig{
 		Enabled:     true,
 		FrontDomain: "www.microsoft.com",
 		ExtraDomains: []string{
-			"instagram.com", "facebook.com", "whatsapp.com",
-			"fb.com", "meta.com",
+			"geosite:meta", "static.cdninstagram.com",
 		},
 	},
 	{
@@ -39,14 +38,17 @@ var defaultGroups = []GroupConfig{
 		Enabled:     true,
 		FrontDomain: "github.githubassets.com",
 		ExtraDomains: []string{
-			"reddit.com", "fastly.com", "github.com",
-			"cnn.com", "buzzfeed.com",
+			"geosite:fastly", "geosite:reddit", "geosite:cnn",
+			"buzzfeed.com",
 		},
 	},
 	{
 		Name:        "dns",
 		Enabled:     true,
 		FrontDomain: "www.microsoft.com",
+		ExtraDomains: []string{
+			"dns.google", "cloudflare-dns.com", "one.one.one.one",
+		},
 	},
 }
 

@@ -17,7 +17,7 @@ import { usePersistentState } from "@/hooks/usePersistentState";
 import type { MITMDFGroupConfig, MITMDFProbeResult } from "@/types/settings";
 
 const defaultGroup = (name: string): MITMDFGroupConfig => ({
-    name, enabled: true, frontDomain: 'www.example.com', extraDomains: [],
+    name, enabled: true, frontDomain: 'www.example.com', extraDomains: ['geosite:example'],
 });
 
 const defaultProbeDomains = [
@@ -229,7 +229,7 @@ export function MITMDFTab() {
     };
 
     const statusBadge = () => {
-        const colors: Record<string, string> = { running: 'bg-green-500', stopped: 'bg-destructive', starting: 'bg-yellow-500', stopping: 'bg-yellow-500', error: 'bg-destructive' };
+        const colors: Record<string, string> = { running: 'bg-primary', stopped: 'bg-destructive', starting: 'bg-accent', stopping: 'bg-accent', error: 'bg-destructive' };
         return <Badge className={colors[mitmdfStatus] || 'bg-destructive'}>{mitmdfStatus}</Badge>;
     };
 
@@ -285,11 +285,85 @@ export function MITMDFTab() {
                     </Dialog>
                 </div>
 
+                {/* Auto Detect */}
+                <div className="border rounded-md p-3 space-y-3">
+                    <div className="flex items-center gap-2">
+                        <Search className="size-4" />
+                        <p className="text-sm font-medium">Auto Detect — Domain Fronting Probe</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                        Test whether a target domain can be fronted through each CDN. The tool connects to each front domain's server via TLS and sends an HTTP request with your target domain as the Host header. A successful response means domain fronting is possible.
+                    </p>
+                    <div className="flex gap-2">
+                        <Input
+                            className="flex-1 font-mono text-sm"
+                            placeholder="target-domain.com"
+                            value={probeTarget}
+                            onChange={e => setProbeTarget(e.target.value)}
+                            disabled={probing}
+                        />
+                        <Button onClick={handleProbe} disabled={probing || !probeTarget.trim()}>
+                            {probing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+                            Detect
+                        </Button>
+                    </div>
+
+                    <details className="text-xs text-muted-foreground">
+                        <summary className="cursor-pointer">Front domains to probe ({probeDomainsText.split('\n').filter(Boolean).length})</summary>
+                        <Textarea
+                            className="mt-2 h-24 font-mono text-sm"
+                            value={probeDomainsText}
+                            onChange={e => setProbeDomainsText(e.target.value)}
+                            disabled={probing}
+                            placeholder="www.google.com&#10;www.microsoft.com"
+                        />
+                    </details>
+
+                    {probeResults && (
+                        <div className="space-y-1 max-h-64 overflow-y-auto">
+                            {probeResults.map((r, i) => {
+                                const matchedGroup = mitmdfSettings.groups.find(g => g.frontDomain === r.frontDomain && g.enabled);
+                                const alreadyInGroup = matchedGroup && matchedGroup.extraDomains.includes(probeTarget.trim());
+                                return (
+                                    <div key={i} className="flex items-center justify-between gap-2 py-1.5 px-2 rounded hover:bg-muted/50 text-sm">
+                                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                                            {r.success
+                                                ? <CheckCircle2 className="size-3.5 shrink-0 text-primary" />
+                                                : <XCircle className="size-3.5 shrink-0 text-destructive" />
+                                            }
+                                            <span className="font-mono truncate">{r.frontDomain}</span>
+                                            {r.success && (
+                                                <span className="text-muted-foreground shrink-0">
+                                                    HTTP {r.statusCode} · {r.latencyMs}ms
+                                                </span>
+                                            )}
+                                            {r.error && (
+                                                <span className="text-muted-foreground truncate" title={r.error}>{r.error}</span>
+                                            )}
+                                        </div>
+                                        {r.success && matchedGroup && (
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="shrink-0 h-6 text-xs"
+                                                onClick={() => addTargetToGroup(r.frontDomain)}
+                                                disabled={alreadyInGroup}
+                                            >
+                                                {alreadyInGroup ? "Added" : `Add to ${matchedGroup.name}`}
+                                            </Button>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+
                 {/* Assets */}
                 <div className="border rounded-md p-3 space-y-3">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                            {checkingAssets ? <Loader2 className="size-4 animate-spin" /> : assetsReady ? <CheckCircle2 className="size-4 text-green-500" /> : <ShieldX className="size-4 text-destructive" />}
+                            {checkingAssets ? <Loader2 className="size-4 animate-spin" /> : assetsReady ? <CheckCircle2 className="size-4 text-primary" /> : <ShieldX className="size-4 text-destructive" />}
                             <p className="text-sm font-medium">Geo Assets (geosite.dat + geoip.dat)</p>
                         </div>
                         <Button variant="outline" size="sm" onClick={downloadAssets} disabled={downloadingAssets || !isStopped}>
@@ -303,7 +377,7 @@ export function MITMDFTab() {
                 {/* Certificate */}
                 <div className="border rounded-md p-3 space-y-3">
                     <div className="flex items-center gap-2">
-                        {certChecked && (certExists ? <ShieldCheck className="size-4 text-green-500" /> : <ShieldX className="size-4 text-destructive" />)}
+                        {certChecked && (certExists ? <ShieldCheck className="size-4 text-primary" /> : <ShieldX className="size-4 text-destructive" />)}
                         <p className="text-sm font-medium">Certificate</p>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
@@ -366,7 +440,7 @@ export function MITMDFTab() {
                                         </div>
                                         <div className="flex flex-col gap-1.5">
                                             <Label className="text-xs">Extra Domains <span className="text-muted-foreground">(one per line, supports domain:/geosite:/geoip: prefixes)</span></Label>
-                                            <Textarea className="h-20 font-mono text-sm" value={g.extraDomains.join('\n')} onChange={e => updateGroup(idx, { extraDomains: e.target.value.split('\n').map(s => s.trim()).filter(Boolean) })} disabled={!isStopped} placeholder="example.com&#10;geosite:google" />
+                                            <Textarea className="h-20 font-mono text-sm" value={g.extraDomains.join('\n')} onChange={e => updateGroup(idx, { extraDomains: e.target.value.split('\n').map(s => s.trim()).filter(Boolean) })} placeholder="example.com&#10;geosite:google" />
                                         </div>
                                     </motion.div>
                                 )}
@@ -379,80 +453,6 @@ export function MITMDFTab() {
                 <div className="flex flex-col gap-1.5">
                     <Label className="text-xs">Extra Iranian / Direct Domains <span className="text-muted-foreground">(one per line, bypass MITM)</span></Label>
                     <Textarea className="h-16 font-mono text-sm" value={extraIRText} onChange={e => setExtraIRText(e.target.value)} disabled={!isStopped} placeholder="domain:example.ir" />
-                </div>
-
-                {/* Auto Detect */}
-                <div className="border rounded-md p-3 space-y-3">
-                    <div className="flex items-center gap-2">
-                        <Search className="size-4" />
-                        <p className="text-sm font-medium">Auto Detect — Domain Fronting Probe</p>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                        Test whether a target domain can be fronted through each CDN. The tool connects to each front domain's server via TLS and sends an HTTP request with your target domain as the Host header. A successful response means domain fronting is possible.
-                    </p>
-                    <div className="flex gap-2">
-                        <Input
-                            className="flex-1 font-mono text-sm"
-                            placeholder="target-domain.com"
-                            value={probeTarget}
-                            onChange={e => setProbeTarget(e.target.value)}
-                            disabled={probing}
-                        />
-                        <Button onClick={handleProbe} disabled={probing || !probeTarget.trim()}>
-                            {probing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
-                            Detect
-                        </Button>
-                    </div>
-
-                    <details className="text-xs text-muted-foreground">
-                        <summary className="cursor-pointer">Front domains to probe ({probeDomainsText.split('\n').filter(Boolean).length})</summary>
-                        <Textarea
-                            className="mt-2 h-24 font-mono text-sm"
-                            value={probeDomainsText}
-                            onChange={e => setProbeDomainsText(e.target.value)}
-                            disabled={probing}
-                            placeholder="www.google.com&#10;www.microsoft.com"
-                        />
-                    </details>
-
-                    {probeResults && (
-                        <div className="space-y-1 max-h-64 overflow-y-auto">
-                            {probeResults.map((r, i) => {
-                                const matchedGroup = mitmdfSettings.groups.find(g => g.frontDomain === r.frontDomain && g.enabled);
-                                const alreadyInGroup = matchedGroup && matchedGroup.extraDomains.includes(probeTarget.trim());
-                                return (
-                                    <div key={i} className="flex items-center justify-between gap-2 py-1.5 px-2 rounded hover:bg-muted/50 text-sm">
-                                        <div className="flex items-center gap-2 min-w-0 flex-1">
-                                            {r.success
-                                                ? <CheckCircle2 className="size-3.5 shrink-0 text-green-500" />
-                                                : <XCircle className="size-3.5 shrink-0 text-destructive" />
-                                            }
-                                            <span className="font-mono truncate">{r.frontDomain}</span>
-                                            {r.success && (
-                                                <span className="text-muted-foreground shrink-0">
-                                                    HTTP {r.statusCode} · {r.latencyMs}ms
-                                                </span>
-                                            )}
-                                            {r.error && (
-                                                <span className="text-muted-foreground truncate" title={r.error}>{r.error}</span>
-                                            )}
-                                        </div>
-                                        {r.success && matchedGroup && (
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="shrink-0 h-6 text-xs"
-                                                onClick={() => addTargetToGroup(r.frontDomain)}
-                                                disabled={alreadyInGroup}
-                                            >
-                                                {alreadyInGroup ? "Added" : `Add to ${matchedGroup.name}`}
-                                            </Button>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
                 </div>
             </CardContent>
         </Card>

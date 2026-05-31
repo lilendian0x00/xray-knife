@@ -187,9 +187,9 @@ export default function Dashboard() {
     }, [setProxyStatus, setProxyDetails, setScanStatus, setScanResults, setHttpResults, setHttpTestStatus]);
 
     const getProxyStatusColor = (status: ProxyStatus) => {
-        if (status === 'running') return 'bg-green-500 text-primary-foreground';
+        if (status === 'running') return 'bg-primary text-primary-foreground';
         if (status === 'stopped') return 'bg-destructive';
-        return 'bg-yellow-500 text-destructive-foreground';
+        return 'bg-accent text-accent-foreground';
     };
 
     const clearLogs = () => term.current?.clear();
@@ -298,7 +298,7 @@ export default function Dashboard() {
                         </Sheet>
                         <div className="w-full flex-1"><Breadcrumb><BreadcrumbList><BreadcrumbItem><BreadcrumbLink href="/">Home</BreadcrumbLink></BreadcrumbItem><BreadcrumbSeparator /><BreadcrumbItem><BreadcrumbPage>{currentPageInfo?.label}</BreadcrumbPage></BreadcrumbItem></BreadcrumbList></Breadcrumb></div>
                         <div className="flex items-center gap-1" title={sseConnected ? "Connected" : "Disconnected"}>
-                            <span className={cn("size-2 rounded-full", sseConnected ? "bg-green-500" : "bg-red-500")} />
+                            <span className={cn("size-2 rounded-full", sseConnected ? "bg-primary" : "bg-destructive")} />
                         </div>
                         <Badge className={cn("capitalize", getProxyStatusColor(proxyStatus))}>Proxy: {proxyStatus}</Badge>
                         <Button variant="ghost" size="icon" onClick={cycleTheme} title={`Theme: ${theme}`}>

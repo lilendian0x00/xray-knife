@@ -107,9 +107,9 @@ const RunningContent = ({ details }: { details: ProxyDetails }) => {
         }
         const colorClass = () => {
             switch (rotationStatus) {
-                case 'testing': return "bg-blue-500/20 text-blue-400 border-blue-500/30";
-                case 'switching': return "bg-purple-500/20 text-purple-400 border-purple-500/30";
-                case 'stalled': return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
+                case 'testing': return "bg-primary/20 text-primary border-primary/30";
+                case 'switching': return "bg-chart-3/20 text-chart-3 border-chart-3/30";
+                case 'stalled': return "bg-chart-4/20 text-chart-4 border-chart-4/30";
                 default: return "";
             }
         }
@@ -213,7 +213,7 @@ const RunningContent = ({ details }: { details: ProxyDetails }) => {
                                 </div>
                             ))}
                             <div className="flex items-center gap-2 py-1 pt-2 border-t mt-2">
-                                <Badge variant="outline" className="text-xs min-w-[50px] justify-center bg-green-500/10 text-green-500 border-green-500/30">Dest</Badge>
+                                <Badge variant="outline" className="text-xs min-w-[50px] justify-center bg-primary/10 text-primary border-primary/30">Dest</Badge>
                                 <span className="text-xs text-muted-foreground">Destination</span>
                             </div>
                         </div>
