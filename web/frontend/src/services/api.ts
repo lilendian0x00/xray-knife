@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { toast } from "sonner";
-import { type ProxySettings, type HttpTesterSettings, type CfScannerSettings } from '@/types/settings';
+import { type ProxySettings, type HttpTesterSettings, type CfScannerSettings, type MITMDFSettings, type MITMDFProbeResult } from '@/types/settings';
 import { type ProxyDetails, type HttpResult } from '@/types/dashboard';
 import { useAppStore } from '@/stores/appStore';
 
@@ -86,6 +86,34 @@ export const api = {
     },
     stopCfScan() { return axios.post('/api/v1/scanner/cf/stop'); },
     clearCfScanHistory() { return axios.post('/api/v1/scanner/cf/clear_history'); },
+
+    // MITM-DF Endpoints
+    startMITMDF(settings: MITMDFSettings) {
+        return axios.post('/api/v1/mitmdf/start', settings);
+    },
+    stopMITMDF() { return axios.post('/api/v1/mitmdf/stop'); },
+    getMITMDFStatus() { return axios.get<{ status: string }>('/api/v1/mitmdf/status'); },
+    generateMITMDFCert(certPath: string, keyPath: string, force: boolean) {
+        return axios.post('/api/v1/mitmdf/cert/generate', { certPath, keyPath, force });
+    },
+    checkMITMDFCert(certPath: string, keyPath: string) {
+        return axios.get<{ exists: boolean }>('/api/v1/mitmdf/cert/check', { params: { certPath, keyPath } });
+    },
+    downloadMITMDFCert(certPath: string) {
+        return axios.get('/api/v1/mitmdf/cert/download', { params: { certPath }, responseType: 'blob' });
+    },
+    installMITMDFCert(certPath: string) {
+        return axios.post<{ success: boolean; message: string; command?: string }>('/api/v1/mitmdf/cert/install', { certPath });
+    },
+    checkMITMDFAssets() {
+        return axios.get<{ geosite: boolean; geoip: boolean }>('/api/v1/mitmdf/assets/check');
+    },
+    downloadMITMDFAssets() {
+        return axios.post('/api/v1/mitmdf/assets/download');
+    },
+    probeMITMDFDomain(targetDomain: string, probeFrontDomains: string[]) {
+        return axios.post<{ results: MITMDFProbeResult[] }>('/api/v1/mitmdf/probe', { targetDomain, probeFrontDomains });
+    },
 };
 
 // AXIOS INTERCEPTORS

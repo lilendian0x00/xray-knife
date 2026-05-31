@@ -14,23 +14,25 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Server, Globe, Menu, Package2, PanelLeft, Search, LogOut, Trash2, ArrowDownToLine, Pause, Sun, Moon, Monitor, ChevronDown, ChevronUp } from 'lucide-react';
+import { Server, Globe, Menu, Package2, PanelLeft, Search, LogOut, Trash2, ArrowDownToLine, Pause, Sun, Moon, Monitor, ChevronDown, ChevronUp, Shield } from 'lucide-react';
 import { useAppStore } from "@/stores/appStore";
 import { sseService } from "@/services/sse";
 import { ProxyTab } from "./dashboard/ProxyTab";
 import { HttpTesterTab } from "./dashboard/HttpTesterTab";
 import { CfScannerTab } from "./dashboard/CFScannerTab";
+import { MITMDFTab } from "./dashboard/MITMDFTab";
 import { ProxyStatusCard } from "./dashboard/ProxyStatusCard";
 import { type ProxyStatus } from "@/types/dashboard";
 import { api } from "@/services/api";
 import { useTheme } from "@/components/theme-provider";
 import { usePersistentState } from "@/hooks/usePersistentState";
 
-type Page = 'proxy' | 'http-tester' | 'cf-scanner';
+type Page = 'proxy' | 'http-tester' | 'cf-scanner' | 'mitmdf';
 const navItems = [
     { id: 'proxy' as Page, label: 'Proxy Service', icon: Server },
     { id: 'http-tester' as Page, label: 'HTTP Tester', icon: Globe },
-    { id: 'cf-scanner' as Page, label: 'CF Scanner', icon: FaCloudflare }
+    { id: 'cf-scanner' as Page, label: 'CF Scanner', icon: FaCloudflare },
+    { id: 'mitmdf' as Page, label: 'MITM-DF', icon: Shield }
 ];
 
 export default function Dashboard() {
@@ -265,7 +267,7 @@ export default function Dashboard() {
         }
         return (
             <div className="flex h-full flex-col gap-4 lg:gap-6">
-                {activePage === 'http-tester' ? <HttpTesterTab /> : <CfScannerTab />}
+                {activePage === 'http-tester' ? <HttpTesterTab /> : activePage === 'mitmdf' ? <MITMDFTab /> : <CfScannerTab />}
                 <div className="flex-1">
                     {logsCard}
                 </div>

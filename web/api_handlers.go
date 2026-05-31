@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gocarina/gocsv"
+	"github.com/lilendian0x00/xray-knife/v10/pkg/mitmdf"
 	pkghttp "github.com/lilendian0x00/xray-knife/v10/pkg/http"
 	"github.com/lilendian0x00/xray-knife/v10/pkg/proxy"
 	"github.com/lilendian0x00/xray-knife/v10/pkg/scanner"
@@ -69,6 +70,16 @@ func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/scanner/cf/history", h.handleCfScannerHistory)
 	mux.HandleFunc("/api/v1/scanner/cf/clear_history", h.handleCfScannerClearHistory)
 	mux.HandleFunc("/api/v1/scanner/cf/ranges", h.handleCfScannerRanges)
+	mux.HandleFunc("/api/v1/mitmdf/start", h.handleMITMDFStart)
+	mux.HandleFunc("/api/v1/mitmdf/stop", h.handleMITMDFStop)
+	mux.HandleFunc("/api/v1/mitmdf/status", h.handleMITMDFStatus)
+	mux.HandleFunc("/api/v1/mitmdf/cert/generate", h.handleMITMDFCertGenerate)
+	mux.HandleFunc("/api/v1/mitmdf/cert/check", h.handleMITMDFCertCheck)
+	mux.HandleFunc("/api/v1/mitmdf/cert/download", h.handleMITMDFCertDownload)
+	mux.HandleFunc("/api/v1/mitmdf/cert/install", h.handleMITMDFCertInstall)
+	mux.HandleFunc("/api/v1/mitmdf/assets/check", h.handleMITMDFAssetsCheck)
+	mux.HandleFunc("/api/v1/mitmdf/assets/download", h.handleMITMDFAssetsDownload)
+	mux.HandleFunc("/api/v1/mitmdf/probe", h.handleMITMDFProbe)
 }
 
 // --- Proxy Handlers ---
@@ -398,4 +409,171 @@ func (h *APIHandler) handleCfScannerRanges(w http.ResponseWriter, r *http.Reques
 	}
 	ranges := fetchCloudflareRanges(h.logger)
 	writeJSONResponse(w, http.StatusOK, map[string][]string{"ranges": ranges})
+}
+
+// --- MITM-DomainFronting Handlers ---
+
+func (h *APIHandler) handleMITMDFStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var cfg mitmdf.Config
+	if err := decodeJSONBody(w, r, &cfg); err != nil {
+		writeJSONError(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		return
+	}
+	if err := h.manager.StartMITMDF(cfg); err != nil {
+		writeJSONError(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSONResponse(w, http.StatusAccepted, map[string]string{"status": "MITM-DF service started"})
+}
+
+func (h *APIHandler) handleMITMDFStop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	h.manager.StopMITMDF()
+	writeJSONResponse(w, http.StatusOK, map[string]string{"status": "MITM-DF service stopped"})
+}
+
+func (h *APIHandler) handleMITMDFStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	status := h.manager.GetMITMDFStatus()
+	writeJSONResponse(w, http.StatusOK, map[string]string{"status": status})
+}
+
+type certGenerateReq struct {
+	CertPath string `json:"certPath"`
+	KeyPath  string `json:"keyPath"`
+	Force    bool   `json:"force"`
+}
+
+func (h *APIHandler) handleMITMDFCertGenerate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var req certGenerateReq
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		writeJSONError(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		return
+	}
+	if err := mitmdf.GenerateCertificate(req.CertPath, req.KeyPath, req.Force); err != nil {
+		writeJSONError(w, fmt.Sprintf("Failed to generate certificate: %v", err), http.StatusInternalServerError)
+		return
+	}
+	writeJSONResponse(w, http.StatusOK, map[string]string{"status": "Certificate generated"})
+}
+
+func (h *APIHandler) handleMITMDFCertCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	certPath := r.URL.Query().Get("certPath")
+	keyPath := r.URL.Query().Get("keyPath")
+	exists := mitmdf.CheckCertificate(certPath, keyPath)
+	writeJSONResponse(w, http.StatusOK, map[string]bool{"exists": exists})
+}
+
+func (h *APIHandler) handleMITMDFCertDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	certPath := r.URL.Query().Get("certPath")
+	if certPath == "" {
+		writeJSONError(w, "certPath query param is required", http.StatusBadRequest)
+		return
+	}
+	data, err := os.ReadFile(certPath)
+	if err != nil {
+		writeJSONError(w, fmt.Sprintf("Cannot read cert: %v", err), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-pem-file")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="mitmdf-root-ca.crt"`))
+	w.WriteHeader(http.StatusOK)
+	w.Write(data)
+}
+
+func (h *APIHandler) handleMITMDFCertInstall(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var req struct {
+		CertPath string `json:"certPath"`
+	}
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		writeJSONError(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		return
+	}
+	if req.CertPath == "" {
+		writeJSONError(w, "certPath is required", http.StatusBadRequest)
+		return
+	}
+	result := mitmdf.InstallCert(req.CertPath)
+	writeJSONResponse(w, http.StatusOK, result)
+}
+
+func (h *APIHandler) handleMITMDFAssetsCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	status, err := mitmdf.CheckAssets()
+	if err != nil {
+		writeJSONError(w, fmt.Sprintf("Failed to check assets: %v", err), http.StatusInternalServerError)
+		return
+	}
+	writeJSONResponse(w, http.StatusOK, status)
+}
+
+func (h *APIHandler) handleMITMDFAssetsDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if err := mitmdf.DownloadAssets(nil); err != nil {
+		writeJSONError(w, fmt.Sprintf("Failed to download assets: %v", err), http.StatusInternalServerError)
+		return
+	}
+	writeJSONResponse(w, http.StatusOK, map[string]string{"status": "Assets downloaded"})
+}
+
+type probeRequest struct {
+	TargetDomain     string   `json:"targetDomain"`
+	ProbeFrontDomains []string `json:"probeFrontDomains"`
+}
+
+func (h *APIHandler) handleMITMDFProbe(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var req probeRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		writeJSONError(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		return
+	}
+	if req.TargetDomain == "" {
+		writeJSONError(w, "targetDomain is required", http.StatusBadRequest)
+		return
+	}
+	if len(req.ProbeFrontDomains) == 0 {
+		writeJSONError(w, "at least one probeFrontDomain is required", http.StatusBadRequest)
+		return
+	}
+
+	results := mitmdf.ProbeDomain(req.TargetDomain, req.ProbeFrontDomains)
+	writeJSONResponse(w, http.StatusOK, map[string]interface{}{
+		"results": results,
+	})
 }
