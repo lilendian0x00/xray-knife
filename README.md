@@ -175,8 +175,12 @@ Start a local SOCKS5 proxy on port `9999`. It will load all enabled configs from
 # Proxy to configs from a file
 xray-knife proxy inbound -f ./configs.txt --port 9999 --rotate 300
 
+# Proxy to configs from a file and no auth socks
+xray-knife proxy inbound -f ./configs.txt --rotate 800 -I socks://0.0.0.0:9999#Listener
+
 # Proxy to configs from your database
 xray-knife proxy inbound --port 9999 --rotate 300
+
 ```
 > **Pro Tip:** While the proxy is running, simply press `Enter` in the terminal to force an immediate rotation to the next available fast configuration.
 
