@@ -14,6 +14,7 @@ import (
 	pkghttp "github.com/lilendian0x00/xray-knife/v10/pkg/http"
 	"github.com/lilendian0x00/xray-knife/v10/pkg/proxy"
 	"github.com/lilendian0x00/xray-knife/v10/pkg/scanner"
+	"github.com/lilendian0x00/xray-knife/v10/utils"
 )
 
 // appendResultsToCSV delegates to the shared implementation in pkg/http.
@@ -229,6 +230,9 @@ func (h *APIHandler) handleCfScannerStart(w http.ResponseWriter, r *http.Request
 	if err := decodeJSONBody(w, r, &cfg); err != nil {
 		writeJSONError(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
 		return
+	}
+	for i, s := range cfg.Subnets {
+		cfg.Subnets[i] = utils.NormalizeCIDR(s)
 	}
 	if err := h.manager.StartScanner(cfg); err != nil {
 		writeJSONError(w, err.Error(), http.StatusConflict)

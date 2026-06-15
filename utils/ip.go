@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 )
 
 func incrementIP(i *net.IP) {
@@ -40,6 +41,21 @@ func CIDRSize(cidr string) (int, error) {
 	}
 	ones, bits := ipNet.Mask.Size()
 	return 1 << (bits - ones), nil
+}
+
+// NormalizeCIDR appends /32 or /128 to bare IPs missing a subnet mask.
+func NormalizeCIDR(s string) string {
+	if strings.Contains(s, "/") {
+		return s
+	}
+	ip := net.ParseIP(s)
+	if ip == nil {
+		return s
+	}
+	if ip.To4() != nil {
+		return s + "/32"
+	}
+	return s + "/128"
 }
 
 func IsIPv6(ipStr string) bool {

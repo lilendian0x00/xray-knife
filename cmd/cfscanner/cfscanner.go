@@ -43,6 +43,9 @@ pass a file containing one subnet per line.`,
 			customlog.Printf(customlog.Failure, "No subnets found. Please provide a valid file or CIDR list for the --subnets flag.\n")
 			return
 		}
+		for i, s := range allSubnets {
+			allSubnets[i] = utils.NormalizeCIDR(s)
+		}
 		cliConfig.Subnets = allSubnets
 
 		if cliConfig.Port <= 0 || cliConfig.Port > 65535 {
