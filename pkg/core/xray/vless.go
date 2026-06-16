@@ -203,6 +203,12 @@ func (v *Vless) DetailsStr() string {
 		info += fmt.Sprintf("%s: none\n", color.RedString("TLS"))
 	}
 
+  if copyV.Encryption != "" {
+		info += fmt.Sprintf("%s: %s\n", color.RedString("Encryption"), copyV.Encryption)
+  } else {
+		info += fmt.Sprintf("%s: none\n", color.RedString("Encryption"))
+  }
+
 	return info
 }
 
