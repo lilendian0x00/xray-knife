@@ -203,6 +203,12 @@ func (v *Vless) DetailsStr() string {
 		info += fmt.Sprintf("%s: none\n", color.RedString("TLS"))
 	}
 
+  if copyV.Encryption != "" {
+		info += fmt.Sprintf("%s: %s\n", color.RedString("Encryption"), copyV.Encryption)
+  } else {
+		info += fmt.Sprintf("%s: none\n", color.RedString("Encryption"))
+  }
+
 	return info
 }
 
@@ -451,6 +457,9 @@ func (v *Vless) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 	}
 	if v.Flow != "" {
 		user["flow"] = v.Flow
+	}
+	if v.Encryption != "" {
+		user["encryption"] = v.Encryption
 	}
 	settingsBytes, err := json.Marshal(map[string]interface{}{
 		"vnext": []map[string]interface{}{
