@@ -43,21 +43,45 @@ export interface HttpTesterSettings {
 }
 
 export interface CfScannerSettings {
-    threadCount: number;
-    timeout: number;
-    retry: number;
-    doSpeedtest: boolean;
-    speedtestOptions: {
-        top: number;
-        concurrency: number;
-        timeout: number;
-        downloadMB: number;
-        uploadMB: number;
-    };
-    advancedOptions: {
-        configLink: string;
-        insecureTLS: boolean;
-        shuffleIPs: boolean;
-        shuffleSubnets: boolean;
-    };
+	threadCount: number;
+	timeout: number;
+	retry: number;
+	doSpeedtest: boolean;
+	speedtestOptions: {
+		top: number;
+		concurrency: number;
+		timeout: number;
+		downloadMB: number;
+		uploadMB: number;
+	};
+	advancedOptions: {
+		configLink: string;
+		insecureTLS: boolean;
+		shuffleIPs: boolean;
+		shuffleSubnets: boolean;
+	};
+}
+
+export interface MITMDFProbeResult {
+    frontDomain: string;
+    success: boolean;
+    statusCode: number;
+    latencyMs: number;
+    error?: string;
+}
+
+export interface MITMDFGroupConfig {
+	name: string;
+	enabled: boolean;
+	frontDomain: string;
+	extraDomains: string[];
+}
+
+export interface MITMDFSettings {
+	certPath: string;
+	keyPath: string;
+	listenPort: number;
+	socks5Port: number;
+	groups: MITMDFGroupConfig[];
+	extraIRDomains: string[];
 }

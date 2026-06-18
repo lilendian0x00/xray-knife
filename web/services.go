@@ -16,6 +16,7 @@ import (
 
 	"github.com/lilendian0x00/xray-knife/v10/database"
 	pkghttp "github.com/lilendian0x00/xray-knife/v10/pkg/http"
+	"github.com/lilendian0x00/xray-knife/v10/pkg/mitmdf"
 	"github.com/lilendian0x00/xray-knife/v10/pkg/proxy"
 	"github.com/lilendian0x00/xray-knife/v10/pkg/scanner"
 	"github.com/lilendian0x00/xray-knife/v10/utils"
@@ -108,6 +109,8 @@ func (s *BaseService) Stop() error {
 		messageType, finalState = "http_test_status", "stopped"
 	case "cf-scanner":
 		messageType, finalState = "cfscan_status", "stopped"
+	case "mitmdf":
+		messageType, finalState = "mitmdf_status", "stopped"
 	default:
 		return nil
 	}
@@ -512,4 +515,62 @@ func (s *CfScannerRunner) run(ctx context.Context, service *scanner.ScannerServi
 	s.SetState(StateFinished)
 	statusMsg, _ := json.Marshal(map[string]interface{}{"type": "cfscan_status", "data": "finished"})
 	s.hub.Broadcast(statusMsg)
+}
+
+// --- MITM Domain Fronting Runner ---
+
+type MITMDFRunner struct {
+	*BaseService
+	svc *mitmdf.Service
+}
+
+func NewMITMDFRunner(logger *log.Logger, hub *Hub) *MITMDFRunner {
+	return &MITMDFRunner{BaseService: NewBaseService("mitmdf", logger, hub)}
+}
+
+func (r *MITMDFRunner) Start(config interface{}) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.state == StateRunning || r.state == StateStarting {
+		return fmt.Errorf("MITM-DF service is already running or starting")
+	}
+
+	cfg, ok := config.(mitmdf.Config)
+	if !ok {
+		return fmt.Errorf("invalid config type for MITM-DF service")
+	}
+
+	r.state = StateStarting
+	r.svc = mitmdf.NewService(&cfg, r.logger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	r.cancelFunc = cancel
+	r.wg.Add(1)
+
+	go r.run(ctx)
+
+	return nil
+}
+
+func (r *MITMDFRunner) run(ctx context.Context) {
+	defer r.recoverAndLogPanic()
+	defer r.wg.Done()
+	defer r.SetState(StateIdle)
+
+	r.SetState(StateRunning)
+	statusMsgRunning, _ := json.Marshal(map[string]interface{}{"type": "mitmdf_status", "data": "running"})
+	r.hub.Broadcast(statusMsgRunning)
+
+	if err := r.svc.Start(ctx); err != nil {
+		if ctx.Err() == nil {
+			r.logger.Printf("[MITM-DF] Service exited with error: %v", err)
+			statusMsg, _ := json.Marshal(map[string]interface{}{
+				"type":  "mitmdf_status",
+				"data":  "error",
+				"error": err.Error(),
+			})
+			r.hub.Broadcast(statusMsg)
+		}
+	}
 }

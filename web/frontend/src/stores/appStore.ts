@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { type ProxySettings, type HttpTesterSettings, type CfScannerSettings } from '@/types/settings';
+import { type ProxySettings, type HttpTesterSettings, type CfScannerSettings, type MITMDFSettings } from '@/types/settings';
 import { type HttpResult, type ProxyStatus, type ProxyDetails, type ScanResult } from '@/types/dashboard';
 
 // Default States
@@ -22,6 +22,16 @@ const defaultCfScannerSettings: CfScannerSettings = {
     speedtestOptions: { top: 10, concurrency: 4, timeout: 30, downloadMB: 10, uploadMB: 5 },
     advancedOptions: { configLink: '', insecureTLS: false, shuffleIPs: false, shuffleSubnets: false }
 };
+const defaultMITMDFSettings: MITMDFSettings = {
+    certPath: 'mycert.crt', keyPath: 'mycert.key', listenPort: 10808, socks5Port: 10808,
+    groups: [
+        { name: 'google', enabled: true, frontDomain: 'www.google.com', extraDomains: ['geosite:google', 'googlevideo.com'] },
+        { name: 'meta', enabled: true, frontDomain: 'www.microsoft.com', extraDomains: ['geosite:meta', 'static.cdninstagram.com'] },
+        { name: 'fastly', enabled: true, frontDomain: 'github.githubassets.com', extraDomains: ['geosite:fastly', 'geosite:reddit', 'geosite:cnn', 'buzzfeed.com'] },
+        { name: 'dns', enabled: true, frontDomain: 'www.microsoft.com', extraDomains: ['dns.google', 'cloudflare-dns.com', 'one.one.one.one'] },
+    ],
+    extraIRDomains: [],
+};
 
 // --- Progress State ---
 interface ProgressState { completed: number; total: number; }
@@ -34,6 +44,8 @@ interface AppState {
     proxySettings: ProxySettings;
     httpSettings: HttpTesterSettings;
     cfScannerSettings: CfScannerSettings;
+    mitmdfSettings: MITMDFSettings;
+    mitmdfStatus: 'stopped' | 'running' | 'starting' | 'stopping' | 'error';
     proxyStatus: ProxyStatus;
     scanStatus: TaskStatus;
     httpTestStatus: TaskStatus;
@@ -52,9 +64,12 @@ interface AppActions {
     updateProxySettings: (settings: Partial<ProxySettings>) => void;
     updateHttpSettings: (settings: Partial<HttpTesterSettings>) => void;
     updateCfScannerSettings: (settings: Partial<CfScannerSettings>) => void;
+    updateMITMDFSettings: (settings: Partial<MITMDFSettings>) => void;
     resetProxySettings: () => void;
     resetHttpSettings: () => void;
     resetCfScannerSettings: () => void;
+    resetMITMDFSettings: () => void;
+    setMITMDFStatus: (status: 'stopped' | 'running' | 'starting' | 'stopping' | 'error') => void;
     setProxyStatus: (status: ProxyStatus) => void;
     setScanStatus: (status: TaskStatus) => void;
     setHttpTestStatus: (status: TaskStatus) => void;
@@ -79,6 +94,8 @@ export const useAppStore = create<AppState & AppActions>()(
             proxySettings: defaultProxySettings,
             httpSettings: defaultHttpSettings,
             cfScannerSettings: defaultCfScannerSettings,
+            mitmdfSettings: defaultMITMDFSettings,
+            mitmdfStatus: 'stopped',
             proxyStatus: 'stopped',
             scanStatus: 'idle',
             httpTestStatus: 'idle',
@@ -95,9 +112,12 @@ export const useAppStore = create<AppState & AppActions>()(
             updateProxySettings: (newSettings) => set(state => ({ proxySettings: { ...state.proxySettings, ...newSettings } })),
             updateHttpSettings: (newSettings) => set(state => ({ httpSettings: { ...state.httpSettings, ...newSettings } })),
             updateCfScannerSettings: (newSettings) => set(state => ({ cfScannerSettings: { ...state.cfScannerSettings, ...newSettings } })),
+            updateMITMDFSettings: (newSettings) => set(state => ({ mitmdfSettings: { ...state.mitmdfSettings, ...newSettings } })),
             resetProxySettings: () => set({ proxySettings: defaultProxySettings }),
             resetHttpSettings: () => set({ httpSettings: defaultHttpSettings }),
             resetCfScannerSettings: () => set({ cfScannerSettings: defaultCfScannerSettings }),
+            resetMITMDFSettings: () => set({ mitmdfSettings: defaultMITMDFSettings }),
+            setMITMDFStatus: (status) => set({ mitmdfStatus: status }),
             setProxyStatus: (status) => set({ proxyStatus: status }),
             setScanStatus: (status) => set({ 
                 scanStatus: status,
@@ -128,16 +148,20 @@ export const useAppStore = create<AppState & AppActions>()(
                 proxySettings: state.proxySettings,
                 httpSettings: state.httpSettings,
                 cfScannerSettings: state.cfScannerSettings,
+                mitmdfSettings: state.mitmdfSettings,
                 token: state.token,
             }),
             merge: (persistedState, currentState) => {
                 const persisted = persistedState as Partial<AppState & AppActions> | undefined;
+                const persistedGroups = persisted?.mitmdfSettings?.groups;
+                const groups = Array.isArray(persistedGroups) ? persistedGroups : defaultMITMDFSettings.groups;
                 return {
                     ...currentState,
                     ...persisted,
                     proxySettings: { ...defaultProxySettings, ...persisted?.proxySettings },
                     httpSettings: { ...defaultHttpSettings, ...persisted?.httpSettings },
                     cfScannerSettings: { ...defaultCfScannerSettings, ...persisted?.cfScannerSettings },
+                    mitmdfSettings: { ...defaultMITMDFSettings, ...persisted?.mitmdfSettings, groups },
                 };
             },
             onRehydrateStorage: () => (state) => {
