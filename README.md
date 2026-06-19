@@ -131,7 +131,6 @@ xray-knife subs show
 # Fetch all configs from the subscription with ID 1
 xray-knife subs fetch --id 1
 ```
-
 ---
 
 ### 🧪 Testing Configs (`http`)
@@ -146,12 +145,16 @@ This is the new, powerful way to test configs. It pulls directly from the librar
 # Test configs from a file, with a speed test
 xray-knife http -f ./configs.txt --speedtest
 
+# setting test url & output file
+xray-knife http -f ./configs.txt --speedtest --url https://google.com -o results.txt
+
 # Test up to 100 'vless' configs from your database, with a speed test
 xray-knife http --from-db --limit 100 --protocol vless --speedtest
 
 # Test all configs belonging to subscription ID 1
 xray-knife http --from-db --sub-id 1
 ```
+for full list of all commands [check](https://github.com/lilendian0x00/xray-knife/blob/cdf905b1aa7b58e761a1c11fc1fb7b065ca6e65b/cmd/http/http.go#L368)
 
 **2. List Results**
 View a summary of the results from the most recent test run.
