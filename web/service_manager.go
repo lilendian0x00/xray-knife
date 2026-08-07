@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/lilendian0x00/xray-knife/v10/pkg/mitmdf"
 	pkghttp "github.com/lilendian0x00/xray-knife/v10/pkg/http"
 	"github.com/lilendian0x00/xray-knife/v10/pkg/proxy"
 	"github.com/lilendian0x00/xray-knife/v10/pkg/scanner"
@@ -45,6 +46,7 @@ func NewServiceManager(logger *log.Logger, hub *Hub) *ServiceManager {
 	sm.registerService(NewProxyServiceRunner(logger, hub))
 	sm.registerService(NewHttpTestRunner(logger, hub))
 	sm.registerService(NewCfScannerRunner(logger, hub))
+	sm.registerService(NewMITMDFRunner(logger, hub))
 
 	// Goroutine to periodically push proxy details
 	go sm.proxyDetailsBroadcaster(hub)
@@ -214,4 +216,39 @@ func (sm *ServiceManager) GetScannerStatus() bool {
 		return false
 	}
 	return service.Status() == StateRunning || service.Status() == StateStarting
+}
+
+// --- MITM-DF Methods ---
+
+func (sm *ServiceManager) StartMITMDF(cfg mitmdf.Config) error {
+	service, err := sm.getService("mitmdf")
+	if err != nil {
+		return err
+	}
+	return service.Start(cfg)
+}
+
+func (sm *ServiceManager) StopMITMDF() {
+	service, _ := sm.getService("mitmdf")
+	if service != nil {
+		service.Stop()
+	}
+}
+
+func (sm *ServiceManager) GetMITMDFStatus() string {
+	service, err := sm.getService("mitmdf")
+	if err != nil {
+		return "error"
+	}
+	switch service.Status() {
+	case StateRunning:
+		return "running"
+	default:
+		return "stopped"
+	}
+}
+
+func (sm *ServiceManager) IsMITMDFRunning() bool {
+	status := sm.GetMITMDFStatus()
+	return status == "running"
 }

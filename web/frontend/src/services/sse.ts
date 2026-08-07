@@ -82,6 +82,7 @@ class SSEService {
         eventSource.addEventListener('cfscan_status', (e) => this.handleEvent('cfscan_status', e));
         eventSource.addEventListener('http_test_progress', (e) => this.handleEvent('http_test_progress', e));
         eventSource.addEventListener('cf_scan_progress', (e) => this.handleEvent('cf_scan_progress', e));
+        eventSource.addEventListener('mitmdf_status', (e) => this.handleEvent('mitmdf_status', e));
     }
 
     private handleEvent(type: string, event: MessageEvent) {
@@ -160,6 +161,16 @@ class SSEService {
             case 'cf_scan_progress':
                 setScanProgress(message.data);
                 break;
+            case 'mitmdf_status': {
+                const mStatus = message.data as 'running' | 'stopped' | 'error';
+                if (mStatus === 'stopped' || mStatus === 'error') {
+                    useAppStore.getState().setMITMDFStatus('stopped');
+                    if (mStatus === 'error') toast.error(`MITM-DF error: ${message.error || 'Unknown error'}`);
+                } else {
+                    useAppStore.getState().setMITMDFStatus(mStatus as any);
+                }
+                break;
+            }
             default:
                 this.emit('log', `\x1b[33m[SSE] Unhandled message type: ${type}\x1b[0m`);
                 console.warn("Unhandled SSE message:", type, message);
