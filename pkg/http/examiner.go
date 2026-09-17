@@ -426,6 +426,11 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 	}
 	r.TLS = generalConfig.TLS
 
+	// Protocols that cannot carry HTTP (MTProto proxies) grade themselves.
+	if prober, ok := proto.(protocol.Prober); ok {
+		return e.examineProbe(ctx, r, prober)
+	}
+
 	client, instance, err := e.Core.MakeHttpClient(ctx, proto, time.Duration(e.Timeout)*time.Millisecond)
 	if err != nil {
 		r.Status = "broken"

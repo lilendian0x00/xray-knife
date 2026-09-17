@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"strings"
 	"testing"
 )
@@ -107,4 +108,39 @@ func fingerprint(t *testing.T, c Core, link string) string {
 		t.Fatal(err)
 	}
 	return f
+}
+
+func TestConnectionFingerprintMTProto(t *testing.T) {
+	c := NewAutomaticCore(false, false)
+	const key = "00112233445566778899aabbccddeeff"
+	raw, err := hex.DecodeString("dd" + key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b64 := base64.RawURLEncoding.EncodeToString(raw)
+
+	same := []string{
+		"tg://proxy?server=Proxy.Example.com&port=443&secret=dd" + key,
+		"https://t.me/proxy?server=proxy.example.com&port=443&secret=DD" + strings.ToUpper(key) + "#renamed",
+		"tg://proxy?secret=" + b64 + "&port=443&server=proxy.example.com",
+		"tg://proxy?server=proxy.example.com&port=00443&secret=dd" + key,
+	}
+	want := fingerprint(t, c, same[0])
+	for _, link := range same[1:] {
+		if fingerprint(t, c, link) != want {
+			t.Errorf("%s did not collapse onto %s", link, same[0])
+		}
+	}
+
+	for name, other := range map[string]string{
+		"secret":         "tg://proxy?server=proxy.example.com&port=443&secret=dd" + strings.Repeat("0", 32),
+		"port":           "tg://proxy?server=proxy.example.com&port=444&secret=dd" + key,
+		"server":         "tg://proxy?server=other.example.com&port=443&secret=dd" + key,
+		"secret type":    "tg://proxy?server=proxy.example.com&port=443&secret=" + key,
+		"unknown option": same[0] + "&future-option=one",
+	} {
+		if fingerprint(t, c, other) == want {
+			t.Errorf("distinct %s collapsed", name)
+		}
+	}
 }

@@ -1,5 +1,10 @@
 package protocol
 
+import (
+	"context"
+	"time"
+)
+
 const (
 	VmessIdentifier       = "vmess"
 	VlessIdentifier       = "vless"
@@ -9,6 +14,7 @@ const (
 	SocksIdentifier       = "socks"
 	Hysteria2Identifier   = "hysteria2"
 	TunIdentifier         = "tun"
+	MTProtoIdentifier     = "mtproto"
 )
 const (
 	VmessPattern       = `vmess:\/\/[a-zA-Z0-9+/=]+`
@@ -49,4 +55,24 @@ type GeneralConfig struct {
 	Mode           string
 	Type           string
 	OrigLink       string
+}
+
+// Prober The examiner uses it in place
+// of Core.MakeHttpClient.
+type Prober interface {
+	Probe(ctx context.Context, opts ProbeOptions) (ProbeResult, error)
+}
+
+// ProbeOptions controls a single Probe call.
+type ProbeOptions struct {
+	Timeout       time.Duration
+	BindInterface string
+}
+
+// ProbeResult reports timings measured from the start of the probe
+type ProbeResult struct {
+	ConnectTime time.Duration
+	TTFB        time.Duration
+	Delay       time.Duration
+	Detail      string // note such as "faketls, dc2 resPQ ok".
 }

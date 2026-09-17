@@ -5,12 +5,17 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/lilendian0x00/xray-knife/v11/pkg/core/mtproto"
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/protocol"
 )
 
 func (c *Core) CreateProtocol(configLink string) (protocol.Protocol, error) {
 	// Remove any spaces
 	configLink = strings.TrimSpace(configLink)
+
+	if mtproto.IsProxyLink(configLink) {
+		return nil, mtproto.ErrNotProxyable
+	}
 
 	// Parse url
 	uri, err := url.Parse(configLink)

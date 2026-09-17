@@ -210,3 +210,21 @@ func TestDecodePreservesMalformedCandidates(t *testing.T) {
 		t.Fatalf("malformed candidate lost: %d links, %v", len(links), err)
 	}
 }
+
+// MTProto links travel in subscriptions like any other, plain or base64.
+func TestDecodePreservesMTProtoLinks(t *testing.T) {
+	const secret = "dd00112233445566778899aabbccddeeff"
+	want := []string{
+		"tg://proxy?server=1.2.3.4&port=443&secret=" + secret + "#mine",
+		"https://t.me/proxy?server=1.2.3.4&port=443&secret=" + secret,
+		"http://telegram.dog/proxy?server=5.6.7.8&port=8443&secret=" + secret,
+		"vless://uuid@host:443#one",
+	}
+	input := strings.Join(want, "\n") + "\n"
+	for _, body := range []string{input, base64.StdEncoding.EncodeToString([]byte(input))} {
+		got, err := Decode([]byte(body), DecodeOptions{})
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatalf("decoded %v, error %v", got, err)
+		}
+	}
+}

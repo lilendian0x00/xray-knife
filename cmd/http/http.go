@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lilendian0x00/xray-knife/v11/database"
+	"github.com/lilendian0x00/xray-knife/v11/pkg/core/protocol"
 	pkghttp "github.com/lilendian0x00/xray-knife/v11/pkg/http"
 	"github.com/lilendian0x00/xray-knife/v11/utils"
 	"github.com/lilendian0x00/xray-knife/v11/utils/customlog"
@@ -256,16 +257,35 @@ func handlePingMode(examiner *pkghttp.Examiner, config *Config) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Create HTTP client and instance ONCE before the ticker loop
 	timeout := time.Duration(config.Timeout) * time.Millisecond
 	if timeout == 0 {
 		timeout = time.Duration(config.MaximumAllowedDelay) * time.Millisecond
 	}
-	client, instance, err := examiner.Core.MakeHttpClient(ctx, pinger, timeout)
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP client: %w", err)
+
+	// measure performs one ping and returns its latency in milliseconds.
+	var measure func() (int64, error)
+	if prober, ok := pinger.(protocol.Prober); ok {
+		// Protocols without an HTTP path (MTProto) probe natively on every tick.
+		opts := protocol.ProbeOptions{Timeout: timeout, BindInterface: examiner.BindInterface}
+		measure = func() (int64, error) {
+			res, err := prober.Probe(ctx, opts)
+			if err != nil {
+				return 0, err
+			}
+			return res.Delay.Milliseconds(), nil
+		}
+	} else {
+		// Create HTTP client and instance ONCE before the ticker loop
+		client, instance, err := examiner.Core.MakeHttpClient(ctx, pinger, timeout)
+		if err != nil {
+			return fmt.Errorf("failed to create HTTP client: %w", err)
+		}
+		defer instance.Close()
+		measure = func() (int64, error) {
+			delay, _, _, err := pkghttp.MeasureDelay(ctx, client, config.DestURL, config.HTTPMethod)
+			return delay, err
+		}
 	}
-	defer instance.Close()
 
 	ticker := time.NewTicker(time.Duration(config.PingInterval) * time.Millisecond)
 	defer ticker.Stop()
@@ -295,7 +315,7 @@ func handlePingMode(examiner *pkghttp.Examiner, config *Config) error {
 			return nil
 		case <-ticker.C:
 			sent++
-			delay, _, _, err := pkghttp.MeasureDelay(ctx, client, config.DestURL, config.HTTPMethod)
+			delay, err := measure()
 			if err != nil {
 				customlog.Printf(customlog.Failure, "Request failed: %v\n", err)
 			} else {
@@ -575,11 +595,21 @@ func handleSingleConfig(examiner *pkghttp.Examiner, config *Config) {
 		customlog.Printf(customlog.Success, "Upload: %f mbps (requested %dKB)\n",
 			res.UploadSpeed, config.SpeedtestAmount)
 	}
-	// A passed config can still carry a speedtest/ip-info problem; surface it
-	// instead of leaving a silent 0.
-	if res.Status == "passed" && res.Reason != "" {
+	if reasonIsWarning(&res) {
 		customlog.Printf(customlog.Warning, "%s\n", res.Reason)
 	}
+}
+
+// reasonIsWarning reports whether a passed config's reason describes a problem
+// worth flagging, such as a speedtest or ip-info failure that would otherwise
+// leave a silent 0. Natively probed protocols (MTProto) put their success
+// detail in Reason, so warning about it would cry wolf on a healthy config.
+func reasonIsWarning(res *pkghttp.Result) bool {
+	if res.Status != "passed" || res.Reason == "" {
+		return false
+	}
+	_, native := res.Protocol.(protocol.Prober)
+	return !native
 }
 
 // printConfiguration prints the current configuration

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core"
+	"github.com/lilendian0x00/xray-knife/v11/pkg/core/mtproto"
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/protocol"
 	"github.com/lilendian0x00/xray-knife/v11/utils"
 )
@@ -31,6 +32,9 @@ func resolveFixedChain(c core.Core, chainLinks string, chainFile string) ([]prot
 		link = strings.TrimSpace(link)
 		if link == "" {
 			continue
+		}
+		if mtproto.IsProxyLink(link) {
+			return nil, fmt.Errorf("chain hop %d: mtproto cannot be a chain hop: it only relays Telegram traffic", i)
 		}
 		p, err := c.CreateProtocol(link)
 		if err != nil {
@@ -76,6 +80,9 @@ func selectChainFromPool(c core.Core, pool []string, numHops int) ([]protocol.Pr
 		link := strings.TrimSpace(pool[idx])
 		if link == "" {
 			continue
+		}
+		if mtproto.IsProxyLink(link) {
+			continue // MTProto proxies cannot relay chain traffic.
 		}
 		p, err := c.CreateProtocol(link)
 		if err != nil {
@@ -128,6 +135,9 @@ func selectExitHopFromPool(c core.Core, pool []string, fixedHops []protocol.Prot
 	rng.Shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
 
 	for _, link := range candidates {
+		if mtproto.IsProxyLink(link) {
+			continue // MTProto proxies cannot relay chain traffic.
+		}
 		p, err := c.CreateProtocol(link)
 		if err != nil {
 			continue

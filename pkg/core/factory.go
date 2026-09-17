@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/lilendian0x00/xray-knife/v11/pkg/core/mtproto"
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/protocol"
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/singbox"
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/xray"
@@ -62,6 +63,7 @@ func CoreFactoryWith(coreType CoreType, opts FactoryOptions) Core {
 type AutomaticCore struct {
 	xrayCore    Core
 	singboxCore Core
+	mtprotoCore Core
 }
 
 func (c *AutomaticCore) Name() string {
@@ -78,11 +80,15 @@ func NewAutomaticCoreWith(opts FactoryOptions) Core {
 	return &AutomaticCore{
 		xrayCore:    xray.NewXrayService(opts.Verbose, opts.InsecureTLS, xray.WithBindInterface(opts.BindInterface)),
 		singboxCore: singbox.NewSingboxService(opts.Verbose, opts.InsecureTLS, singbox.WithBindInterface(opts.BindInterface)),
+		mtprotoCore: mtproto.NewCore(),
 	}
 }
 
 // selectCoreForLink is a helper to determine which core to use based on the protocol scheme.
 func (c *AutomaticCore) selectCoreForLink(configLink string) (Core, error) {
+	if mtproto.IsProxyLink(configLink) {
+		return c.mtprotoCore, nil
+	}
 	uri, err := url.Parse(configLink)
 	if err != nil {
 		return nil, err

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lilendian0x00/xray-knife/v11/pkg/core/mtproto"
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/singbox"
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/xray"
 )
@@ -54,6 +55,15 @@ func ConnectionFingerprint(c Core, link string) (string, error) {
 			u.User = url.UserPassword(v.Username, v.Password)
 		case *singbox.Socks:
 			u.User = url.UserPassword(v.Username, v.Password)
+		case *mtproto.MTProto:
+			query, queryErr := url.ParseQuery(u.RawQuery)
+			if queryErr != nil {
+				return "", errors.New("cannot fingerprint malformed share link")
+			}
+			query.Set("server", strings.ToLower(v.Address))
+			query.Set("port", v.Port)
+			query.Set("secret", v.Secret.Hex())
+			u = &url.URL{Scheme: "tg", Host: "proxy", RawQuery: query.Encode()}
 		}
 		if u.Scheme == "hy2" {
 			u.Scheme = "hysteria2"

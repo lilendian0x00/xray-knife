@@ -31,6 +31,8 @@
 
 - **🚀 双内核支持**: 无缝使用 `xray-core` 和 `sing-box`, 根据代理协议可自动选择正确的内核。 (VLESS, VMess, Trojan, Shadowsocks, Hysteria2, WireGuard, etc.)
 
+- **✈️ MTProto 代理测试**: 原生测试 Telegram `tg://proxy` 与 `t.me/proxy` 链接（支持 obfuscated2 和 fake-TLS 密钥），通过真实的 MTProto 往返验证可用性，`http` 命令会与其他配置一并输出结果。MTProto 代理仅转发 Telegram 流量，因此只能测试，不能作为出口使用。
+
 - **🔬 多线程支持**: 同时测出数百代理的真延迟、速度和落地位置。你可以从文件中导入配置进行测试，也可以使用强大的筛选器直接从数据库中提取数据进行测试。
 
 - **🔄 Failover 支持**: 运行一个本地 SOCKS/HTTP 代理，该代理会自动从您的数据库中找到速度最快且可用的出站代理，并定时或按需进行轮换。

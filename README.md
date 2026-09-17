@@ -31,6 +31,8 @@ A powerful command-line utility and secure web UI designed for managing, testing
 
 - **🚀 Dual-Core Engine**: Seamlessly works with both `xray-core` and `sing-box`, automatically selecting the right core for each configuration type (VLESS, VMess, Trojan, Shadowsocks, Hysteria2, WireGuard, etc.).
 
+- **✈️ MTProto Proxy Testing**: Tests Telegram `tg://proxy` and `t.me/proxy` links natively (obfuscated2 and fake-TLS secrets) with a real MTProto round trip, so `http` reports them alongside your other configs. MTProto proxies only relay Telegram traffic, so they are test-only and cannot be used as an outbound.
+
 - **🔬 Advanced Proxy Tester**: Concurrently test hundreds of configs for real latency, speed, and IP location. Test from a file or pull directly from your database using powerful filters.
 
 - **🔄 Auto-Rotating Proxy**: Run a local SOCKS/HTTP proxy that automatically finds the fastest, working outbound from your database and rotates it on a schedule or on-demand.
