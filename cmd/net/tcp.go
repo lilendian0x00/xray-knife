@@ -2,10 +2,10 @@ package net
 
 import (
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/v11/pkg/core/xray"
 	"net"
 	"time"
 
+	"github.com/lilendian0x00/xray-knife/v11/pkg/core"
 	"github.com/lilendian0x00/xray-knife/v11/utils/customlog"
 
 	"github.com/spf13/cobra"
@@ -27,14 +27,18 @@ func newTcpCommand() *cobra.Command {
 		Use:   "tcp",
 		Short: "Examine TCP Connection delay to config's host",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			x := xray.NewXrayService(false, false)
+			c := core.NewAutomaticCore(false, false)
 
 			if cfg.configLink == "" {
 				return fmt.Errorf("config link is required for the tcp command. Use -c or --config")
 			}
 
-			parsed, err := x.CreateProtocol(cfg.configLink)
+			parsed, err := c.CreateProtocol(cfg.configLink)
 			if err != nil {
+				return fmt.Errorf("couldn't parse the config: %w", err)
+			}
+
+			if err := parsed.Parse(); err != nil {
 				return fmt.Errorf("couldn't parse the config: %w", err)
 			}
 			generalDetails := parsed.ConvertToGeneralConfig()
@@ -42,7 +46,7 @@ func newTcpCommand() *cobra.Command {
 			if generalDetails.Address == "" || generalDetails.Port == "" {
 				return fmt.Errorf("parsed config (from %s) does not yield a valid address or port", cfg.configLink)
 			}
-			targetAddr := generalDetails.Address + ":" + generalDetails.Port
+			targetAddr := net.JoinHostPort(generalDetails.Address, generalDetails.Port)
 
 			tcpAddr, err := net.ResolveTCPAddr("tcp", targetAddr)
 			if err != nil {
@@ -59,7 +63,7 @@ func newTcpCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&cfg.configLink, "config", "c", "", "The xray config link")
+	cmd.Flags().StringVarP(&cfg.configLink, "config", "c", "", "The config link (any supported protocol, including tg://proxy)")
 	// cmd.MarkFlagRequired("config")
 	return cmd
 }
