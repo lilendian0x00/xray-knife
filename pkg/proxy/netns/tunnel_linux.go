@@ -6,7 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
-	"runtime"
+	"path/filepath"
 	"strings"
 
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/protocol"
@@ -24,7 +24,6 @@ import (
 	sing_tun "github.com/sagernet/sing-box/protocol/tun"
 	"github.com/sagernet/sing/common/json/badoption"
 	"github.com/sagernet/sing/service"
-	"github.com/vishvananda/netns"
 )
 
 // buildDNSServer constructs the sing-box DNSServerOptions for the configured
@@ -85,80 +84,45 @@ func buildDNSServer(cfg Config) (option.DNSServerOptions, func(*dns.TransportReg
 
 const tunInboundTag = "tun-in"
 
-// StartTunnel creates a sing-box instance inside the given named namespace
-// with a TUN inbound (capturing all traffic via gvisor stack) and a SOCKS
-// outbound pointing at the host proxy through the veth pair.
+// StartTunnel starts a sing-box instance whose TUN inbound lives inside
+// the named namespace and whose SOCKS outbound dials the proxy listener
+// on the host loopback.
 //
-// The TUN device and routing rules are created inside the namespace.
-// The entire setup runs on a dedicated, permanently-locked OS thread that
-// terminates when its goroutine exits — so the target namespace can never
-// leak back into the Go scheduler's thread pool. Sing-box worker threads
-// spawned during Start() inherit the target namespace, which is desired.
+// The instance itself runs in the host namespace: sing-tun enters the
+// target namespace (on a throwaway locked thread) only to create the
+// device and to install and later remove its routes and rules. That keeps
+// three things right that running the whole instance "inside" the
+// namespace could not guarantee, because Go spawns new worker threads
+// from its template thread in the host namespace:
+//   - the SOCKS dial is a plain host-loopback connection,
+//   - teardown deletes the rules inside the namespace, not the host's
+//     (sing-tun's cleanup removes every rule in its priority block),
+//   - systemd-resolved on the host is never pointed at the namespace's
+//     TUN (sing-tun skips resolvectl when a netns is set).
 func StartTunnel(ctx context.Context, nsName string, cfg Config) (protocol.Instance, error) {
-	type result struct {
-		instance protocol.Instance
-		err      error
+	if err := ValidateName(nsName); err != nil {
+		return nil, err
 	}
-	ch := make(chan result, 1)
-
-	go func() {
-		// Lock this goroutine to its OS thread for life. We deliberately
-		// do NOT defer UnlockOSThread: when this goroutine exits, the Go
-		// runtime terminates the locked thread, ensuring the polluted-NS
-		// thread is never recycled.
-		runtime.LockOSThread()
-
-		instance, err := buildAndStartTunnel(ctx, nsName, cfg)
-		ch <- result{instance: instance, err: err}
-		// goroutine returns → locked thread dies in target NS.
-	}()
-
-	r := <-ch
-	return r.instance, r.err
-}
-
-// buildAndStartTunnel runs entirely on the locked thread inside the target
-// namespace. On error it returns with the thread still in target NS — but
-// since the calling goroutine terminates immediately, the thread dies too.
-func buildAndStartTunnel(ctx context.Context, nsName string, cfg Config) (protocol.Instance, error) {
-	nsPath := fmt.Sprintf("/var/run/netns/%s", nsName)
-	targetNS, err := netns.GetFromPath(nsPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open namespace %q: %w", nsName, err)
-	}
-	defer targetNS.Close()
-
-	if err := netns.Set(targetNS); err != nil {
-		return nil, fmt.Errorf("failed to enter namespace: %w", err)
-	}
-
 	tunPrefix, err := netip.ParsePrefix(cfg.TunAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse TUN address %q: %w", cfg.TunAddr, err)
-	}
-	hostPrefix, err := netip.ParsePrefix(cfg.HostIP + "/32")
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse host IP %q: %w", cfg.HostIP, err)
 	}
 
 	// Sniff fields on InboundOptions were removed at sing-box 1.13 final;
 	// migrate to a route rule action ("sniff") to stay forward-compatible.
 	tunOpts := option.TunInboundOptions{
 		InterfaceName: cfg.TunName,
+		NetNs:         filepath.Join(netnsRunDir, nsName),
 		MTU:           cfg.TunMTU,
 		Address:       badoption.Listable[netip.Prefix]{tunPrefix},
 		AutoRoute:     true,
-		StrictRoute:   true,
-		Stack:         "gvisor",
-		// Exclude the upstream SOCKS proxy IP from TUN capture so the
-		// SOCKS dialer reaches the host via veth, not back through TUN.
-		RouteExcludeAddress: badoption.Listable[netip.Prefix]{hostPrefix},
+		// StrictRoute also installs an IPv6 "unreachable" rule (the TUN
+		// has no IPv6 address), so nothing in the namespace can bypass
+		// the tunnel.
+		StrictRoute: true,
+		Stack:       "gvisor",
 	}
 
-	// Pin SOCKS dialer to the veth interface inside the namespace.
-	// Combined with AutoDetectInterface=false below, this prevents
-	// sing-box from binding the dialer to the TUN device (which would
-	// cause a routing loop).
 	socksOpts := option.SOCKSOutboundOptions{
 		ServerOptions: option.ServerOptions{
 			Server:     cfg.ProxyAddr,
@@ -166,11 +130,6 @@ func buildAndStartTunnel(ctx context.Context, nsName string, cfg Config) (protoc
 		},
 		Username: cfg.SocksUser,
 		Password: cfg.SocksPass,
-		DialerOptions: option.DialerOptions{
-			AbstractDialerOptions: option.AbstractDialerOptions{
-				BindInterface: cfg.VethNS,
-			},
-		},
 	}
 
 	dnsServer, registerDNS, err := buildDNSServer(cfg)
@@ -226,13 +185,9 @@ func buildAndStartTunnel(ctx context.Context, nsName string, cfg Config) (protoc
 				},
 			},
 			Final: "proxy-out",
-			// Inside a single-purpose netns with one veth + one tun, the
-			// kernel default route is via TUN (StrictRoute installs it).
-			// AutoDetectInterface would resolve "default interface" to
-			// the TUN itself, causing the SOCKS dialer to loop back into
-			// gvisor. Pin to the veth instead.
+			// The instance dials from the host namespace, where the TUN
+			// does not exist; plain default routing reaches the listener.
 			AutoDetectInterface: false,
-			DefaultInterface:    cfg.VethNS,
 		},
 		Log: &option.LogOptions{Disabled: true},
 	}

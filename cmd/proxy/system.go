@@ -16,7 +16,8 @@ func newSystemCommand() *cobra.Command {
 		Use:   "system",
 		Short: "Like 'inbound', plus register the running proxy as the OS system proxy.",
 		Long: `Runs a local inbound proxy AND configures the host OS to route HTTP/HTTPS
-traffic through it. On exit, the previous OS proxy settings are restored.
+traffic through it once the listener is up. On exit, the previous OS proxy
+settings are restored.
 
 OS-specific behavior:
   Linux:   GNOME / KDE proxy settings via gsettings / kwriteconfig5
@@ -49,7 +50,10 @@ func runSystem(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg := buildPkgConfig("system", &pf, &systemCmdRot.in, &systemCmdRot.rot, &systemCmdRot.ch, &systemCmdRot.on, nil, nil)
+	cfg, err := buildPkgConfig("system", &pf, &systemCmdRot.in, &systemCmdRot.rot, &systemCmdRot.ch, &systemCmdRot.on, nil, nil)
+	if err != nil {
+		return err
+	}
 	cfg.ConfigLinks = links
 	return runService(cmd.Context(), cfg, false)
 }

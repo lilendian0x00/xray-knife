@@ -22,6 +22,9 @@ func newProxyCommand() *cobra.Command {
   app      — per-process Linux network namespace (--shell / --namespace)
   tun      — host-wide TUN capture (Linux only, DANGEROUS over SSH)
 
+'proxy restore' removes what a crashed run left behind (kill switch,
+namespace, system proxy settings, TUN rules).
+
 Configurations are read from --config / --file / --stdin or, if none of
 those are provided, from the local subscription database (populate with
 'xray-knife subs fetch').`,
@@ -51,4 +54,5 @@ func addSubcommandPalettes(cmd *cobra.Command) {
 	cmd.AddCommand(SystemCmd)
 	cmd.AddCommand(AppCmd)
 	cmd.AddCommand(TunCmd)
+	cmd.AddCommand(RestoreCmd)
 }

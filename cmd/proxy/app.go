@@ -21,13 +21,15 @@ func newAppCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "app",
 		Short: "Run the proxy inside a per-process Linux network namespace.",
-		Long: `Creates a Linux network namespace, sets up a veth pair, runs a SOCKS
-listener inside the namespace, and routes all in-namespace traffic
-through the proxy. Requires root (sudo).
+		Long: `Creates a Linux network namespace whose only way out is a TUN device
+that carries all in-namespace traffic (DNS included) through the proxy.
+Nothing else is routable from inside, so traffic fails closed if the
+tunnel stops. Requires root (sudo).
 
-Use --shell to drop into an interactive shell in the namespace, or
---namespace <name> to create a named netns other processes can join
-with 'ip netns exec <name> <cmd>'.`,
+Use --shell to drop into an interactive shell in the namespace (as the
+user who ran sudo, unless --shell-as-root), or --namespace <name> to
+create a named netns other processes can join with
+'sudo ip netns exec <name> <cmd>' or 'xray-knife exec <name> -- <cmd>'.`,
 		Example: `  sudo xray-knife proxy app --shell -c "vless://..."
   sudo xray-knife proxy app --namespace work -f configs.txt`,
 		RunE: runApp,
@@ -36,6 +38,8 @@ with 'ip netns exec <name> <cmd>'.`,
 	flags := cmd.Flags()
 	flags.BoolVar(&appCmdMode.shell, "shell", false, "Launch an interactive shell inside the proxy namespace")
 	flags.StringVar(&appCmdMode.namespaceName, "namespace", "", "Create a named namespace for the proxy")
+	flags.BoolVar(&appCmdMode.shellAsRoot, "shell-as-root", false, "Keep the --shell as root under sudo (default: drop to the invoking user)")
+	flags.BoolVar(&appCmdMode.killSwitch, "kill-switch", false, "Also firewall the namespace so only the tunnel carries traffic (it already has no other route out)")
 	cmd.MarkFlagsMutuallyExclusive("shell", "namespace")
 
 	addRotationFlags(cmd, &appCmdRot)
@@ -53,7 +57,10 @@ func runApp(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg := buildPkgConfig("app", &pf, nil, &appCmdRot, &appCmdCh, &appCmdOn, &appCmdMode, nil)
+	cfg, err := buildPkgConfig("app", &pf, nil, &appCmdRot, &appCmdCh, &appCmdOn, &appCmdMode, nil)
+	if err != nil {
+		return err
+	}
 	cfg.ConfigLinks = links
 	// shell-interactive suppresses the manual rotation reader because the
 	// spawned shell takes over stdin.

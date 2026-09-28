@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -10,15 +11,37 @@ import (
 	"github.com/lilendian0x00/xray-knife/v11/utils"
 )
 
+// errNotHop refuses a protocol that cannot relay chain traffic.
+var errNotHop = errors.New("mtproto cannot be a chain hop: it only relays Telegram traffic")
+
+// createHop creates and parses one chain hop. Protocols that cannot relay
+// (MTProto) are refused whichever core parsed them.
+func createHop(c core.Core, link string) (protocol.Protocol, error) {
+	p, err := core.CreateRelayProtocol(c, link)
+	if errors.Is(err, mtproto.ErrNotProxyable) {
+		return nil, errNotHop
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to create protocol from link: %w", err)
+	}
+	if err := p.Parse(); err != nil {
+		return nil, fmt.Errorf("failed to parse protocol: %w", err)
+	}
+	return p, nil
+}
+
 // resolveFixedChain parses a fixed chain from either pipe-separated links
 // or a file with one link per line.
 func resolveFixedChain(c core.Core, chainLinks string, chainFile string) ([]protocol.Protocol, error) {
 	var links []string
 
-	if chainLinks != "" {
+	if strings.TrimSpace(chainLinks) != "" {
 		links = strings.Split(chainLinks, "|")
 	} else if chainFile != "" {
-		links = utils.ParseFileByNewline(chainFile)
+		var err error
+		if links, err = utils.ReadLinks(chainFile); err != nil {
+			return nil, fmt.Errorf("chain file: %w", err)
+		}
 	} else {
 		return nil, fmt.Errorf("no chain links or chain file specified")
 	}
@@ -33,15 +56,9 @@ func resolveFixedChain(c core.Core, chainLinks string, chainFile string) ([]prot
 		if link == "" {
 			continue
 		}
-		if mtproto.IsProxyLink(link) {
-			return nil, fmt.Errorf("chain hop %d: mtproto cannot be a chain hop: it only relays Telegram traffic", i)
-		}
-		p, err := c.CreateProtocol(link)
+		p, err := createHop(c, link)
 		if err != nil {
-			return nil, fmt.Errorf("chain hop %d: failed to create protocol from link: %w", i, err)
-		}
-		if err := p.Parse(); err != nil {
-			return nil, fmt.Errorf("chain hop %d: failed to parse protocol: %w", i, err)
+			return nil, fmt.Errorf("chain hop %d: %w", i, err)
 		}
 		hops = append(hops, p)
 	}
@@ -81,14 +98,8 @@ func selectChainFromPool(c core.Core, pool []string, numHops int) ([]protocol.Pr
 		if link == "" {
 			continue
 		}
-		if mtproto.IsProxyLink(link) {
-			continue // MTProto proxies cannot relay chain traffic.
-		}
-		p, err := c.CreateProtocol(link)
+		p, err := createHop(c, link)
 		if err != nil {
-			continue
-		}
-		if err := p.Parse(); err != nil {
 			continue
 		}
 		hops = append(hops, p)
@@ -135,14 +146,8 @@ func selectExitHopFromPool(c core.Core, pool []string, fixedHops []protocol.Prot
 	rng.Shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
 
 	for _, link := range candidates {
-		if mtproto.IsProxyLink(link) {
-			continue // MTProto proxies cannot relay chain traffic.
-		}
-		p, err := c.CreateProtocol(link)
+		p, err := createHop(c, link)
 		if err != nil {
-			continue
-		}
-		if err := p.Parse(); err != nil {
 			continue
 		}
 		// Build new chain: fixedHops + new exit hop.

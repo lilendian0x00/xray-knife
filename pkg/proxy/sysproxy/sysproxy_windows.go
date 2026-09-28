@@ -1,6 +1,7 @@
 package sysproxy
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"syscall"
@@ -36,7 +37,7 @@ func (m *windowsManager) Get() (*Settings, error) {
 
 	s := &Settings{
 		Platform: "windows",
-		Data:     make(map[string]string),
+		Data:     map[string]string{"format": "2"},
 	}
 
 	proxyEnable, _, err := k.GetIntegerValue("ProxyEnable")
@@ -46,14 +47,13 @@ func (m *windowsManager) Get() (*Settings, error) {
 		s.Data["ProxyEnable"] = "0"
 	}
 
-	proxyServer, _, err := k.GetStringValue("ProxyServer")
-	if err == nil {
-		s.Data["ProxyServer"] = proxyServer
-	}
-
-	proxyOverride, _, err := k.GetStringValue("ProxyOverride")
-	if err == nil {
-		s.Data["ProxyOverride"] = proxyOverride
+	// Record presence separately from value so Restore can delete a
+	// value that did not exist before instead of leaving ours behind.
+	for _, name := range []string{"ProxyServer", "ProxyOverride", "AutoConfigURL"} {
+		if v, _, err := k.GetStringValue(name); err == nil {
+			s.Data[name] = v
+			s.Data[name+".present"] = "1"
+		}
 	}
 
 	return s, nil
@@ -81,6 +81,12 @@ func (m *windowsManager) Set(addr string, port string) error {
 	if err := k.SetStringValue("ProxyServer", proxyServer); err != nil {
 		return fmt.Errorf("failed to set ProxyServer: %w", err)
 	}
+	// A PAC script (AutoConfigURL) takes precedence over ProxyServer in
+	// WinINet, so leaving it in place would silently bypass us. Get()
+	// saved it; Restore puts it back.
+	if err := k.DeleteValue("AutoConfigURL"); err != nil && !errors.Is(err, registry.ErrNotExist) {
+		return fmt.Errorf("failed to clear AutoConfigURL: %w", err)
+	}
 
 	notifySystemSettingsChange()
 	return nil
@@ -103,20 +109,28 @@ func (m *windowsManager) Restore(prev *Settings) error {
 		return fmt.Errorf("failed to restore ProxyEnable: %w", err)
 	}
 
-	if server, ok := prev.Data["ProxyServer"]; ok && server != "" {
-		if err := k.SetStringValue("ProxyServer", server); err != nil {
-			return fmt.Errorf("failed to restore ProxyServer: %w", err)
-		}
-	}
-
-	if override, ok := prev.Data["ProxyOverride"]; ok {
-		if err := k.SetStringValue("ProxyOverride", override); err != nil {
-			return fmt.Errorf("failed to restore ProxyOverride: %w", err)
+	// Snapshots written before "format" 2 carry no presence markers: for
+	// them keep the old behaviour (restore what was recorded, never
+	// delete).
+	legacy := prev.Data["format"] != "2"
+	var errs []error
+	for _, name := range []string{"ProxyServer", "ProxyOverride", "AutoConfigURL"} {
+		val, hadValue := prev.Data[name]
+		_, present := prev.Data[name+".present"]
+		switch {
+		case present || (legacy && hadValue && val != ""):
+			if err := k.SetStringValue(name, val); err != nil {
+				errs = append(errs, fmt.Errorf("failed to restore %s: %w", name, err))
+			}
+		case !legacy:
+			if err := k.DeleteValue(name); err != nil && !errors.Is(err, registry.ErrNotExist) {
+				errs = append(errs, fmt.Errorf("failed to remove %s: %w", name, err))
+			}
 		}
 	}
 
 	notifySystemSettingsChange()
-	return nil
+	return errors.Join(errs...)
 }
 
 // notifySystemSettingsChange signals running applications that internet settings have changed.

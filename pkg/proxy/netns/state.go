@@ -3,34 +3,63 @@ package netns
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 
-	"github.com/lilendian0x00/xray-knife/v11/utils/xkhome"
+	"github.com/lilendian0x00/xray-knife/v11/pkg/proxy/statefile"
 )
 
-// State is persisted to disk so a subsequent launch can clean up
-// an orphaned namespace left behind by a crash (SIGKILL, power loss, etc.).
-// Pid and BootID together identify the owning process; if the PID is alive
-// AND the boot_id matches, the resources still belong to a live process and
-// must NOT be reclaimed.
+// State is persisted so a later launch can clean up a namespace left
+// behind by a crash (SIGKILL, power loss, etc.). Pid and BootID identify
+// the owner; while it is alive (same boot) its resources are left alone.
+//
+// Each instance writes its own file (keyed by PID) so parallel app-mode
+// runs cannot overwrite or clear each other's state.
 type State struct {
-	Name     string `json:"name"`
-	VethHost string `json:"vethHost"`
-	VethNS   string `json:"vethNS"`
-	Pid      int    `json:"pid"`
-	BootID   string `json:"bootId"`
+	Name string `json:"name"`
+	// VethHost/VethNS are only set by state files written before the
+	// veth pair was dropped; recovery still deletes them.
+	VethHost string `json:"vethHost,omitempty"`
+	VethNS   string `json:"vethNS,omitempty"`
+	// ResolvDir is the /etc/netns/<name> directory we created, if any.
+	ResolvDir string `json:"resolvDir,omitempty"`
+	Pid       int    `json:"pid"`
+	BootID    string `json:"bootId"`
 }
 
-func stateFilePath() (string, error) {
-	dir, err := xkhome.Dir()
-	if err != nil {
-		return "", err
+const (
+	legacyStateFile = ".netns-state.json"
+	stateFilePrefix = ".netns-state-"
+)
+
+var legacyVethRE = regexp.MustCompile(`^xk[hn]-[0-9]{1,11}$`)
+
+// Validate rejects state this package could not have written, so a forged
+// file cannot make recovery (running as root) delete arbitrary
+// namespaces, links or directories.
+func (s *State) Validate() error {
+	if s.Pid <= 0 {
+		return errors.New("bad pid")
 	}
-	return filepath.Join(dir, ".netns-state.json"), nil
+	if err := ValidateName(s.Name); err != nil {
+		return err
+	}
+	for _, v := range []string{s.VethHost, s.VethNS} {
+		if v != "" && !legacyVethRE.MatchString(v) {
+			return fmt.Errorf("bad veth name %q", v)
+		}
+	}
+	if s.ResolvDir != "" && s.ResolvDir != filepath.Join(netnsEtcDir, s.Name) {
+		return fmt.Errorf("bad resolver directory %q", s.ResolvDir)
+	}
+	return nil
 }
+
+func stateFileName(pid int) string { return fmt.Sprintf("%s%d.json", stateFilePrefix, pid) }
 
 // readBootID returns the kernel boot_id, used to invalidate stale state
 // across reboots (PIDs can recycle after a reboot).
@@ -42,13 +71,9 @@ func readBootID() string {
 	return strings.TrimSpace(string(data))
 }
 
-// SaveState persists the namespace state to disk for crash recovery.
-// Pid and BootID are stamped automatically.
+// SaveState persists the namespace state for crash recovery. Pid and
+// BootID are stamped automatically.
 func SaveState(s *State) error {
-	path, err := stateFilePath()
-	if err != nil {
-		return err
-	}
 	if s.Pid == 0 {
 		s.Pid = os.Getpid()
 	}
@@ -59,44 +84,49 @@ func SaveState(s *State) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return statefile.Write(stateFileName(s.Pid), data)
 }
 
-// LoadState reads the persisted state file. Returns nil, nil if no file exists.
-func LoadState() (*State, error) {
-	path, err := stateFilePath()
+// LoadStates reads every persisted state file: per-instance and legacy,
+// in the state directory and (read as untrusted) where older versions
+// kept it. Files that do not validate are reported in bad.
+func LoadStates() (states []*State, files []string, bad []string, err error) {
+	dir, err := statefile.Dir()
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
+	dirs := []string{dir}
+	if legacy, ok := statefile.LegacyDir(); ok {
+		dirs = append(dirs, legacy)
+	}
+	for _, d := range dirs {
+		paths, _ := filepath.Glob(filepath.Join(d, stateFilePrefix+"*.json"))
+		paths = append(paths, filepath.Join(d, legacyStateFile))
+		for _, p := range paths {
+			data, err := statefile.Read(p)
+			if err != nil {
+				continue
+			}
+			var s State
+			if err := json.Unmarshal(data, &s); err != nil {
+				bad = append(bad, p+": "+err.Error())
+				continue
+			}
+			if err := s.Validate(); err != nil {
+				bad = append(bad, p+": "+err.Error())
+				continue
+			}
+			states = append(states, &s)
+			files = append(files, p)
 		}
-		return nil, err
 	}
-	var s State
-	if err := json.Unmarshal(data, &s); err != nil {
-		return nil, err
-	}
-	return &s, nil
+	return states, files, bad, nil
 }
 
-// ClearState removes the state file after a successful cleanup or shutdown.
+// ClearState removes this process's state file after a successful
+// cleanup or shutdown.
 func ClearState() error {
-	path, err := stateFilePath()
-	if err != nil {
-		return err
-	}
-	err = os.Remove(path)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	return err
+	return statefile.Remove(stateFileName(os.Getpid()))
 }
 
 // stateOwnerAlive reports whether the recorded owner is still running.
@@ -106,6 +136,9 @@ func ClearState() error {
 func stateOwnerAlive(s *State) bool {
 	if s == nil || s.Pid <= 0 {
 		return false
+	}
+	if s.Pid == os.Getpid() {
+		return true
 	}
 	if s.BootID != "" && s.BootID != readBootID() {
 		// Boot changed: PIDs from before reboot are meaningless.

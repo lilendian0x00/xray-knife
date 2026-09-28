@@ -1,12 +1,16 @@
 package sysproxy
 
 import (
+	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 )
 
-type darwinManager struct{}
+type darwinManager struct {
+	// services is the list Get() saw; Set configures exactly these so
+	// what Restore puts back matches what Set changed.
+	services []string
+}
 
 // New returns a macOS proxy manager.
 func New() (Manager, error) {
@@ -23,13 +27,14 @@ func New() (Manager, error) {
 //   - "https":  HTTPS traffic (browsers honour this independently from "web")
 //   - "socks":  SOCKS-aware apps (Telegram, dev tools, etc.)
 //
-// The xray "system" inbound speaks HTTP (with CONNECT for HTTPS), and the
-// sing-box one is a "mixed" HTTP+SOCKS listener, so pointing all three
-// preferences at the same addr:port works for both cores.
+// The system-mode listener speaks both HTTP (with CONNECT for HTTPS) and
+// SOCKS on one port for both cores (an xray socks inbound also accepts
+// HTTP proxy requests; sing-box uses a "mixed" inbound), so pointing all
+// three preferences at the same addr:port works.
 var proxyKinds = []struct {
-	tag     string
-	getFlag string
-	setFlag string
+	tag       string
+	getFlag   string
+	setFlag   string
 	stateFlag string
 }{
 	{"web", "-getwebproxy", "-setwebproxy", "-setwebproxystate"},
@@ -42,6 +47,7 @@ func (m *darwinManager) Get() (*Settings, error) {
 	if err != nil {
 		return nil, err
 	}
+	m.services = services
 
 	s := &Settings{
 		Platform: "darwin",
@@ -51,46 +57,53 @@ func (m *darwinManager) Get() (*Settings, error) {
 
 	for _, svc := range services {
 		for _, k := range proxyKinds {
-			prefix := "svc:" + svc + ":" + k.tag + ":"
-			out, err := exec.Command("networksetup", k.getFlag, svc).Output()
+			out, err := execOutput("networksetup", k.getFlag, svc)
 			if err != nil {
 				continue
 			}
-			for _, line := range strings.Split(string(out), "\n") {
-				parts := strings.SplitN(line, ": ", 2)
-				if len(parts) != 2 {
-					continue
-				}
-				key := strings.TrimSpace(parts[0])
-				val := strings.TrimSpace(parts[1])
-				switch key {
-				case "Enabled":
-					s.Data[prefix+"enabled"] = val
-				case "Server":
-					s.Data[prefix+"server"] = val
-				case "Port":
-					s.Data[prefix+"port"] = val
-				}
-			}
+			parseProxyInfo(s.Data, "svc:"+svc+":"+k.tag+":", string(out))
 		}
 	}
 
 	return s, nil
 }
 
+// parseProxyInfo reads `networksetup -get*proxy` output ("Enabled: Yes",
+// "Server: host", "Port: 8080") into data under prefix.
+func parseProxyInfo(data map[string]string, prefix, out string) {
+	for _, line := range strings.Split(out, "\n") {
+		key, val, ok := strings.Cut(line, ": ")
+		if !ok {
+			continue
+		}
+		val = strings.TrimSpace(val)
+		switch strings.TrimSpace(key) {
+		case "Enabled":
+			data[prefix+"enabled"] = val
+		case "Server":
+			data[prefix+"server"] = val
+		case "Port":
+			data[prefix+"port"] = val
+		}
+	}
+}
+
 func (m *darwinManager) Set(addr string, port string) error {
-	services, err := activeNetworkServices()
-	if err != nil {
-		return err
+	services := m.services
+	if len(services) == 0 {
+		var err error
+		if services, err = activeNetworkServices(); err != nil {
+			return err
+		}
 	}
 
 	for _, svc := range services {
 		for _, k := range proxyKinds {
-			if out, err := exec.Command("networksetup", k.setFlag, svc, addr, port).CombinedOutput(); err != nil {
-				return fmt.Errorf("failed to set %s proxy for %s: %s: %w", k.tag, svc, string(out), err)
+			if out, err := execCombined("networksetup", k.setFlag, svc, addr, port); err != nil {
+				return fmt.Errorf("failed to set %s proxy for %s: %s: %w", k.tag, svc, strings.TrimSpace(string(out)), err)
 			}
-			if out, err := exec.Command("networksetup", k.stateFlag, svc, "on").CombinedOutput(); err != nil {
-				return fmt.Errorf("failed to enable %s proxy for %s: %s: %w", k.tag, svc, string(out), err)
+			if out, err := execCombined("networksetup", k.stateFlag, svc, "on"); err != nil {
+				return fmt.Errorf("failed to enable %s proxy for %s: %s: %w", k.tag, svc, strings.TrimSpace(string(out)), err)
 			}
 		}
 	}
@@ -98,6 +111,10 @@ func (m *darwinManager) Set(addr string, port string) error {
 	return nil
 }
 
+// Restore puts every managed preference back: the previous server/port
+// (so a configured-but-disabled proxy keeps its values) and then the
+// previous on/off state. It keeps going past failures and reports them
+// all, so one broken service cannot leave the others pointing at us.
 func (m *darwinManager) Restore(prev *Settings) error {
 	if prev == nil {
 		return nil
@@ -107,30 +124,37 @@ func (m *darwinManager) Restore(prev *Settings) error {
 	if svcList == "" {
 		return nil
 	}
-	services := strings.Split(svcList, "|")
 
-	for _, svc := range services {
+	var errs []error
+	run := func(args ...string) {
+		if out, err := execCombined("networksetup", args...); err != nil {
+			errs = append(errs, fmt.Errorf("networksetup %s: %s: %w", strings.Join(args, " "), strings.TrimSpace(string(out)), err))
+		}
+	}
+	for _, svc := range strings.Split(svcList, "|") {
 		for _, k := range proxyKinds {
 			prefix := "svc:" + svc + ":" + k.tag + ":"
-			wasEnabled := prev.Data[prefix+"enabled"]
+			wasEnabled := prev.Data[prefix+"enabled"] == "Yes"
 			prevServer := prev.Data[prefix+"server"]
 			prevPort := prev.Data[prefix+"port"]
 
-			if wasEnabled == "Yes" && prevServer != "" && prevPort != "" {
-				exec.Command("networksetup", k.setFlag, svc, prevServer, prevPort).Run()
-				exec.Command("networksetup", k.stateFlag, svc, "on").Run()
+			if prevServer != "" && prevPort != "" && prevPort != "0" {
+				run(k.setFlag, svc, prevServer, prevPort)
+			}
+			if wasEnabled && prevServer != "" {
+				run(k.stateFlag, svc, "on")
 			} else {
-				exec.Command("networksetup", k.stateFlag, svc, "off").Run()
+				run(k.stateFlag, svc, "off")
 			}
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // activeNetworkServices lists network services that have an active IP address.
 func activeNetworkServices() ([]string, error) {
-	out, err := exec.Command("networksetup", "-listallnetworkservices").Output()
+	out, err := execOutput("networksetup", "-listallnetworkservices")
 	if err != nil {
 		return nil, fmt.Errorf("failed to list network services: %w", err)
 	}
@@ -142,24 +166,12 @@ func activeNetworkServices() ([]string, error) {
 		if line == "" || strings.HasPrefix(line, "An asterisk") || strings.HasPrefix(line, "*") {
 			continue
 		}
-		// Check if the service has an active IP
-		info, err := exec.Command("networksetup", "-getinfo", line).Output()
+		info, err := execOutput("networksetup", "-getinfo", line)
 		if err != nil {
 			continue
 		}
-		infoStr := string(info)
-		// A service is active if it has a non-empty IP address
-		if strings.Contains(infoStr, "IP address: ") {
-			for _, infoLine := range strings.Split(infoStr, "\n") {
-				if strings.HasPrefix(infoLine, "IP address: ") {
-					ip := strings.TrimPrefix(infoLine, "IP address: ")
-					ip = strings.TrimSpace(ip)
-					if ip != "" && ip != "none" {
-						active = append(active, line)
-						break
-					}
-				}
-			}
+		if serviceHasIP(string(info)) {
+			active = append(active, line)
 		}
 	}
 
@@ -168,4 +180,20 @@ func activeNetworkServices() ([]string, error) {
 	}
 
 	return active, nil
+}
+
+// serviceHasIP reports whether `networksetup -getinfo` output shows an
+// assigned IPv4 or IPv6 address.
+func serviceHasIP(info string) bool {
+	for _, line := range strings.Split(info, "\n") {
+		for _, key := range []string{"IP address: ", "IPv6 IP address: "} {
+			if strings.HasPrefix(line, key) {
+				ip := strings.TrimSpace(strings.TrimPrefix(line, key))
+				if ip != "" && ip != "none" {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

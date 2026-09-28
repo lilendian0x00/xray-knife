@@ -60,7 +60,7 @@ func DeadmanInstructions(timeout time.Duration) string {
 			"  → If you can still read this, the tunnel is preserving your SSH.\n"+
 			"  → Press ENTER within %v to confirm — otherwise auto-teardown.\n"+
 			"  → If SSH disconnects (SIGHUP), the tunnel is torn down on exit.\n"+
-			"  → For unattended use: run under tmux/screen/systemd and pass --host-tun-deadman 0.\n",
+			"  → For unattended use: run under tmux/screen/systemd and pass --tun-deadman 0.\n",
 		timeout,
 	)
 }

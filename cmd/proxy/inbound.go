@@ -45,7 +45,10 @@ func runInbound(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg := buildPkgConfig("inbound", &pf, &inboundCmdRot.in, &inboundCmdRot.rot, &inboundCmdRot.ch, &inboundCmdRot.on, nil, nil)
+	cfg, err := buildPkgConfig("inbound", &pf, &inboundCmdRot.in, &inboundCmdRot.rot, &inboundCmdRot.ch, &inboundCmdRot.on, nil, nil)
+	if err != nil {
+		return err
+	}
 	cfg.ConfigLinks = links
 	return runService(cmd.Context(), cfg, false)
 }

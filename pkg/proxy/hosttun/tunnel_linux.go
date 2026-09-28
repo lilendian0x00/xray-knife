@@ -4,7 +4,9 @@ package hosttun
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	mathrand "math/rand/v2"
 	"net/netip"
 	"strings"
 
@@ -19,10 +21,12 @@ import (
 	"github.com/sagernet/sing-box/dns"
 	dns_transport "github.com/sagernet/sing-box/dns/transport"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/protocol/direct"
 	"github.com/sagernet/sing-box/protocol/socks"
 	sing_tun "github.com/sagernet/sing-box/protocol/tun"
 	"github.com/sagernet/sing/common/json/badoption"
 	"github.com/sagernet/sing/service"
+	"github.com/vishvananda/netlink"
 )
 
 const tunInboundTag = "tun-in"
@@ -85,7 +89,11 @@ func buildDNSServer(cfg Config) (option.DNSServerOptions, func(*dns.TransportReg
 // Caller is responsible for ensuring the exclusion list in cfg.RouteExcludeCIDRs
 // contains everything needed to keep the SSH session alive and to
 // prevent the upstream proxy dial from looping back through TUN.
-func Start(ctx context.Context, cfg Config) (protocol.Instance, error) {
+//
+// Start fills in the iproute2 table, rule index and bypass priority it
+// picked, so the caller can record them for crash recovery.
+func Start(ctx context.Context, cfgp *Config) (protocol.Instance, error) {
+	cfg := *cfgp
 	if cfg.PhysIface == "" {
 		return nil, fmt.Errorf("PhysIface is required (set via --bind)")
 	}
@@ -94,6 +102,42 @@ func Start(ctx context.Context, cfg Config) (protocol.Instance, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid TUN address %q: %w", cfg.TunAddr, err)
 	}
+	if !tunPrefix.Addr().Is4() {
+		return nil, fmt.Errorf("TUN address %q must be IPv4 (use the IPv6 address option for IPv6)", cfg.TunAddr)
+	}
+	tunAddrs := badoption.Listable[netip.Prefix]{tunPrefix}
+	if cfg.TunAddr6 != "" {
+		tunPrefix6, err := netip.ParsePrefix(cfg.TunAddr6)
+		if err != nil {
+			return nil, fmt.Errorf("invalid TUN IPv6 address %q: %w", cfg.TunAddr6, err)
+		}
+		if !tunPrefix6.Addr().Is6() || tunPrefix6.Addr().Is4In6() {
+			return nil, fmt.Errorf("TUN IPv6 address %q is not an IPv6 prefix", cfg.TunAddr6)
+		}
+		// Giving the TUN an IPv6 address is what makes sing-tun install
+		// the IPv6 default route and rules; without it IPv6 egress
+		// bypasses the tunnel entirely.
+		tunAddrs = append(tunAddrs, tunPrefix6)
+	}
+
+	tableIndex, ruleIndex := cfg.RouteTableIndex, cfg.RouteRuleIndex
+	if tableIndex == 0 || ruleIndex == 0 {
+		t, start, err := pickRouteIndices()
+		if err != nil {
+			return nil, fmt.Errorf("pick iproute2 table/rule index: %w", err)
+		}
+		if tableIndex == 0 {
+			tableIndex = t
+		}
+		if ruleIndex == 0 {
+			cfgp.BypassPriority = start
+			ruleIndex = start + 1
+		}
+	}
+	if cfgp.BypassPriority == 0 {
+		cfgp.BypassPriority = ruleIndex - 1
+	}
+	cfgp.RouteTableIndex, cfgp.RouteRuleIndex = tableIndex, ruleIndex
 
 	excludePrefixes := make([]netip.Prefix, 0, len(cfg.RouteExcludeCIDRs))
 	for _, c := range cfg.RouteExcludeCIDRs {
@@ -105,13 +149,21 @@ func Start(ctx context.Context, cfg Config) (protocol.Instance, error) {
 	}
 
 	tunOpts := option.TunInboundOptions{
-		InterfaceName:       cfg.TunName,
-		MTU:                 cfg.TunMTU,
-		Address:             badoption.Listable[netip.Prefix]{tunPrefix},
-		AutoRoute:           true,
-		StrictRoute:         false, // host-tun must let excludes win
+		InterfaceName: cfg.TunName,
+		MTU:           cfg.TunMTU,
+		Address:       tunAddrs,
+		AutoRoute:     true,
+		// Strict route adds an "unreachable" rule for an address family
+		// the TUN has no address in, at the start of sing-tun's block —
+		// ahead of the route excludes, which are routes, not rules. With
+		// the kill switch that turns "no IPv6 capture" into "no IPv6";
+		// the caller keeps IPv6 SSH peers and excluded ranges reachable
+		// with Bypass rules one priority earlier.
+		StrictRoute:         cfg.StrictRoute,
 		Stack:               "gvisor",
 		RouteExcludeAddress: badoption.Listable[netip.Prefix](excludePrefixes),
+		IPRoute2TableIndex:  tableIndex,
+		IPRoute2RuleIndex:   ruleIndex,
 	}
 
 	socksOpts := option.SOCKSOutboundOptions{
@@ -136,17 +188,46 @@ func Start(ctx context.Context, cfg Config) (protocol.Instance, error) {
 		return nil, err
 	}
 
+	outbounds := []option.Outbound{{
+		Type:    "socks",
+		Tag:     "proxy-out",
+		Options: &socksOpts,
+	}}
+	var directRule []option.Rule
+	if len(cfg.DirectCIDRs) > 0 {
+		// Addresses carved out of the excludes so DNS to them gets
+		// hijacked (e.g. the LAN router): everything that is not DNS
+		// leaves on the uplink as before.
+		outbounds = append(outbounds, option.Outbound{
+			Type: "direct",
+			Tag:  "direct-out",
+			Options: &option.DirectOutboundOptions{
+				DialerOptions: option.DialerOptions{
+					AbstractDialerOptions: option.AbstractDialerOptions{BindInterface: cfg.PhysIface},
+				},
+			},
+		})
+		directRule = []option.Rule{{
+			Type: "default",
+			DefaultOptions: option.DefaultRule{
+				RawDefaultRule: option.RawDefaultRule{
+					IPCIDR: badoption.Listable[string](cfg.DirectCIDRs),
+				},
+				RuleAction: option.RuleAction{
+					Action:       "route",
+					RouteOptions: option.RouteActionOptions{Outbound: "direct-out"},
+				},
+			},
+		}}
+	}
+
 	opts := option.Options{
 		Inbounds: []option.Inbound{{
 			Type:    "tun",
 			Tag:     tunInboundTag,
 			Options: &tunOpts,
 		}},
-		Outbounds: []option.Outbound{{
-			Type:    "socks",
-			Tag:     "proxy-out",
-			Options: &socksOpts,
-		}},
+		Outbounds: outbounds,
 		DNS: &option.DNSOptions{
 			RawDNSOptions: option.RawDNSOptions{
 				Servers: []option.DNSServerOptions{dnsServer},
@@ -154,7 +235,7 @@ func Start(ctx context.Context, cfg Config) (protocol.Instance, error) {
 			},
 		},
 		Route: &option.RouteOptions{
-			Rules: []option.Rule{
+			Rules: append([]option.Rule{
 				{
 					Type: "default",
 					DefaultOptions: option.DefaultRule{
@@ -178,7 +259,7 @@ func Start(ctx context.Context, cfg Config) (protocol.Instance, error) {
 						},
 					},
 				},
-			},
+			}, directRule...),
 			Final: "proxy-out",
 			// Pin "default" to the physical NIC so sing-box's own
 			// outbound dials (e.g. the SOCKS connect to 127.0.0.1
@@ -197,6 +278,7 @@ func Start(ctx context.Context, cfg Config) (protocol.Instance, error) {
 
 	outboundRegistry := boxOutbound.NewRegistry()
 	socks.RegisterOutbound(outboundRegistry)
+	direct.RegisterOutbound(outboundRegistry)
 
 	dnsTransportRegistry := dns.NewTransportRegistry()
 	registerDNS(dnsTransportRegistry)
@@ -217,4 +299,36 @@ func Start(ctx context.Context, cfg Config) (protocol.Instance, error) {
 	}
 
 	return instance, nil
+}
+
+// pickRouteIndices returns an iproute2 table index and a first rule
+// priority that nothing on the host uses yet, so neither our rules nor
+// our teardown can collide with another TUN (sing-box, mihomo, a second
+// xray-knife) that sticks to sing-box's 2022/9000 defaults.
+func pickRouteIndices() (table, rule int, err error) {
+	rules, err := netlink.RuleList(netlink.FAMILY_ALL)
+	if err != nil {
+		return 0, 0, fmt.Errorf("list rules: %w", err)
+	}
+	usedPrio := make(map[int]bool, len(rules))
+	usedTable := make(map[int]bool, len(rules))
+	for _, r := range rules {
+		usedPrio[r.Priority] = true
+		usedTable[r.Table] = true
+	}
+	rule = freeRuleBlock(usedPrio)
+	if rule == 0 {
+		return 0, 0, errors.New("no free block of ip rule priorities between 9100 and 32000")
+	}
+	for i := 0; i < 128; i++ {
+		t := 20000 + mathrand.IntN(40000)
+		if usedTable[t] {
+			continue
+		}
+		routes, rErr := netlink.RouteListFiltered(netlink.FAMILY_ALL, &netlink.Route{Table: t}, netlink.RT_FILTER_TABLE)
+		if rErr == nil && len(routes) == 0 {
+			return t, rule, nil
+		}
+	}
+	return 0, 0, errors.New("no unused iproute2 table index found")
 }

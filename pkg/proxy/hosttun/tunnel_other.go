@@ -12,7 +12,7 @@ import (
 // ErrNotSupported is returned on non-Linux platforms.
 var ErrNotSupported = errors.New("host-tun mode is only supported on Linux")
 
-func Start(context.Context, Config) (protocol.Instance, error) {
+func Start(context.Context, *Config) (protocol.Instance, error) {
 	return nil, ErrNotSupported
 }
 

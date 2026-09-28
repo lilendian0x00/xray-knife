@@ -131,7 +131,7 @@ func (m *linuxManager) gnomeSet(addr, port string) error {
 		[2]string{"/system/proxy/ignore-hosts", "['localhost', '127.0.0.0/8', '::1']"},
 	)
 	for _, w := range writes {
-		if out, err := exec.Command("dconf", "write", w[0], w[1]).CombinedOutput(); err != nil {
+		if out, err := execCombined("dconf", "write", w[0], w[1]); err != nil {
 			return fmt.Errorf("dconf write %s failed: %s: %w", w[0], string(out), err)
 		}
 	}
@@ -149,12 +149,12 @@ func (m *linuxManager) kdeSet(addr, port string) error {
 		{m.kwriteConfig, "--file", "kioslaverc", "--group", "Proxy Settings", "--key", "NoProxyFor", "localhost,127.0.0.0/8,::1"},
 	}
 	for _, args := range cmds {
-		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+		if out, err := execCombined(args[0], args[1:]...); err != nil {
 			return fmt.Errorf("kwriteconfig failed: %s: %w", string(out), err)
 		}
 	}
-	_ = exec.Command("dbus-send", "--type=signal", "/KIO/Scheduler",
-		"org.kde.KIO.Scheduler.reparseSlaveConfiguration", "string:").Run()
+	_, _ = execCombined("dbus-send", "--type=signal", "/KIO/Scheduler",
+		"org.kde.KIO.Scheduler.reparseSlaveConfiguration", "string:")
 	return nil
 }
 
@@ -188,7 +188,7 @@ func (m *linuxManager) Restore(prev *Settings) error {
 			writes = append(writes, [2]string{"/system/proxy/ignore-hosts", ignoreHosts})
 		}
 		for _, w := range writes {
-			if out, err := exec.Command("dconf", "write", w[0], w[1]).CombinedOutput(); err != nil {
+			if out, err := execCombined("dconf", "write", w[0], w[1]); err != nil {
 				return fmt.Errorf("dconf restore %s failed: %s: %w", w[0], string(out), err)
 			}
 		}
@@ -225,12 +225,12 @@ func (m *linuxManager) Restore(prev *Settings) error {
 		}
 
 		for _, args := range cmds {
-			if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			if out, err := execCombined(args[0], args[1:]...); err != nil {
 				return fmt.Errorf("kwriteconfig restore failed: %s: %w", string(out), err)
 			}
 		}
-		_ = exec.Command("dbus-send", "--type=signal", "/KIO/Scheduler",
-			"org.kde.KIO.Scheduler.reparseSlaveConfiguration", "string:").Run()
+		_, _ = execCombined("dbus-send", "--type=signal", "/KIO/Scheduler",
+			"org.kde.KIO.Scheduler.reparseSlaveConfiguration", "string:")
 		return nil
 
 	default:
@@ -239,7 +239,7 @@ func (m *linuxManager) Restore(prev *Settings) error {
 }
 
 func dconfRead(path string) string {
-	out, err := exec.Command("dconf", "read", path).Output()
+	out, err := execOutput("dconf", "read", path)
 	if err != nil {
 		return ""
 	}
@@ -250,7 +250,7 @@ func kdeRead(kreadConfig, key string) string {
 	if kreadConfig == "" {
 		return ""
 	}
-	out, err := exec.Command(kreadConfig, "--file", "kioslaverc", "--group", "Proxy Settings", "--key", key).Output()
+	out, err := execOutput(kreadConfig, "--file", "kioslaverc", "--group", "Proxy Settings", "--key", key)
 	if err != nil {
 		return ""
 	}
@@ -280,8 +280,9 @@ export no_proxy=localhost,127.0.0.1
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("No supported desktop environment detected. Source %s in your shell to apply.\n", path)
-	return nil
+	// Nothing system-wide changed: say so instead of claiming the OS
+	// proxy is configured.
+	return &ManualConfigError{Path: path}
 }
 
 func (m *linuxManager) writeUnsetEnvFile() error {
