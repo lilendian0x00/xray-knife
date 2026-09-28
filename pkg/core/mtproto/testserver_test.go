@@ -22,21 +22,44 @@ const (
 	modeTransportError                   // answer with a 4-byte -404 frame
 	modeWrongNonce                       // answer a well-formed resPQ for another nonce
 	modeStallHandshake                   // fake TLS only: read ClientHello, never reply
+	// These answer request 1 normally, so only later samples differ.
+	modeDropAfterFirst       // close without draining
+	modeHangAfterFirst       // read request 2, never answer it
+	modeWrongNonceAfterFirst // answer request 2 for another nonce
+	modeSlowSecond           // answer request 2+ after slowSecondDelay
 )
 
-// fakeProxy speaks the server side of obfuscated2 and fake TLS, parses one
-// req_pq_multi and answers according to its mode. Starting it with a different
-// Secret than the client uses simulates a wrong secret.
+const (
+	// Far longer than any client budget below, so a server timeout is never
+	// mistaken for the client giving up.
+	serverSafetyDeadline = 30 * time.Second
+	// Long enough that a later RTT cannot be loopback jitter.
+	slowSecondDelay = 300 * time.Millisecond
+)
+
+// recordedRequest is one parsed req_pq_multi and the connection it arrived on.
+type recordedRequest struct {
+	conn  int
+	msgID uint64
+	nonce [16]byte
+}
+
+// fakeProxy speaks the server side of obfuscated2 and fake TLS, answering
+// req_pq_multi per mode. A different Secret simulates a wrong secret.
 type fakeProxy struct {
 	t      *testing.T
 	ln     net.Listener
 	secret Secret
 	mode   serverMode
 	wg     sync.WaitGroup
-	// Signalled at the stall point (modeHang: request read; modeStallHandshake:
-	// ClientHello read) so cancellation tests do not race the handshake.
+	// Signalled at the stall point so cancellation tests do not race the handshake.
 	reached chan struct{}
 	once    sync.Once
+
+	mu       sync.Mutex
+	conns    int
+	active   []net.Conn
+	requests []recordedRequest
 }
 
 func startFakeProxy(t *testing.T, secret Secret, mode serverMode) *fakeProxy {
@@ -50,6 +73,7 @@ func startFakeProxy(t *testing.T, secret Secret, mode serverMode) *fakeProxy {
 	go p.acceptLoop()
 	t.Cleanup(func() {
 		_ = ln.Close()
+		p.closeActive()
 		p.wg.Wait()
 	})
 	return p
@@ -61,6 +85,43 @@ func (p *fakeProxy) port() string {
 }
 
 func (p *fakeProxy) signalReached() { p.once.Do(func() { close(p.reached) }) }
+
+func (p *fakeProxy) track(conn net.Conn) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.conns++
+	p.active = append(p.active, conn)
+	return p.conns
+}
+
+func (p *fakeProxy) closeActive() {
+	p.mu.Lock()
+	conns := append([]net.Conn(nil), p.active...)
+	p.mu.Unlock()
+	for _, c := range conns {
+		_ = c.Close()
+	}
+}
+
+func (p *fakeProxy) record(connIdx int, msgID uint64, nonce [16]byte) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.requests = append(p.requests, recordedRequest{conn: connIdx, msgID: msgID, nonce: nonce})
+}
+
+// connections is safe to read once the probe under test has returned.
+func (p *fakeProxy) connections() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.conns
+}
+
+// observed returns every parsed request, in arrival order.
+func (p *fakeProxy) observed() []recordedRequest {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]recordedRequest(nil), p.requests...)
+}
 
 func (p *fakeProxy) acceptLoop() {
 	defer p.wg.Done()
@@ -86,7 +147,8 @@ func drainAndClose(conn net.Conn) {
 }
 
 func (p *fakeProxy) serve(conn net.Conn) {
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	connIdx := p.track(conn)
+	_ = conn.SetDeadline(time.Now().Add(serverSafetyDeadline))
 	var stream io.ReadWriter = conn
 
 	if p.secret.Type == SecretFakeTLS {
@@ -143,10 +205,26 @@ func (p *fakeProxy) serve(conn net.Conn) {
 	}
 	obfs := &obfuscated2{conn: stream, encrypt: encrypt, decrypt: decrypt}
 
-	frame, err := readPaddedFrame(obfs)
-	if err != nil {
-		return
+	// A probe may sample several times on this one stream.
+	for reqNum := 1; ; reqNum++ {
+		frame, err := readPaddedFrame(obfs)
+		if err != nil {
+			return
+		}
+		msgID, nonce, ok := p.parseRequest(frame)
+		if !ok {
+			return
+		}
+		p.record(connIdx, msgID, nonce)
+		if !p.respond(conn, obfs, reqNum, nonce) {
+			return
+		}
 	}
+}
+
+// parseRequest validates a req_pq_multi frame and returns its message ID and nonce.
+func (p *fakeProxy) parseRequest(frame []byte) (uint64, [16]byte, bool) {
+	var nonce [16]byte
 	if len(frame) < reqPQMultiLen || len(frame)-reqPQMultiLen > 15 ||
 		binary.LittleEndian.Uint64(frame[:8]) != 0 ||
 		binary.LittleEndian.Uint64(frame[8:16])&3 != 0 ||
@@ -154,27 +232,65 @@ func (p *fakeProxy) serve(conn net.Conn) {
 		binary.LittleEndian.Uint32(frame[16:20]) != 20 ||
 		binary.LittleEndian.Uint32(frame[20:24]) != reqPQMultiConstructor {
 		p.t.Errorf("fake proxy: expected req_pq_multi, got % x", frame)
-		return
+		return 0, nonce, false
 	}
-	var nonce [16]byte
 	copy(nonce[:], frame[24:40])
+	return binary.LittleEndian.Uint64(frame[8:16]), nonce, true
+}
 
+// respond answers request reqNum and reports whether to keep serving.
+func (p *fakeProxy) respond(conn net.Conn, obfs *obfuscated2, reqNum int, nonce [16]byte) bool {
 	switch p.mode {
 	case modeHang:
 		p.signalReached()
 		_, _ = io.Copy(io.Discard, conn) // block until the client gives up
+		return false
 	case modeTransportError:
 		_ = writePaddedFrame(rand.Reader, obfs, []byte{0x6c, 0xfe, 0xff, 0xff}) // int32 -404
+		return false
 	case modeGarbage:
 		reply := buildResPQ(nonce)
 		binary.LittleEndian.PutUint32(reply[20:24], 0xdeadbeef)
 		_ = writePaddedFrame(rand.Reader, obfs, reply)
+		return false
 	case modeWrongNonce:
-		var other [16]byte
-		copy(other[:], nonce[:])
-		other[0] ^= 0xff
-		_ = writePaddedFrame(rand.Reader, obfs, buildResPQ(other))
+		_ = writePaddedFrame(rand.Reader, obfs, buildResPQ(flipNonce(nonce)))
+		return false
+	case modeDropAfterFirst:
+		// No drain. It would hold the connection open long enough to turn this
+		// into a timeout test.
+		_ = writePaddedFrame(rand.Reader, obfs, buildResPQ(nonce))
+		return false
+	case modeHangAfterFirst:
+		if reqNum == 1 {
+			_ = writePaddedFrame(rand.Reader, obfs, buildResPQ(nonce))
+			return true
+		}
+		// Getting here proves the client validated response 1 and asked again.
+		p.signalReached()
+		_, _ = io.Copy(io.Discard, conn)
+		return false
+	case modeWrongNonceAfterFirst:
+		if reqNum == 1 {
+			_ = writePaddedFrame(rand.Reader, obfs, buildResPQ(nonce))
+			return true
+		}
+		_ = writePaddedFrame(rand.Reader, obfs, buildResPQ(flipNonce(nonce)))
+		return false
+	case modeSlowSecond:
+		if reqNum > 1 {
+			time.Sleep(slowSecondDelay)
+		}
+		_ = writePaddedFrame(rand.Reader, obfs, buildResPQ(nonce))
+		return true
 	default:
 		_ = writePaddedFrame(rand.Reader, obfs, buildResPQ(nonce))
+		return true
 	}
+}
+
+func flipNonce(nonce [16]byte) [16]byte {
+	other := nonce
+	other[0] ^= 0xff
+	return other
 }

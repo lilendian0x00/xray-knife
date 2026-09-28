@@ -18,20 +18,35 @@ const maxFrameLen = 1 << 20
 // length, payload, 0..15 random padding bytes covered by that length. Payload
 // length must be a multiple of 4, as all TL objects are.
 func writePaddedFrame(rnd io.Reader, w io.Writer, payload []byte) error {
+	frame, err := buildPaddedFrame(rnd, payload)
+	if err != nil {
+		return err
+	}
+	return writeFrame(w, frame)
+}
+
+// buildPaddedFrame encodes a padded-intermediate frame without sending it,
+// so callers can keep the random padding out of a timed section.
+func buildPaddedFrame(rnd io.Reader, payload []byte) ([]byte, error) {
 	if len(payload)%4 != 0 {
-		return fmt.Errorf("frame payload length %d is not a multiple of 4", len(payload))
+		return nil, fmt.Errorf("frame payload length %d is not a multiple of 4", len(payload))
 	}
 	var padByte [1]byte
 	if _, err := io.ReadFull(rnd, padByte[:]); err != nil {
-		return err
+		return nil, err
 	}
 	pad := int(padByte[0] % 16)
 	frame := make([]byte, 4+len(payload)+pad)
 	binary.LittleEndian.PutUint32(frame[:4], uint32(len(payload)+pad))
 	copy(frame[4:], payload)
 	if _, err := io.ReadFull(rnd, frame[4+len(payload):]); err != nil {
-		return err
+		return nil, err
 	}
+	return frame, nil
+}
+
+// writeFrame writes an encoded frame in one call.
+func writeFrame(w io.Writer, frame []byte) error {
 	n, err := w.Write(frame)
 	if err == nil && n != len(frame) {
 		err = io.ErrShortWrite

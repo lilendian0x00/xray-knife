@@ -48,6 +48,12 @@ func IsProxyLink(link string) bool {
 
 func (m *MTProto) Name() string { return protocol.MTProtoIdentifier }
 
+// Relays is false: an MTProto proxy only relays Telegram traffic, so it is
+// probed natively but never used as a general outbound.
+func (m *MTProto) Relays() bool { return false }
+
+var _ protocol.Relayer = (*MTProto)(nil)
+
 // Parse validates the link and decodes its secret.
 func (m *MTProto) Parse() error {
 	if !IsProxyLink(m.OrigLink) {
@@ -66,7 +72,11 @@ func (m *MTProto) Parse() error {
 			return fmt.Errorf("duplicate mtproto %s parameter", name)
 		}
 	}
+	// A bracketed IPv6 literal would be bracketed again by net.JoinHostPort.
 	m.Address = strings.TrimSpace(q.Get("server"))
+	if strings.HasPrefix(m.Address, "[") && strings.HasSuffix(m.Address, "]") {
+		m.Address = m.Address[1 : len(m.Address)-1]
+	}
 	if m.Address == "" {
 		return errors.New("mtproto link is missing the server parameter")
 	}
@@ -79,7 +89,9 @@ func (m *MTProto) Parse() error {
 		return fmt.Errorf("mtproto link has an invalid port %q", m.Port)
 	}
 	m.Port = strconv.FormatUint(n, 10)
-	m.RawSecret = strings.TrimSpace(q.Get("secret"))
+	// ParseQuery decodes '+' to a space, but a standard-base64 secret uses
+	// '+' literally and no valid secret contains a space.
+	m.RawSecret = strings.TrimSpace(strings.ReplaceAll(q.Get("secret"), " ", "+"))
 	if m.RawSecret == "" {
 		return errors.New("mtproto link is missing the secret parameter")
 	}

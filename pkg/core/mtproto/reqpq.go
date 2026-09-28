@@ -19,28 +19,60 @@ const (
 const (
 	unencryptedHeaderLen = 8 + 8 + 4
 	reqPQMultiLen        = unencryptedHeaderLen + 4 + 16
-	// resPQMinBody is the shortest legal resPQ body: constructor(4),
-	// nonce(16), server_nonce(16), a 4-byte padded pq string and a
-	// Vector<long> header(8) with one fingerprint(8).
+	// resPQMinBody is the shortest legal resPQ body: constructor(4), nonce(16),
+	// server_nonce(16), padded pq(4) and a Vector<long>(8) with one fingerprint(8).
 	resPQMinBody = 56
 )
 
 // TransportError is a 4-byte MTProto transport-level error frame such as -404.
 type TransportError struct{ Code int32 }
 
-func (e TransportError) Error() string { return fmt.Sprintf("transport error %d", e.Code) }
+func (e TransportError) Error() string {
+	// https://core.telegram.org/mtproto/mtproto-transports#transport-errors
+	switch e.Code {
+	case -429:
+		return "transport error -429 (too many connections: Telegram is rate-limiting this IP)"
+	case -444:
+		return "transport error -444 (invalid data center)"
+	}
+	return fmt.Sprintf("transport error %d", e.Code)
+}
 
-// buildReqPQMulti encodes an unencrypted req_pq_multi#be7e8ef1 nonce:int128.
-// message_id is Unix time * 2^32 plus fractional seconds; client IDs are
+// timestampMsgID is Unix time * 2^32 plus fractional seconds. Client IDs are
 // divisible by four and their low 32 bits must be nonzero.
-func buildReqPQMulti(nonce [16]byte, now time.Time) []byte {
-	msg := make([]byte, reqPQMultiLen)
+func timestampMsgID(now time.Time) uint64 {
 	fraction := (uint64(now.Nanosecond()) << 32) / uint64(time.Second)
 	fraction &^= 3
 	if fraction == 0 {
 		fraction = 4
 	}
-	binary.LittleEndian.PutUint64(msg[8:16], uint64(now.Unix())<<32|fraction)
+	return uint64(now.Unix())<<32 | fraction
+}
+
+// msgIDSeq hands out one connection's message IDs. They must increase even when
+// the clock does not. https://core.telegram.org/mtproto/description#message-identifier-msg-id
+type msgIDSeq struct{ last uint64 }
+
+func (s *msgIDSeq) next(now time.Time) uint64 {
+	id := timestampMsgID(now)
+	if id <= s.last {
+		id = s.last + 4
+		if uint32(id) == 0 { // rolled into the next second
+			id += 4
+		}
+	}
+	s.last = id
+	return id
+}
+
+// buildReqPQMulti encodes an unencrypted req_pq_multi#be7e8ef1 nonce:int128.
+func buildReqPQMulti(nonce [16]byte, now time.Time) []byte {
+	return buildReqPQMultiWithID(nonce, timestampMsgID(now))
+}
+
+func buildReqPQMultiWithID(nonce [16]byte, msgID uint64) []byte {
+	msg := make([]byte, reqPQMultiLen)
+	binary.LittleEndian.PutUint64(msg[8:16], msgID)
 	binary.LittleEndian.PutUint32(msg[16:20], reqPQMultiLen-unencryptedHeaderLen)
 	binary.LittleEndian.PutUint32(msg[20:24], reqPQMultiConstructor)
 	copy(msg[24:40], nonce[:])
@@ -68,9 +100,8 @@ func parseResPQ(frame []byte) ([16]byte, error) {
 	if binary.LittleEndian.Uint64(frame[8:16])&3 != 1 {
 		return nonce, errors.New("resPQ has an invalid response message_id")
 	}
-	// message_data_length is authoritative; the rest is transport padding. Real
-	// proxies pad well past the documented 0-15 bytes (35 observed), so the tail
-	// is left unbounded — readPaddedFrame already caps the frame.
+	// message_data_length is authoritative, the rest is padding. Real proxies pad
+	// past the documented 0-15 bytes, so the tail is capped by readPaddedFrame.
 	n := uint64(binary.LittleEndian.Uint32(frame[16:20]))
 	available := uint64(len(frame) - unencryptedHeaderLen)
 	if n < resPQMinBody || n%4 != 0 || n > available {

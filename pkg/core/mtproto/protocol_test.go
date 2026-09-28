@@ -57,6 +57,7 @@ func TestMTProtoParse(t *testing.T) {
 		{name: "t.me faketls", link: "https://t.me/proxy?server=proxy.example.com&port=8443&secret=" + fakeHex, wantAddr: "proxy.example.com", wantPort: "8443", wantType: SecretFakeTLS},
 		{name: "fragment remark", link: "tg://proxy?server=1.2.3.4&port=443&secret=dd" + testKeyHex + "#My%20Proxy", wantAddr: "1.2.3.4", wantPort: "443", wantType: SecretSecured, wantRem: "My Proxy"},
 		{name: "ipv6 server", link: "tg://proxy?server=2001:db8::1&port=443&secret=" + testKeyHex, wantAddr: "2001:db8::1", wantPort: "443", wantType: SecretSimple},
+		{name: "bracketed ipv6 server", link: "tg://proxy?server=[2001:db8::1]&port=443&secret=" + testKeyHex, wantAddr: "2001:db8::1", wantPort: "443", wantType: SecretSimple},
 		{name: "decimal port normalization", link: "tg://proxy?server=a&port=00443&secret=" + testKeyHex, wantAddr: "a", wantPort: "443", wantType: SecretSimple},
 		{name: "malformed query", link: "tg://proxy?server=a&port=443&secret=" + testKeyHex + "&extra=%zz", wantErr: "query"},
 		{name: "duplicate server", link: "tg://proxy?server=a&server=b&port=443&secret=" + testKeyHex, wantErr: "duplicate"},
@@ -194,5 +195,33 @@ func TestMTProtoGeneralConfig(t *testing.T) {
 	}
 	if m.Name() != "mtproto" {
 		t.Errorf("Name() = %q", m.Name())
+	}
+}
+
+// A standard-base64 secret carries '+' literally, which ParseQuery would
+// otherwise turn into a space.
+func TestMTProtoParseStdBase64SecretWithPlus(t *testing.T) {
+	key := []byte{0xdd, 1, 2, 0xf8, 0, 0, 0xf8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	secret := base64.StdEncoding.EncodeToString(key)
+	if !strings.Contains(secret, "+") {
+		t.Fatalf("test secret %q has no '+'", secret)
+	}
+	m := NewMTProto("tg://proxy?server=1.2.3.4&port=443&secret=" + secret)
+	if err := m.Parse(); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if m.Secret.Type != SecretSecured || m.Secret.Hex() != hex.EncodeToString(key) {
+		t.Fatalf("secret = %v %s, want secured %x", m.Secret.Type, m.Secret.Hex(), key)
+	}
+}
+
+// net.JoinHostPort must see the bare IPv6 literal.
+func TestMTProtoBracketedIPv6Dial(t *testing.T) {
+	m := NewMTProto("tg://proxy?server=[::1]&port=443&secret=" + testKeyHex)
+	if err := m.Parse(); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.ConvertToGeneralConfig().Address; got != "::1" {
+		t.Fatalf("address = %q, want ::1", got)
 	}
 }

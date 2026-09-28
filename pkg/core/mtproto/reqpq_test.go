@@ -149,3 +149,55 @@ func TestParseResPQQuickAckIsNotATransportError(t *testing.T) {
 		}
 	}
 }
+
+func TestMsgIDSeqAdvances(t *testing.T) {
+	base := time.Unix(1_800_000_000, 250_000_000)
+	cases := []struct {
+		name  string
+		times []time.Time
+	}{
+		{"fixed clock", []time.Time{base, base, base, base}},
+		{"advancing clock", []time.Time{base, base.Add(time.Second), base.Add(2 * time.Second)}},
+		{"clock stepped backwards", []time.Time{base, base.Add(-time.Hour), base.Add(-2 * time.Hour), base}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var seq msgIDSeq
+			var last uint64
+			for i, now := range tc.times {
+				id := seq.next(now)
+				if id <= last && i > 0 {
+					t.Fatalf("id %d = %x, did not advance past %x", i, id, last)
+				}
+				if id%4 != 0 || uint32(id) == 0 {
+					t.Fatalf("id %d = %x is not a valid client ID", i, id)
+				}
+				last = id
+			}
+		})
+	}
+}
+
+func TestMsgIDSeqSkipsZeroLowWord(t *testing.T) {
+	seq := msgIDSeq{last: uint64(1_800_000_000)<<32 | 0xfffffffc}
+	id := seq.next(time.Unix(1_700_000_000, 0)) // behind the last ID
+	if id <= uint64(1_800_000_000)<<32|0xfffffffc {
+		t.Fatalf("id = %x, did not advance", id)
+	}
+	if uint32(id) == 0 || id%4 != 0 {
+		t.Fatalf("id = %x is not a valid client ID", id)
+	}
+}
+
+func TestTransportErrorMessages(t *testing.T) {
+	for code, want := range map[int32]string{
+		-404: "transport error -404",
+		-429: "rate-limiting",
+		-444: "invalid data center",
+		-500: "transport error -500",
+	} {
+		if got := (TransportError{Code: code}).Error(); !strings.Contains(got, want) {
+			t.Errorf("TransportError(%d) = %q, want it to mention %q", code, got, want)
+		}
+	}
+}
