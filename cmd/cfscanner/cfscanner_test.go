@@ -1,6 +1,7 @@
 package cfscanner
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -37,5 +38,48 @@ func TestValidateConfigLinkMentionsSpeedtestTop(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--speedtest-top") {
 		t.Fatalf("error %q should point users at --speedtest-top", err)
+	}
+}
+
+func TestCollectSubnets(t *testing.T) {
+	dir := t.TempDir()
+	file := dir + "/subnets.txt"
+	if err := os.WriteFile(file, []byte("# cloudflare\n104.16.0.0/13\n\n1.1.1.1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := collectSubnets([]string{file, "2606:4700::/32"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"104.16.0.0/13", "1.1.1.1/32", "2606:4700::/32"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for _, bad := range [][]string{{"1.2.3.0/40"}, {"not-a-subnet"}, {}, {dir + "/missing.txt"}} {
+		if _, err := collectSubnets(bad); err == nil {
+			t.Errorf("collectSubnets(%v) accepted", bad)
+		}
+	}
+	empty := dir + "/empty.txt"
+	_ = os.WriteFile(empty, []byte("# nothing\n"), 0o600)
+	if _, err := collectSubnets([]string{empty}); err == nil {
+		t.Error("empty subnet file accepted")
+	}
+}
+
+func TestOutputPath(t *testing.T) {
+	for in, want := range map[[2]string]string{
+		{"results.csv", "json"}: "results.json",
+		{"results.csv", "csv"}:  "results.csv",
+		{"out/scan", "jsonl"}:   "out/scan.jsonl",
+		{"-", "json"}:           "-",
+	} {
+		got, err := outputPath(in[0], in[1])
+		if err != nil || got != want {
+			t.Errorf("outputPath(%q, %q) = %q, %v; want %q", in[0], in[1], got, err, want)
+		}
+	}
+	if _, err := outputPath("results.csv", "xml"); err == nil {
+		t.Error("unknown type accepted")
 	}
 }

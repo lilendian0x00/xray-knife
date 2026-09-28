@@ -5,7 +5,6 @@ import (
 	"log"
 	"strings"
 	"testing"
-	"time"
 )
 
 // The scanner swaps the config's address for each scanned IP, so an MTProto
@@ -15,11 +14,7 @@ func TestScannerRejectsMTProtoConfig(t *testing.T) {
 		"tg://proxy?server=1.2.3.4&port=443&secret=00112233445566778899aabbccddeeff",
 		"https://t.me/proxy?server=1.2.3.4&port=443&secret=00112233445566778899aabbccddeeff",
 	} {
-		s, err := NewScannerService(ScannerConfig{ConfigLink: link}, log.New(io.Discard, "", 0))
-		if err != nil {
-			t.Fatalf("%s: %v", link, err)
-		}
-		_, _, err = s.createClientFromConfig("1.1.1.1", time.Second)
+		_, err := NewScannerService(ScannerConfig{ConfigLink: link, ThreadCount: 1, Subnets: []string{"1.1.1.1/32"}}, log.New(io.Discard, "", 0))
 		if err == nil {
 			t.Fatalf("%s: scanner accepted an mtproto config", link)
 		}

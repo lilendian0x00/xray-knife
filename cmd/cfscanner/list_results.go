@@ -1,16 +1,46 @@
 package cfscanner
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
 	"text/tabwriter"
+	"time"
 
 	"github.com/lilendian0x00/xray-knife/v11/database"
 	"github.com/spf13/cobra"
 )
 
-var listLimit int
+var (
+	listLimit int
+	listJSON  bool
+)
+
+// storedScan is a database row in the shape list-results prints as JSON.
+type storedScan struct {
+	IP            string    `json:"ip"`
+	LatencyMs     *int64    `json:"latencyMs,omitempty"`
+	DownloadMbps  float64   `json:"downloadMbps,omitempty"`
+	UploadMbps    float64   `json:"uploadMbps,omitempty"`
+	Error         string    `json:"error,omitempty"`
+	LastScannedAt time.Time `json:"lastScannedAt"`
+}
+
+func toStoredScan(res database.CfScanResult) storedScan {
+	out := storedScan{
+		IP:            res.IP,
+		DownloadMbps:  res.DownloadMbps.Float64,
+		UploadMbps:    res.UploadMbps.Float64,
+		Error:         res.Error.String,
+		LastScannedAt: res.LastScannedAt,
+	}
+	if res.LatencyMs.Valid {
+		ms := res.LatencyMs.Int64
+		out.LatencyMs = &ms
+	}
+	return out
+}
 
 // listResultsCmd prints CF scanner results from the database.
 var listResultsCmd = &cobra.Command{
@@ -20,6 +50,16 @@ var listResultsCmd = &cobra.Command{
 		results, err := database.GetCfScanHistory(listLimit)
 		if err != nil {
 			return err
+		}
+
+		if listJSON {
+			rows := make([]storedScan, 0, len(results))
+			for _, res := range results {
+				rows = append(rows, toStoredScan(res))
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(rows)
 		}
 
 		if len(results) == 0 {
@@ -67,5 +107,6 @@ var listResultsCmd = &cobra.Command{
 
 func init() {
 	listResultsCmd.Flags().IntVarP(&listLimit, "limit", "l", 100, "Limit the number of results to show")
+	listResultsCmd.Flags().BoolVarP(&listJSON, "json", "j", false, "Print the results as JSON")
 	CFscannerCmd.AddCommand(listResultsCmd)
 }
