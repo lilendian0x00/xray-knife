@@ -1,0 +1,74 @@
+name: Test
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: 1 # -race needs cgo
+    steps:
+      - name: Checkout codebase
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Generate compressed frontend assets
+        # web embeds dist-gzip, generated from the committed web/dist.
+        run: go generate ./web
+
+      - name: go vet
+        run: go vet -tags="with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc" ./...
+
+      - name: Cross-platform vet
+        run: |
+          GOOS=windows go vet ./...
+          GOOS=darwin go vet ./...
+
+      - name: Tests (race, short)
+        # -short skips tests that need the public internet (e.g. the
+        # sing-box outbound tests against live hosts).
+        run: go test -short -race -count=1 -timeout 15m -tags="with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc" ./...
+
+      - name: CLI shorthand surface
+        # Also part of the test run; kept as its own step so a flag-surface
+        # break is obvious in the checks list.
+        run: go test -count=1 -run 'Shorthand|FlagError|RemovedShorthand' ./cmd/
+
+      - name: Build release configuration
+        run: go build -trimpath -tags="with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc" -o /dev/null .
+
+  lint:
+    runs-on: ubuntu-latest
+    continue-on-error: true # advisory until the backlog is cleared
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Generate compressed frontend assets
+        run: go generate ./web
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l $(git ls-files '*.go'))
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed on:"; echo "$unformatted"; exit 1
+          fi
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+          args: --timeout=10m

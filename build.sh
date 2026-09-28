@@ -35,6 +35,10 @@ if [ ! -f "$SOURCE_FILE" ]; then
     exit 1
 fi
 
+# Refresh the compressed embedded frontend once, before any parallel builds.
+# Generate for the host even if the caller exports cross-compilation targets.
+GOOS=$(go env GOHOSTOS) GOARCH=$(go env GOHOSTARCH) go generate ./web
+
 # Create build directory if it doesn't exist
 mkdir -p "$BUILD_DIR"
 

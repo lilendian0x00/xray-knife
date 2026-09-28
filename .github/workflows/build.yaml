@@ -39,7 +39,7 @@ jobs:
 
     steps:
       - name: Checkout codebase
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Show workflow information
         run: |
@@ -48,12 +48,19 @@ jobs:
           echo "ASSET_NAME=$_NAME" >> $GITHUB_ENV
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version-file: go.mod
 
       - name: Download Project dependencies
         run: go mod download
+
+      - name: Generate compressed frontend assets
+        run: GOOS=$(go env GOHOSTOS) GOARCH=$(go env GOHOSTARCH) go generate ./web
+
+      - name: Verify embedded frontend
+        # web embeds dist-gzip; a build without it fails (or ships no UI).
+        run: test -s web/dist-gzip/index.html.gz
 
       - name: Build the application
         run: |
@@ -64,7 +71,7 @@ jobs:
             VERSION="$(git describe --tags --always 2>/dev/null || echo dev)"
             VERSION="${VERSION#v}"
           fi
-          go build -v -o build_assets/xray-knife -tags="with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc" -ldflags "-s -w -buildid= -X github.com/lilendian0x00/xray-knife/v11/cmd.version=${VERSION} ${{ matrix.extra_ldflags }}"
+          go build -v -trimpath -o build_assets/xray-knife -tags="with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc" -ldflags "-s -w -buildid= -X github.com/lilendian0x00/xray-knife/v11/cmd.version=${VERSION} ${{ matrix.extra_ldflags }}"
 
       - name: Rename Windows binary
         if: matrix.goos == 'windows'
@@ -100,6 +107,12 @@ jobs:
           name: Xray-knife-${{ env.ASSET_NAME }}
           path: ./Xray-knife-${{ env.ASSET_NAME }}/*
 
+      - name: Upload zip for the checksum job
+        uses: actions/upload-artifact@v4
+        with:
+          name: zip-${{ env.ASSET_NAME }}
+          path: ./Xray-knife-${{ env.ASSET_NAME }}.zip
+
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
         if: github.event_name == 'release'
@@ -108,3 +121,38 @@ jobs:
           file: ./Xray-knife-${{ env.ASSET_NAME }}.zip*
           tag: ${{ github.ref }}
           file_glob: true
+
+  checksums:
+    # One SHA256SUMS for every release zip, verifiable with
+    # `sha256sum -c --ignore-missing SHA256SUMS`.
+    needs: build
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release zips
+        uses: actions/download-artifact@v4
+        with:
+          pattern: zip-*
+          merge-multiple: true
+          path: dist
+
+      - name: Write SHA256SUMS
+        run: |
+          cd dist
+          sha256sum Xray-knife-*.zip | sort -k2 > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload SHA256SUMS to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SHA256SUMS
+          path: dist/SHA256SUMS
+
+      - name: Upload SHA256SUMS to release
+        uses: svenstaro/upload-release-action@v2
+        if: github.event_name == 'release'
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: dist/SHA256SUMS
+          tag: ${{ github.ref }}
