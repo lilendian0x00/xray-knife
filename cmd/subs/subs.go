@@ -16,9 +16,13 @@ and the proxy configs they contain.
 Examples:
   xray-knife subs add --url "https://example.com/sub" --remark "My VPN"
   xray-knife subs show
-  xray-knife subs fetch --id 1
+  xray-knife subs fetch --sub-id 1
   xray-knife subs fetch --all
-  xray-knife subs list-configs --id 1`,
+  xray-knife subs list-configs --sub-id 1`,
+	Args: cobra.NoArgs,
+	Run: func(cmd *cobra.Command, args []string) {
+		_ = cmd.Help()
+	},
 }
 
 func addSubcommandPalettes() {
@@ -28,6 +32,7 @@ func addSubcommandPalettes() {
 	SubsCmd.AddCommand(RmCmd)
 	SubsCmd.AddCommand(UpdateCmd)
 	SubsCmd.AddCommand(ListConfigsCmd)
+	SubsCmd.AddCommand(ExportCmd)
 }
 
 func init() {

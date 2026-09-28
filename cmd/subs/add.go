@@ -1,9 +1,6 @@
 package subs
 
 import (
-	"fmt"
-	"net/url"
-
 	"github.com/lilendian0x00/xray-knife/v11/database"
 	"github.com/lilendian0x00/xray-knife/v11/utils/customlog"
 	"github.com/spf13/cobra"
@@ -20,15 +17,16 @@ var AddCmd = &cobra.Command{
 	Use:   "add",
 	Short: "Adds a new subscription to the database",
 	Long: `Adds a new subscription URL to the local database.
-The subscription can later be fetched with 'subs fetch --id <ID>'.
+The subscription can later be fetched with 'subs fetch --sub-id <ID>'.
+Only http:// and https:// URLs are accepted.
 
 Examples:
   xray-knife subs add --url "https://example.com/sub"
   xray-knife subs add --url "https://example.com/sub" --remark "My VPN" --user-agent "clash"`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Validate URL before storing
-		if _, err := url.ParseRequestURI(addURL); err != nil {
-			return fmt.Errorf("invalid URL %q: %w", addURL, err)
+		if err := validateSubscriptionURL(addURL); err != nil {
+			return usageErr(err.Error())
 		}
 
 		err := database.AddSubscription(addURL, addRemark, addUserAgent)

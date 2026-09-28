@@ -24,18 +24,22 @@ var UpdateCmd = &cobra.Command{
 Only the fields you specify will be changed; others remain untouched.
 
 Examples:
-  xray-knife subs update --id 1 --remark "Renamed Sub"
-  xray-knife subs update --id 3 --enabled false
-  xray-knife subs update --id 2 --url "https://new-url.com/sub" --user-agent "clash"`,
+  xray-knife subs update --sub-id 1 --remark "Renamed Sub"
+  xray-knife subs update --sub-id 3 --enabled false
+  xray-knife subs update --sub-id 2 --url "https://new-url.com/sub" --user-agent "clash"`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if updateID == 0 {
-			return fmt.Errorf("--id is required")
+		if updateID <= 0 {
+			return usageErr("--sub-id is required")
 		}
 
 		var urlPtr, remarkPtr, uaPtr *string
 		var enabledPtr *bool
 
 		if cmd.Flags().Changed("url") {
+			if err := validateSubscriptionURL(updateURL); err != nil {
+				return usageErr(err.Error())
+			}
 			urlPtr = &updateURL
 		}
 		if cmd.Flags().Changed("remark") {
@@ -70,10 +74,10 @@ Examples:
 }
 
 func init() {
-	UpdateCmd.Flags().Int64Var(&updateID, "id", 0, "ID of the subscription to update (required)")
+	bindSubscriptionIDFlags(UpdateCmd, &updateID, "ID of the subscription to update (required)")
 	UpdateCmd.Flags().StringVarP(&updateURL, "url", "u", "", "New URL for the subscription")
 	UpdateCmd.Flags().StringVarP(&updateRemark, "remark", "r", "", "New remark (pass empty string to clear)")
 	UpdateCmd.Flags().StringVar(&updateUserAgent, "user-agent", "", "New User-Agent (pass empty string to clear)")
 	UpdateCmd.Flags().StringVar(&updateEnabled, "enabled", "", "Enable or disable the subscription (true/false)")
-	UpdateCmd.MarkFlagRequired("id")
+	_ = UpdateCmd.RegisterFlagCompletionFunc("enabled", cobra.FixedCompletions([]string{"true", "false"}, cobra.ShellCompDirectiveNoFileComp))
 }

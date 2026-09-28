@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -57,17 +58,22 @@ func (fc *FetchCommand) createCommand() *cobra.Command {
 		Long: `Fetches proxy configurations from one or more subscription sources.
 
 Supports multiple input modes:
-  --id <N>       Fetch from a subscription stored in the DB by its ID.
+  --sub-id <N>   Fetch from a subscription stored in the DB by its ID.
   --url <URL>    One-off fetch from a URL (configs saved to DB but not linked to a subscription).
   --all          Fetch from all enabled subscriptions in the DB.
-  --file <PATH>  Read subscription URLs from a file (one per line) and fetch each concurrently.
+  --file <PATH>  Read subscription URLs from a file (one per line, "-" for stdin,
+                 # comments allowed) and fetch each concurrently.
 
 Use --workers to control concurrency for --file and --all modes (default: 3).
 Fetched configs are parsed, deduplicated, and upserted into the local database.
-Fetched configs are also written to a file (default: configs.txt); pass --out "" to disable.
+Each config remembers every subscription that returned it (after upgrading an
+older database, run 'subs fetch --all' once so shared links know all their
+sources).
+Fetched configs are also written to a file (default: configs.txt); pass --out "" to disable,
+or --out - to print them to stdout. Links several sources return are written once.
 
 Examples:
-  xray-knife subs fetch --id 1
+  xray-knife subs fetch --sub-id 1
   xray-knife subs fetch --url "https://example.com/sub"
   xray-knife subs fetch --all
   xray-knife subs fetch --file urls.txt --workers 5
@@ -82,7 +88,7 @@ Examples:
 
 func (fc *FetchCommand) addFlags(cmd *cobra.Command) {
 	flags := cmd.Flags()
-	flags.Int64Var(&fc.config.SubscriptionID, "id", 0, "The ID of the subscription from the DB")
+	bindSubscriptionIDFlags(cmd, &fc.config.SubscriptionID, "The ID of the subscription from the DB")
 	flags.StringVarP(&fc.config.SubscriptionURL, "url", "u", "", "A one-off subscription URL to fetch from")
 	flags.StringVar(&fc.config.UserAgent, "user-agent", "", "Custom User-agent to be used (overrides DB value)")
 	flags.StringVar(&fc.config.UserAgent, "useragent", "", "Deprecated alias for --user-agent")
@@ -97,12 +103,17 @@ func (fc *FetchCommand) addFlags(cmd *cobra.Command) {
 	flags.IntVar(&fc.config.MaxLinks, "max-links", subscription.DefaultMaxLinks, "Maximum links per subscription")
 	flags.DurationVar(&fc.config.Timeout, "fetch-timeout", subscription.DefaultTimeout, "Overall timeout for each subscription fetch")
 
-	cmd.MarkFlagsMutuallyExclusive("id", "url", "all", "file")
+	cmd.MarkFlagsMutuallyExclusive("sub-id", "id", "url", "all", "file")
 }
 
 func (fc *FetchCommand) validateFlags(cmd *cobra.Command, args []string) error {
 	if fc.config.SubscriptionID == 0 && fc.config.SubscriptionURL == "" && !fc.config.FetchAll && fc.config.FileInput == "" {
-		return fmt.Errorf("one of --id, --url, --all, or --file must be provided")
+		return usageErr("one of --sub-id, --url, --all, or --file must be provided")
+	}
+	if fc.config.SubscriptionURL != "" {
+		if err := validateSubscriptionURL(fc.config.SubscriptionURL); err != nil {
+			return usageErr(err.Error())
+		}
 	}
 	if fc.config.MaxBytes <= 0 || fc.config.MaxBytes == math.MaxInt64 || fc.config.MaxLinks <= 0 || fc.config.Timeout <= 0 {
 		return fmt.Errorf("--max-bytes, --max-links, and --fetch-timeout must be positive and within supported limits")
@@ -155,14 +166,6 @@ func (fc *FetchCommand) fetchSingle(ctx context.Context) error {
 	return fc.doFetch(ctx, &subToFetch, subscriptionID)
 }
 
-// fetchResult stores per-URL results for concurrent fetching
-type fetchResult struct {
-	url      string
-	configs  []database.SubscriptionConfig
-	rawCount int
-	err      error
-}
-
 // fetchAllSubscriptions handles --all mode with concurrency
 func (fc *FetchCommand) fetchAllSubscriptions(ctx context.Context) error {
 	subs, err := database.ListSubscriptions()
@@ -213,6 +216,7 @@ func (fc *FetchCommand) fetchAllSubscriptions(ctx context.Context) error {
 			customlog.Printf(customlog.Processing, "[%d/%d] Fetching %q (%s)\n", idx, len(enabled), remark, sub.URL)
 
 			subToFetch := Subscription{
+				Remark:    remark,
 				Url:       sub.URL,
 				UserAgent: sub.UserAgent.String,
 				Proxy:     fc.config.Proxy,
@@ -258,27 +262,39 @@ func (fc *FetchCommand) fetchAllSubscriptions(ctx context.Context) error {
 	pool.StopAndWait()
 
 	failed := atomic.LoadInt32(&failedCount)
-	customlog.Printf(customlog.Finished, "All done: %d links fetched, %d configs saved, %d failed.\n", totalRaw, len(allConfigs), failed)
+	unique := dedupeConfigs(allConfigs)
+	customlog.Printf(customlog.Finished, "All done: %d links fetched, %d unique configs saved, %d failed.\n", totalRaw, len(unique), failed)
 
-	if fc.config.OutputFile != "" && len(allConfigs) > 0 {
-		if err := fc.saveConfigsToFile(allConfigs); err != nil {
-			return fmt.Errorf("failed to save configurations to file: %w", err)
-		}
-		customlog.Printf(customlog.Success, "%d configs have been written into %q\n", len(allConfigs), fc.config.OutputFile)
+	if err := fc.writeOutput(unique); err != nil {
+		return err
 	}
 
 	if failed > 0 {
 		return fmt.Errorf("%d out of %d subscriptions failed to fetch", failed, len(enabled))
 	}
-	fc.printNextStep(len(allConfigs))
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	fc.printNextStep(len(unique))
 	return nil
 }
 
 // fetchFromFile handles --file mode with concurrency via pond
 func (fc *FetchCommand) fetchFromFile(ctx context.Context) error {
-	urls := utils.ParseFileByNewline(fc.config.FileInput)
+	lines, err := utils.ReadLinks(fc.config.FileInput)
+	if err != nil {
+		return err
+	}
+	var urls []string
+	for _, line := range lines {
+		if err := validateSubscriptionURL(line); err != nil {
+			customlog.Printf(customlog.Warning, "Skipping %v\n", err)
+			continue
+		}
+		urls = append(urls, line)
+	}
 	if len(urls) == 0 {
-		return fmt.Errorf("no URLs found in file %q", fc.config.FileInput)
+		return fmt.Errorf("no valid http(s) URLs found in %q", fc.config.FileInput)
 	}
 
 	workers := fc.config.Workers
@@ -348,19 +364,20 @@ func (fc *FetchCommand) fetchFromFile(ctx context.Context) error {
 	pool.StopAndWait()
 
 	failed := atomic.LoadInt32(&failedCount)
-	customlog.Printf(customlog.Finished, "All done: %d links fetched, %d configs saved, %d failed.\n", totalRaw, len(allConfigs), failed)
+	unique := dedupeConfigs(allConfigs)
+	customlog.Printf(customlog.Finished, "All done: %d links fetched, %d unique configs saved, %d failed.\n", totalRaw, len(unique), failed)
 
-	if fc.config.OutputFile != "" && len(allConfigs) > 0 {
-		if err := fc.saveConfigsToFile(allConfigs); err != nil {
-			return fmt.Errorf("failed to save configurations to file: %w", err)
-		}
-		customlog.Printf(customlog.Success, "%d configs have been written into %q\n", len(allConfigs), fc.config.OutputFile)
+	if err := fc.writeOutput(unique); err != nil {
+		return err
 	}
 
 	if failed > 0 {
 		return fmt.Errorf("%d out of %d URLs failed to fetch", failed, len(urls))
 	}
-	fc.printNextStep(len(allConfigs))
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	fc.printNextStep(len(unique))
 	return nil
 }
 
@@ -372,12 +389,13 @@ func (fc *FetchCommand) doFetch(ctx context.Context, sub *Subscription, subscrip
 	}
 
 	dbConfigs, unparsable := fc.parseLinks(rawLinks, subscriptionID)
+	dbConfigs = dedupeConfigs(dbConfigs)
 	if unparsable > 0 {
 		customlog.Printf(customlog.Warning, "%d link(s) could not be parsed; saved with unknown protocol.\n", unparsable)
 	}
 	if len(dbConfigs) == 0 {
 		customlog.Printf(customlog.Warning, "No valid configs found.\n")
-		return nil
+		return fc.writeOutput(nil)
 	}
 
 	if err := database.UpsertSubscriptionConfigs(dbConfigs); err != nil {
@@ -391,14 +409,50 @@ func (fc *FetchCommand) doFetch(ctx context.Context, sub *Subscription, subscrip
 		}
 	}
 
-	if fc.config.OutputFile != "" {
-		if err := fc.saveConfigsToFile(dbConfigs); err != nil {
-			return fmt.Errorf("failed to save configurations to file: %w", err)
-		}
-		customlog.Printf(customlog.Success, "%d configs have been written into %q\n", len(dbConfigs), fc.config.OutputFile)
+	if err := fc.writeOutput(dbConfigs); err != nil {
+		return err
 	}
 
 	fc.printNextStep(len(dbConfigs))
+	return nil
+}
+
+// dedupeConfigs drops repeated links (the same link from several sources, or
+// twice in one source), keeping the first occurrence.
+func dedupeConfigs(configs []database.SubscriptionConfig) []database.SubscriptionConfig {
+	seen := make(map[string]struct{}, len(configs))
+	out := configs[:0:0]
+	for _, c := range configs {
+		if _, dup := seen[c.ConfigLink]; dup {
+			continue
+		}
+		seen[c.ConfigLink] = struct{}{}
+		out = append(out, c)
+	}
+	return out
+}
+
+// writeOutput writes the fetched links to --out. With nothing fetched the
+// previous file is left alone (it may hold the last good fetch) but the user
+// is told it is stale, rather than left to test yesterday's links.
+func (fc *FetchCommand) writeOutput(configs []database.SubscriptionConfig) error {
+	if fc.config.OutputFile == "" {
+		return nil
+	}
+	if len(configs) == 0 {
+		if fc.config.OutputFile != "-" {
+			if _, err := os.Stat(fc.config.OutputFile); err == nil {
+				customlog.Printf(customlog.Warning, "Nothing fetched; %q was not updated and still holds the previous fetch.\n", fc.config.OutputFile)
+			}
+		}
+		return nil
+	}
+	if err := fc.saveConfigsToFile(configs); err != nil {
+		return fmt.Errorf("failed to save configurations to file: %w", err)
+	}
+	if fc.config.OutputFile != "-" {
+		customlog.Printf(customlog.Success, "%d configs have been written into %q\n", len(configs), fc.config.OutputFile)
+	}
 	return nil
 }
 
@@ -424,27 +478,11 @@ func (fc *FetchCommand) parseLinks(rawLinks []string, subID sql.NullInt64) ([]da
 			LastSeenAt:     database.NullTime{Time: now, Valid: true},
 		}
 
-		// Parse protocol info with panic recovery — malformed links must not
-		// crash the program, but they do get counted.
-		parsed := func() (ok bool) {
-			defer func() {
-				if r := recover(); r != nil {
-					ok = false
-				}
-			}()
-			proto, err := fc.core.CreateProtocol(trimmedLink)
-			if err != nil {
-				return false
-			}
-			if err := proto.Parse(); err != nil {
-				return false
-			}
-			g := proto.ConvertToGeneralConfig()
-			dbConf.Protocol = sql.NullString{String: g.Protocol, Valid: g.Protocol != ""}
-			dbConf.Remark = sql.NullString{String: g.Remark, Valid: g.Remark != ""}
-			return g.Protocol != ""
-		}()
-
+		// Malformed links (a parser panic included) must not crash the
+		// program, but they do get counted.
+		proto, remark, parsed := core.DescribeLink(fc.core, trimmedLink)
+		dbConf.Protocol = sql.NullString{String: proto, Valid: proto != ""}
+		dbConf.Remark = sql.NullString{String: remark, Valid: remark != ""}
 		if !parsed {
 			unparsable++
 		}
@@ -461,7 +499,7 @@ func (fc *FetchCommand) printNextStep(saved int) {
 	if saved == 0 {
 		return
 	}
-	if fc.config.OutputFile != "" {
+	if fc.config.OutputFile != "" && fc.config.OutputFile != "-" {
 		customlog.Printf(customlog.Info, "Next: xray-knife http -f %s\n", fc.config.OutputFile)
 		return
 	}
@@ -482,5 +520,16 @@ func (fc *FetchCommand) fetchSource(ctx context.Context, sub *Subscription) ([]s
 	sub.MaxBytes = fc.config.MaxBytes
 	sub.MaxLinks = fc.config.MaxLinks
 	sub.Timeout = fc.config.Timeout
-	return sub.FetchAllContext(ctx)
+	links, err := sub.FetchAllContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if summary := formatSummary(sub.Format, len(links), sub.Skipped); summary != "" {
+		label := sub.Remark
+		if label == "" {
+			label = sub.Url
+		}
+		customlog.Printf(customlog.Info, "%s: %s\n", label, summary)
+	}
+	return links, nil
 }
