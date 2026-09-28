@@ -12,7 +12,6 @@ import (
 
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core"
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/protocol"
-	"github.com/lilendian0x00/xray-knife/v11/pkg/netbind"
 )
 
 const (
@@ -34,6 +33,17 @@ type PrescanOptions struct {
 	// BindInterface pins dials to a specific OS interface, mirroring the
 	// examiner so reachability matches the real test path. Empty disables it.
 	BindInterface string
+	// Resolver, when set, is compared with the system resolver so an endpoint
+	// whose name the system DNS poisons is reported as dns-poisoned.
+	Resolver Resolver
+}
+
+// PrescanDrop is a link the pre-check filtered out, and why.
+type PrescanDrop struct {
+	Link     string
+	Endpoint string
+	Kind     string // a Fail* kind: dns, dns-poisoned, tcp-refused, tcp-timeout, ...
+	Detail   string
 }
 
 // PrescanResult summarizes a single pre-scan pass.
@@ -51,6 +61,31 @@ type PrescanResult struct {
 	FilteredOut int
 	// UniqueEndpoints is the number of distinct host:port pairs dialed.
 	UniqueEndpoints int
+	// Dropped lists the filtered-out links with the failure kind, in input
+	// order, so callers can report them instead of silently losing them.
+	Dropped []PrescanDrop
+	// ReachableParsed is Reachable as parsed links (RunPrescanParsed only),
+	// ready for TestManager.RunParsed without parsing again.
+	ReachableParsed []*ParsedLink
+}
+
+// DroppedResults turns the filtered-out links into failed results. Links
+// the pre-scan never checked because it was stopped (kind FailCanceled)
+// are left out: they are not a verdict, and saving them as failures would
+// mark untested configs dead.
+func (r *PrescanResult) DroppedResults() []*Result {
+	out := make([]*Result, 0, len(r.Dropped))
+	for _, d := range r.Dropped {
+		if d.Kind == FailCanceled {
+			continue
+		}
+		res := newResult(d.Link)
+		res.Status = StatusFailed
+		res.FailureKind = d.Kind
+		res.Reason = "prescan: " + diagnosisPrefix + d.Kind + ": " + d.Detail
+		out = append(out, &res)
+	}
+	return out
 }
 
 // RunPrescan performs a fast TCP reachability pre-check over links and returns
@@ -67,15 +102,29 @@ type PrescanResult struct {
 // before dialing begins. onProgress, if non-nil, is called once per endpoint
 // dialed. Both may be nil.
 func RunPrescan(ctx context.Context, c core.Core, links []string, opts PrescanOptions, onStart func(uniqueEndpoints int), onProgress func()) (*PrescanResult, error) {
-	// Interface binding is resolved once so a bad --bind value fails fast.
-	binder, err := netbind.New(opts.BindInterface)
-	if err != nil {
-		return nil, err
+	// Links that are empty after trimming are kept as bypassed, as before.
+	parsed := make([]*ParsedLink, len(links))
+	for i, link := range links {
+		parsed[i] = ParseLink(c, link)
 	}
+	res, err := RunPrescanParsed(ctx, parsed, opts, onStart, onProgress)
+	if res != nil {
+		res.ReachableParsed = nil // string callers re-parse per test
+	}
+	return res, err
+}
 
+// RunPrescanParsed is RunPrescan over links parsed by ParseLinks. Dropped
+// links release their parsed protocol; survivors are in ReachableParsed.
+func RunPrescanParsed(ctx context.Context, links []*ParsedLink, opts PrescanOptions, onStart func(uniqueEndpoints int), onProgress func()) (*PrescanResult, error) {
 	timeout := opts.Timeout
 	if timeout <= 0 {
 		timeout = defaultPrescanTimeout
+	}
+	// Interface binding is resolved once so a bad --bind value fails fast.
+	diag, err := NewDiagnoser(opts.Resolver, opts.BindInterface, timeout)
+	if err != nil {
+		return nil, err
 	}
 
 	// Decide each link's fate up front: "" means bypass (keep without dialing),
@@ -83,8 +132,8 @@ func RunPrescan(ctx context.Context, c core.Core, links []string, opts PrescanOp
 	endpoints := make([]string, len(links))
 	uniq := make(map[string]struct{})
 	res := &PrescanResult{}
-	for i, link := range links {
-		ep := endpointForLink(c, link)
+	for i, pl := range links {
+		ep := endpointForProto(pl.Proto)
 		endpoints[i] = ep
 		if ep == "" {
 			continue
@@ -98,7 +147,7 @@ func RunPrescan(ctx context.Context, c core.Core, links []string, opts PrescanOp
 	}
 
 	// Dial each unique endpoint once, concurrently.
-	reachable := make(map[string]bool, len(uniq))
+	verdicts := make(map[string]ServerDiagnosis, len(uniq))
 	var mu sync.Mutex
 
 	workers := opts.Workers
@@ -119,9 +168,10 @@ func RunPrescan(ctx context.Context, c core.Core, links []string, opts PrescanOp
 	for ep := range uniq {
 		endpoint := ep
 		group.Submit(func() {
-			ok := dialTCP(group.Context(), binder, endpoint, timeout)
+			host, port, _ := net.SplitHostPort(endpoint)
+			verdict := diag.Server(group.Context(), ServerCheck{Host: host, Port: port})
 			mu.Lock()
-			reachable[endpoint] = ok
+			verdicts[endpoint] = verdict
 			mu.Unlock()
 			if onProgress != nil {
 				onProgress()
@@ -132,37 +182,39 @@ func RunPrescan(ctx context.Context, c core.Core, links []string, opts PrescanOp
 
 	// Assemble survivors, preserving input order.
 	res.Reachable = make([]string, 0, len(links))
-	for i, link := range links {
+	res.ReachableParsed = make([]*ParsedLink, 0, len(links))
+	for i, pl := range links {
+		link := pl.Link
 		ep := endpoints[i]
 		if ep == "" {
 			res.Bypassed++
 			res.Reachable = append(res.Reachable, link)
+			res.ReachableParsed = append(res.ReachableParsed, pl)
 			continue
 		}
-		if reachable[ep] {
+		v, dialed := verdicts[ep]
+		if dialed && v.Kind == "" {
 			res.TCPReachable++
 			res.Reachable = append(res.Reachable, link)
-		} else {
-			res.FilteredOut++
+			res.ReachableParsed = append(res.ReachableParsed, pl)
+			continue
 		}
+		pl.release()
+		if !dialed || v.Kind == FailCanceled {
+			v = ServerDiagnosis{Kind: FailCanceled, Detail: "pre-scan stopped before this endpoint was checked"}
+		}
+		res.FilteredOut++
+		res.Dropped = append(res.Dropped, PrescanDrop{Link: link, Endpoint: ep, Kind: v.Kind, Detail: v.Detail})
 	}
 
 	return res, nil
 }
 
-// endpointForLink returns the "host:port" to TCP-dial for a config link, or ""
-// when the link should bypass the TCP check (UDP-based, unparseable, or no
-// dialable endpoint).
-func endpointForLink(c core.Core, link string) string {
-	link = strings.TrimSpace(link)
-	if link == "" {
-		return ""
-	}
-	proto, err := c.CreateProtocol(link)
-	if err != nil {
-		return ""
-	}
-	if err := proto.Parse(); err != nil {
+// endpointForProto returns the "host:port" to TCP-dial for a parsed config,
+// or "" when it should bypass the TCP check (UDP-based, unparseable (nil),
+// or no dialable endpoint).
+func endpointForProto(proto protocol.Protocol) string {
+	if proto == nil {
 		return ""
 	}
 	gc := proto.ConvertToGeneralConfig()
@@ -188,7 +240,7 @@ func endpointForLink(c core.Core, link string) string {
 // TCP-dialable), so a TCP pre-check would produce a false negative.
 func isUDPBased(gc protocol.GeneralConfig) bool {
 	switch strings.ToLower(gc.Protocol) {
-	case protocol.Hysteria2Identifier, "hy2", protocol.WireguardIdentifier, protocol.TunIdentifier:
+	case protocol.Hysteria2Identifier, "hy2", protocol.WireguardIdentifier, protocol.TunIdentifier, protocol.TuicIdentifier, protocol.HysteriaIdentifier:
 		return true
 	}
 	// The transport network lives in different GeneralConfig fields depending
@@ -200,17 +252,4 @@ func isUDPBased(gc protocol.GeneralConfig) bool {
 		}
 	}
 	return false
-}
-
-// dialTCP performs a single TCP handshake to endpoint and reports success.
-// It honors the optional interface binder (no-op when nil/disabled).
-func dialTCP(ctx context.Context, binder *netbind.Binder, endpoint string, timeout time.Duration) bool {
-	d := &net.Dialer{Timeout: timeout}
-	binder.ApplyDialer(d)
-	conn, err := d.DialContext(ctx, "tcp", endpoint)
-	if err != nil {
-		return false
-	}
-	_ = conn.Close()
-	return true
 }

@@ -12,6 +12,11 @@ import (
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/protocol"
 )
 
+// endpointForLink is endpointForProto for a share link.
+func endpointForLink(c core.Core, link string) string {
+	return endpointForProto(ParseLink(c, link).Proto)
+}
+
 func TestIsUDPBased(t *testing.T) {
 	cases := []struct {
 		name string

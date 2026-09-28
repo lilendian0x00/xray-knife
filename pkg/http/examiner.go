@@ -3,6 +3,7 @@ package http
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"github.com/fatih/color"
 
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core"
+	"github.com/lilendian0x00/xray-knife/v11/pkg/core/fragment"
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/protocol"
 	"github.com/lilendian0x00/xray-knife/v11/pkg/netbind"
 )
@@ -48,10 +50,23 @@ type Result struct {
 	ConnectTime   int64             `csv:"connect_time" json:"connectTime"` // Connection time (ms)
 	SuccessCount  int               `csv:"success" json:"successCount"`     // Endpoints that passed (multi-endpoint panel)
 	TotalCount    int               `csv:"total" json:"totalCount"`         // Endpoints probed (multi-endpoint panel)
-	// Per-endpoint visibility: EndpointResults is the structured breakdown
-	// (JSON/web), EndpointSummary is a compact one-line form (CSV/logs).
+	// EndpointResults is the structured result
 	EndpointResults []EndpointResult `csv:"-" json:"endpoints,omitempty"`
 	EndpointSummary string           `csv:"endpoints" json:"endpointSummary"`
+	// Latency spread over a native probe's samples, in ms. Zero elsewhere
+	RTTMin     int64 `csv:"rtt_min" json:"rttMin"`
+	RTTAvg     int64 `csv:"rtt_avg" json:"rttAvg"`
+	RTTMax     int64 `csv:"rtt_max" json:"rttMax"`
+	Jitter     int64 `csv:"jitter" json:"jitter"`
+	RTTSamples int   `csv:"rtt_samples" json:"rttSamples"`
+	// Exit-side details from the Cloudflare trace. Appended last so CSV files
+	// written before they existed keep a prefix-compatible header.
+	Colo string `csv:"colo" json:"colo"` // Cloudflare data center that served the trace (e.g. FRA)
+	Warp string `csv:"warp" json:"warp"` // WARP state reported by the trace (off/on/plus)
+	// FailureKind says why a non-passed config failed (see the Fail*
+	// constants): blocked on the way (dns-poisoned, tcp-reset, tls-reset…)
+	// versus a dead server or wrong config. Empty for passed results.
+	FailureKind string `csv:"failure_kind" json:"failureKind,omitempty"`
 }
 
 // appendReason adds a note to Reason, keeping any note already recorded.
@@ -62,23 +77,22 @@ func (r *Result) appendReason(reason string) {
 	r.Reason += reason
 }
 
-// EndpointCheck describes a single destination probed while grading a config.
-// ExpectStatus is the exact HTTP status required for the check to count as a
-// success; 0 means any 2xx response is accepted.
+// EndpointCheck is one destination probed while grading a config. ExpectStatus
+// is the exact status required, or 0 to accept any 2xx.
 type EndpointCheck struct {
 	URL          string `json:"url"`
 	Method       string `json:"method"`
 	ExpectStatus int    `json:"expectStatus"`
 }
 
-// EndpointResult records the outcome of probing one panel endpoint, so callers
-// can see which destination failed and why — not just the aggregate count.
+// EndpointResult records one panel endpoint's outcome, so callers see which
+// destination failed and why, not just the aggregate count.
 type EndpointResult struct {
 	URL      string `json:"url"`
 	Label    string `json:"label"`            // short host label, e.g. "gstatic.com"
 	Outcome  string `json:"outcome"`          // ok, slow, bad-status, error
 	HTTPCode int    `json:"code"`             // -1 when no response
-	Delay    int64  `json:"delay"`            // ms; -1 when no response
+	Delay    int64  `json:"delay"`            // ms, -1 when no response
 	Reason   string `json:"reason,omitempty"` // populated on failure
 }
 
@@ -118,10 +132,8 @@ func summarizeEndpoints(results []EndpointResult) string {
 	return strings.Join(parts, "; ")
 }
 
-// statusOK reports whether an HTTP status code satisfies an endpoint's
-// expectation. When expect is 0, any 2xx code passes; otherwise the code must
-// match exactly — so a captive portal answering 200 to a generate_204 probe is
-// correctly rejected instead of counted as working.
+// statusOK checks a status against an endpoint's expectation. 0 accepts any 2xx,
+// otherwise the match is exact, so a captive portal answering 200 is rejected.
 func statusOK(code, expect int) bool {
 	if expect != 0 {
 		return code == expect
@@ -129,9 +141,8 @@ func statusOK(code, expect int) bool {
 	return code >= 200 && code < 300
 }
 
-// expectedStatusFor infers the success code for a URL when the caller did not
-// set one explicitly: generate_204 endpoints must answer 204, everything else
-// accepts any 2xx.
+// expectedStatusFor infers a URL's success code when the caller set none.
+// generate_204 endpoints must answer 204, everything else accepts any 2xx.
 func expectedStatusFor(rawURL string) int {
 	if strings.Contains(rawURL, "generate_204") {
 		return 204
@@ -139,10 +150,8 @@ func expectedStatusFor(rawURL string) int {
 	return 0
 }
 
-// CheckPresets are named, network-diverse endpoint panels. Each spans a
-// distinct provider/DNS zone, so a config that only reaches one CDN (a common
-// failure of Cloudflare-fronted or server-side-DNS-broken proxies) is graded as
-// partial rather than fully working.
+// CheckPresets are named, network-diverse endpoint panels. Each spans a distinct
+// provider zone, so a config that only reaches one CDN grades as partial.
 var CheckPresets = map[string][]EndpointCheck{
 	// cloudflare is the single-endpoint default: just the Cloudflare trace URL.
 	"cloudflare": {
@@ -184,15 +193,9 @@ func PresetNames() []string {
 type Examiner struct {
 	Core core.Core
 
-	// Related to automatic core //
-	SelectedCore map[string]core.Core
-	xrayCore     core.Core
-	singboxCore  core.Core
-	// =========================== //
-
-	// Maximum allowed delay (in ms) — used as the pass/fail latency threshold
+	// Maximum allowed delay (ms), the pass/fail latency threshold
 	MaxDelay uint16
-	// Connection timeout (in ms) — used for the HTTP client timeout
+	// Connection timeout (ms) for the HTTP client
 	Timeout     uint16
 	Verbose     bool
 	ShowBody    bool
@@ -203,9 +206,8 @@ type Examiner struct {
 
 	TestEndpoint           string
 	TestEndpointHttpMethod string
-	// TestEndpoints, when non-empty, replaces the single TestEndpoint with a
-	// diverse panel: the config is probed against every entry and graded by how
-	// many succeed (see SuccessThreshold).
+	// TestEndpoints, when non-empty, replaces TestEndpoint with a panel graded by
+	// how many entries succeed (see SuccessThreshold).
 	TestEndpoints     []EndpointCheck
 	SuccessThreshold  float64
 	SpeedtestKbAmount uint64
@@ -216,8 +218,40 @@ type Examiner struct {
 	// Empty disables binding.
 	BindInterface string
 
+	// ProbeSamples is the round trips a native probe measures per test,
+	// 1..protocol.MaxProbeSamples. Ignored by the HTTP path.
+	ProbeSamples int
+
+	// Fragment is the TLS fragmentation/noise the core applies to the first
+	// hop (nil = off). Informational here: it is baked into Core.
+	Fragment *fragment.Options
+
+	// SpeedTester is the speed test target; nil uses speed.cloudflare.com.
+	SpeedTester *SpeedTester
+
+	// Diagnoser, when set, checks a failed config's server directly (DNS,
+	// TCP, TLS ClientHello) to tell blocking from a dead or misconfigured
+	// proxy. NewExaminer sets it unless Options.NoDiagnose.
+	Diagnoser *Diagnoser
+
 	Logger *log.Logger `json:"-"`
 }
+
+// Result statuses. StatusCanceled marks a test the run stopped before it
+// could finish; it is never persisted as a verdict on the config.
+const (
+	StatusPassed     = "passed"
+	StatusSemiPassed = "semi-passed"
+	StatusFailed     = "failed"
+	StatusTimeout    = "timeout"
+	StatusBroken     = "broken"
+	StatusCanceled   = "canceled"
+)
+
+// maxDelayBody caps how much of a latency probe's response body is read.
+// Trace and generate_204 bodies are tiny; an unexpected large page must not
+// turn a latency test into a download.
+const maxDelayBody = 1 << 20
 
 const FailedDelay int64 = -1
 const defaultSpeedtestTimeout = 30 * time.Second
@@ -235,16 +269,32 @@ type Options struct {
 	DoIPInfo               bool   `json:"doIPInfo"`
 	TestEndpoint           string `json:"destURL"`
 	TestEndpointHttpMethod string `json:"httpMethod"`
-	// TestEndpoints, when non-empty, enables multi-endpoint grading (overrides
-	// the single TestEndpoint). SuccessThreshold is the fraction of endpoints
-	// that must pass for a "passed" verdict (0 defaults to 1.0 = all).
+	// TestEndpoints, when non-empty, overrides TestEndpoint. SuccessThreshold is
+	// the fraction that must pass for a "passed" verdict, 0 meaning all.
 	TestEndpoints     []EndpointCheck `json:"testEndpoints,omitempty"`
 	SuccessThreshold  float64         `json:"successThreshold,omitempty"`
 	SpeedtestKbAmount uint64          `json:"speedtestAmount"`
 	SpeedtestTimeout  uint16          `json:"speedtestTimeout,omitempty"`
 	Retries           uint8           `json:"retries"`
 	BindInterface     string          `json:"bindInterface,omitempty"`
-	Logger            *log.Logger     `json:"-"`
+	ProbeSamples      int             `json:"probeSamples,omitempty"`
+	// Fragment splits the first hop's TLS handshake (see pkg/core/fragment).
+	// FragmentSpec is the "packets,length[,interval]" string form, used when
+	// Fragment is nil (handy for JSON clients).
+	Fragment     *fragment.Options `json:"fragment,omitempty"`
+	FragmentSpec string            `json:"fragmentSpec,omitempty"`
+	// SpeedtestURL overrides the speed test target. A bare origin
+	// (https://host) must speak Cloudflare's /__down and /__up; a URL with a
+	// path is downloaded as a plain file and upload is skipped.
+	SpeedtestURL string `json:"speedtestURL,omitempty"`
+	// Resolver is used for diagnostics only (never inside the cores):
+	// doh://host, https://host/dns-query, or an IP[:port] for plain DNS.
+	// Comparing its answers with the system resolver's exposes poisoning.
+	Resolver string `json:"resolver,omitempty"`
+	// NoDiagnose skips the direct server checks on failed configs; failure
+	// kinds then fall back to the raw error class.
+	NoDiagnose bool        `json:"noDiagnose,omitempty"`
+	Logger     *log.Logger `json:"-"`
 }
 
 func NewExaminer(opts Options) (*Examiner, error) {
@@ -289,8 +339,57 @@ func NewExaminer(opts Options) (*Examiner, error) {
 		e.SuccessThreshold = 1.0
 	}
 
+	e.ProbeSamples = opts.ProbeSamples
+	if e.ProbeSamples == 0 {
+		e.ProbeSamples = 1
+	}
+	if e.ProbeSamples < 1 || e.ProbeSamples > protocol.MaxProbeSamples {
+		return nil, fmt.Errorf("examiner: probe samples must be between 1 and %d, got %d", protocol.MaxProbeSamples, opts.ProbeSamples)
+	}
+
 	e.Retries = opts.Retries
 	e.BindInterface = opts.BindInterface
+
+	e.Fragment = opts.Fragment.Clone()
+	if e.Fragment == nil && strings.TrimSpace(opts.FragmentSpec) != "" {
+		f, err := fragment.Parse(opts.FragmentSpec)
+		if err != nil {
+			return nil, fmt.Errorf("examiner: %w", err)
+		}
+		e.Fragment = f
+	}
+	if err := e.Fragment.Validate(); err != nil {
+		return nil, fmt.Errorf("examiner: %w", err)
+	}
+
+	if opts.SpeedtestURL != "" {
+		st, err := NewSpeedTester(opts.SpeedtestURL)
+		if err != nil {
+			return nil, fmt.Errorf("examiner: %w", err)
+		}
+		e.SpeedTester = st
+	}
+
+	if !opts.NoDiagnose {
+		var trusted Resolver
+		if strings.TrimSpace(opts.Resolver) != "" {
+			r, err := NewResolver(opts.Resolver, opts.BindInterface)
+			if err != nil {
+				return nil, fmt.Errorf("examiner: %w", err)
+			}
+			trusted = r
+		}
+		// Short steps: a dead server already cost the tunnel attempt its
+		// full timeout, and this only has to tell the layers apart.
+		step := min(time.Duration(e.Timeout)*time.Millisecond, 3*time.Second)
+		d, err := NewDiagnoser(trusted, opts.BindInterface, step)
+		if err != nil {
+			return nil, fmt.Errorf("examiner: %w", err)
+		}
+		e.Diagnoser = d
+	} else if strings.TrimSpace(opts.Resolver) != "" {
+		return nil, errors.New("examiner: a resolver needs diagnostics enabled")
+	}
 	if e.BindInterface != "" {
 		if _, err := netbind.New(e.BindInterface); err != nil {
 			return nil, fmt.Errorf("examiner: %w", err)
@@ -308,6 +407,7 @@ func NewExaminer(opts Options) (*Examiner, error) {
 		InsecureTLS:   e.InsecureTLS,
 		Verbose:       e.Verbose,
 		BindInterface: e.BindInterface,
+		Fragment:      e.Fragment,
 	}
 	switch opts.Core {
 	case "xray":
@@ -342,14 +442,17 @@ func parseTraceBody(body []byte, r *Result) {
 				r.RealIPAddr = val
 			case "loc":
 				r.IpAddrLoc = val
+			case "colo":
+				r.Colo = val
+			case "warp":
+				r.Warp = val
 			}
 		}
 	}
 }
 
-// checks returns the effective endpoint panel for a test. An explicit panel is
-// used as-is (filling in per-endpoint defaults); otherwise it falls back to the
-// single legacy TestEndpoint, preserving the original single-URL behavior.
+// checks returns the effective endpoint panel, filling in per-endpoint defaults.
+// With no explicit panel it falls back to the single legacy TestEndpoint.
 func (e *Examiner) checks() []EndpointCheck {
 	src := e.TestEndpoints
 	if len(src) == 0 {
@@ -368,9 +471,8 @@ func (e *Examiner) checks() []EndpointCheck {
 	return out
 }
 
-// passesThreshold reports whether the success ratio clears the "passed" bar.
-// All endpoints passing always qualifies; otherwise successes/total must be at
-// least threshold (a small epsilon absorbs float rounding).
+// passesThreshold reports whether the success ratio clears the "passed" bar. All
+// passing always qualifies, otherwise successes/total must reach threshold.
 func passesThreshold(successes, total int, threshold float64) bool {
 	if total <= 0 {
 		return false
@@ -381,9 +483,94 @@ func passesThreshold(successes, total int, threshold float64) bool {
 	return float64(successes)/float64(total)+1e-9 >= threshold
 }
 
+// failureInfo is what examine learned that classifying a failure needs.
+type failureInfo struct {
+	general      *protocol.GeneralConfig
+	transportErr error // first error from the tunnel, nil if every endpoint answered
+	prober       bool
+}
+
+// ExamineConfig tests one config. A result that did not pass carries a
+// FailureKind, and, when a direct server check explains the failure, a
+// "diagnosis: <kind>: <detail>" note in Reason.
 func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, error) {
+	return e.ExamineParsed(ctx, ParseLink(e.Core, link))
+}
+
+// ExamineParsed tests a link parsed by ParseLink/ParseLinks, without parsing
+// it again. The parsed protocol must come from a core compatible with e.Core.
+func (e *Examiner) ExamineParsed(ctx context.Context, pl *ParsedLink) (Result, error) {
+	pl.ensureParsed(e.Core)
+	var info failureInfo
+	r, err := e.examine(ctx, pl, &info)
+	if r.Status != StatusPassed {
+		e.classifyFailure(ctx, &r, err, &info)
+	}
+	return r, err
+}
+
+// classifyFailure fills r.FailureKind.
+func (e *Examiner) classifyFailure(ctx context.Context, r *Result, err error, info *failureInfo) {
+	switch r.Status {
+	case StatusCanceled:
+		r.FailureKind = FailCanceled
+		return
+	case StatusBroken:
+		r.FailureKind = FailConfig
+		return
+	case StatusTimeout:
+		r.FailureKind = FailSlow
+		return
+	}
+	if info.prober {
+		r.FailureKind = proberKind(err)
+		return
+	}
+	if info.transportErr == nil {
+		// Every endpoint answered through the tunnel: it works, the answers
+		// did not satisfy the panel.
+		r.FailureKind = FailHTTPStatus
+		for _, er := range r.EndpointResults {
+			if er.Outcome == "bad-status" {
+				return
+			}
+		}
+		r.FailureKind = FailSlow
+		return
+	}
+	class := classifyError(info.transportErr)
+	if e.Diagnoser == nil || info.general == nil || ctx.Err() != nil {
+		r.FailureKind = tunnelKind(class, false)
+		return
+	}
+	check := serverCheckFor(*info.general)
+	diag := e.Diagnoser.Server(ctx, check)
+	switch {
+	case diag.Kind == FailCanceled:
+		r.FailureKind = tunnelKind(class, false)
+	case diag.Kind != "":
+		r.FailureKind = diag.Kind
+		r.appendReason(diagnosisPrefix + diag.Kind + ": " + diag.Detail)
+	default:
+		r.FailureKind = tunnelKind(class, !check.UDP)
+	}
+}
+
+// serverCheckFor describes a config's server for a direct check.
+func serverCheckFor(gc protocol.GeneralConfig) ServerCheck {
+	tlsSec := strings.ToLower(gc.TLS)
+	return ServerCheck{
+		Host: gc.Address,
+		Port: gc.Port,
+		SNI:  gc.SNI,
+		TLS:  tlsSec == "tls" || tlsSec == "reality",
+		UDP:  isUDPBased(gc),
+	}
+}
+
+func (e *Examiner) examine(ctx context.Context, pl *ParsedLink, info *failureInfo) (Result, error) {
 	r := Result{
-		ConfigLink: link,
+		ConfigLink: pl.Link,
 		Status:     "passed",
 		Delay:      FailedDelay,
 		HTTPCode:   -1,
@@ -391,26 +578,15 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 		IpAddrLoc:  "null",
 	}
 
-	// Remove any spaces from the link
-	link = strings.TrimSpace(link)
-	if link == "" {
+	if pl.Err != nil || pl.Proto == nil {
 		r.Status = "broken"
 		r.Reason = "config link is empty"
+		if pl.Err != nil {
+			r.Reason = pl.Err.Error()
+		}
 		return r, errors.New(r.Reason)
 	}
-
-	proto, err := e.Core.CreateProtocol(link)
-	if err != nil {
-		r.Status = "broken"
-		r.Reason = fmt.Sprintf("create protocol: %v", err)
-		return r, errors.New(r.Reason)
-	}
-
-	if err = proto.Parse(); err != nil {
-		r.Status = "broken"
-		r.Reason = fmt.Sprintf("parse protocol: %v", err)
-		return r, errors.New(r.Reason)
-	}
+	proto := pl.Proto
 
 	if e.Verbose {
 		e.Logger.Printf("%v%s: %s\n\n", proto.DetailsStr(), color.RedString("Link"), proto.GetLink())
@@ -418,6 +594,7 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 
 	r.Protocol = proto
 	generalConfig := proto.ConvertToGeneralConfig()
+	info.general = &generalConfig
 	r.ProtocolInfo = ProtocolInfo{
 		Remark:   generalConfig.Remark,
 		Protocol: generalConfig.Protocol,
@@ -428,11 +605,15 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 
 	// Protocols that cannot carry HTTP (MTProto proxies) grade themselves.
 	if prober, ok := proto.(protocol.Prober); ok {
+		info.prober = true
 		return e.examineProbe(ctx, r, prober)
 	}
 
 	client, instance, err := e.Core.MakeHttpClient(ctx, proto, time.Duration(e.Timeout)*time.Millisecond)
 	if err != nil {
+		if ctx.Err() != nil {
+			return canceledResult(r, ctx)
+		}
 		r.Status = "broken"
 		r.Reason = err.Error()
 		return r, err
@@ -491,8 +672,8 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 			traceBody = dr.Body
 		}
 
-		// A slow-but-alive endpoint and a wrong status are both failures; record
-		// the reason so a fully-failed config explains itself.
+		// A slow endpoint and a wrong status are both failures. Record the reason
+		// so a fully failed config explains itself.
 		switch {
 		case dr.Delay > int64(e.MaxDelay):
 			er.Outcome = "slow"
@@ -518,10 +699,17 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 		}
 		endpointResults = append(endpointResults, er)
 	}
+	info.transportErr = firstTransportErr
 	r.SuccessCount = successes
 	r.EndpointResults = endpointResults
 	r.EndpointSummary = summarizeEndpoints(endpointResults)
 	total := len(checks)
+
+	// A run stopped mid-panel says nothing about the config: report it as
+	// canceled instead of grading the endpoints the cancellation killed.
+	if ctx.Err() != nil && !passesThreshold(successes, total, e.SuccessThreshold) {
+		return canceledResult(r, ctx)
+	}
 
 	// Grade the config from how many panel endpoints passed.
 	switch {
@@ -534,9 +722,8 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 		r.Status = "semi-passed"
 		r.Reason = fmt.Sprintf("%d/%d endpoints reachable", successes, total)
 	default:
-		// Nothing passed. For the single-endpoint path, preserve the original
-		// failed/timeout contract (and returned error) so existing callers and
-		// the proxy health check behave exactly as before.
+		// Nothing passed. The single-endpoint path keeps its original
+		// failed/timeout contract so existing callers behave as before.
 		if total == 1 && !firstRespRecorded {
 			r.Status = "failed"
 			r.Reason = firstFailReason
@@ -561,17 +748,16 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 		if len(traceBody) > 0 {
 			parseTraceBody(traceBody, &r)
 		} else {
-			// Otherwise, make a dedicated request for the IP info.
-			// Use a standard, reliable trace endpoint.
+			// Otherwise, make a dedicated request for the IP info. The config
+			// already reached the user's own test URL, so a failed lookup is
+			// noted in Reason but never demotes the verdict.
 			req, reqErr := http.NewRequestWithContext(ctx, "GET", "https://cloudflare.com/cdn-cgi/trace", nil)
 			if reqErr != nil {
 				r.appendReason("ip_info_failed")
-				r.Status = "semi-passed"
 			} else {
 				_, ipBody, _, traceErr := CoreHTTPRequestCustom(ctx, client, 10*time.Second, req)
 				if traceErr != nil {
 					r.appendReason("ip_info_failed")
-					r.Status = "semi-passed"
 				} else {
 					parseTraceBody(ipBody, &r)
 				}
@@ -586,10 +772,19 @@ func (e *Examiner) ExamineConfig(ctx context.Context, link string) (Result, erro
 	return r, nil
 }
 
-// ExamineConfigWithRetries runs ExamineConfig up to 1+Retries times, keeping the best result.
+// ExamineConfigWithRetries runs ExamineConfig up to 1+Retries times, keeping
+// the best result: passed beats semi-passed beats every failure, and among
+// equal verdicts the lower delay wins. Broken configs (unparseable, or a core
+// that refuses to build them) are not retried: another attempt cannot help.
 func (e *Examiner) ExamineConfigWithRetries(ctx context.Context, link string) (Result, error) {
-	best, err := e.ExamineConfig(ctx, link)
-	if e.Retries == 0 || best.Status == "passed" {
+	return e.ExamineParsedWithRetries(ctx, ParseLink(e.Core, link))
+}
+
+// ExamineParsedWithRetries is ExamineConfigWithRetries for a parsed link; every
+// attempt reuses the one parsed protocol.
+func (e *Examiner) ExamineParsedWithRetries(ctx context.Context, pl *ParsedLink) (Result, error) {
+	best, err := e.ExamineParsed(ctx, pl)
+	if e.Retries == 0 || best.Status == StatusPassed || best.Status == StatusBroken || best.Status == StatusCanceled {
 		return best, err
 	}
 
@@ -597,17 +792,53 @@ func (e *Examiner) ExamineConfigWithRetries(ctx context.Context, link string) (R
 		if ctx.Err() != nil {
 			break
 		}
-		res, retryErr := e.ExamineConfig(ctx, link)
-		// Keep the best result: prefer passed, then lowest delay
-		if res.Status == "passed" && (best.Status != "passed" || (res.Delay >= 0 && res.Delay < best.Delay)) {
+		res, retryErr := e.ExamineParsed(ctx, pl)
+		if res.Status == StatusCanceled {
+			break
+		}
+		if betterResult(res, best) {
 			best = res
 			err = retryErr
 		}
-		if best.Status == "passed" {
+		if best.Status == StatusPassed {
 			break
 		}
 	}
 	return best, err
+}
+
+// verdictRank orders statuses for picking the best of several attempts.
+func verdictRank(status string) int {
+	switch status {
+	case StatusPassed:
+		return 3
+	case StatusSemiPassed:
+		return 2
+	case StatusTimeout:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// betterResult reports whether candidate should replace best.
+func betterResult(candidate, best Result) bool {
+	cr, br := verdictRank(candidate.Status), verdictRank(best.Status)
+	if cr != br {
+		return cr > br
+	}
+	if cr < 2 {
+		return false // equally failed: keep the first explanation
+	}
+	return candidate.Delay >= 0 && (best.Delay < 0 || candidate.Delay < best.Delay)
+}
+
+// canceledResult marks r as stopped by the run rather than judged.
+func canceledResult(r Result, ctx context.Context) (Result, error) {
+	r.Status = StatusCanceled
+	r.Reason = "test canceled before it finished"
+	r.Delay = FailedDelay
+	return r, ctx.Err()
 }
 
 // MeasureDelayResult holds the timing results from MeasureDelay.
@@ -633,22 +864,28 @@ func MeasureDelayDetailed(ctx context.Context, client *http.Client, dest string,
 		return nil, err
 	}
 
-	var connectStart time.Time
-	var connectTime int64
-	var ttfb int64
+	// The trace hooks can fire from transport goroutines, so they record into
+	// atomics rather than plain variables.
+	var connectStart, connectTime, tlsDone, ttfb atomic.Int64
 	start := time.Now()
+	sinceStart := func() int64 { return time.Since(start).Milliseconds() }
 
 	trace := &httptrace.ClientTrace{
 		ConnectStart: func(_, _ string) {
-			connectStart = time.Now()
+			connectStart.Store(time.Now().UnixNano())
 		},
 		ConnectDone: func(_, _ string, err error) {
-			if err == nil && !connectStart.IsZero() {
-				connectTime = time.Since(connectStart).Milliseconds()
+			if at := connectStart.Load(); err == nil && at != 0 {
+				connectTime.Store(time.Since(time.Unix(0, at)).Milliseconds())
+			}
+		},
+		TLSHandshakeDone: func(_ tls.ConnectionState, err error) {
+			if err == nil {
+				tlsDone.Store(sinceStart())
 			}
 		},
 		GotFirstResponseByte: func() {
-			ttfb = time.Since(start).Milliseconds()
+			ttfb.Store(sinceStart())
 		},
 	}
 
@@ -659,15 +896,26 @@ func MeasureDelayDetailed(ctx context.Context, client *http.Client, dest string,
 	}
 	defer resp.Body.Close()
 
-	b, _ := io.ReadAll(resp.Body)
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxDelayBody))
+	if err != nil {
+		return nil, fmt.Errorf("read response body: %w", err)
+	}
 	delay := time.Since(start).Milliseconds()
+
+	// Cores dial through their own pipes, so net/http's ConnectStart/Done
+	// rarely fire. The TLS handshake to the test URL (through the tunnel) is
+	// the closest honest stand-in for "time to connect".
+	connect := connectTime.Load()
+	if connect == 0 {
+		connect = tlsDone.Load()
+	}
 
 	return &MeasureDelayResult{
 		Delay:       delay,
 		Code:        resp.StatusCode,
 		Body:        b,
-		TTFB:        ttfb,
-		ConnectTime: connectTime,
+		TTFB:        ttfb.Load(),
+		ConnectTime: connect,
 	}, nil
 }
 
@@ -681,9 +929,8 @@ func (z zeroReader) Read(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-// countingReader wraps an io.Reader and counts the total bytes read from it,
-// so a truncated transfer is measured by what actually moved rather than by
-// what was requested.
+// countingReader counts bytes read, so a truncated transfer is measured by what
+// actually moved rather than what was requested.
 type countingReader struct {
 	r io.Reader
 	n atomic.Int64
@@ -713,18 +960,31 @@ func (e *Examiner) runSpeedtest(ctx context.Context, client *http.Client, r *Res
 	}
 	amount := e.SpeedtestKbAmount * 1000
 	timeout := e.speedtestTimeout()
+	tester := e.speedTester()
 
-	if speed, err := measureDownload(ctx, stClient, timeout, amount); err != nil {
+	if speed, err := MeasureDownload(ctx, stClient, tester, timeout, amount); err != nil {
 		r.appendReason(fmt.Sprintf("speedtest_download_failed: %v", err))
 	} else {
 		r.DownloadSpeed = speed
 	}
 
-	if speed, err := measureUpload(ctx, stClient, timeout, amount); err != nil {
+	if !tester.CanUpload() {
+		r.appendReason("speedtest_upload_skipped: plain download URL")
+		return
+	}
+	if speed, err := MeasureUpload(ctx, stClient, tester, timeout, amount); err != nil {
 		r.appendReason(fmt.Sprintf("speedtest_upload_failed: %v", err))
 	} else {
 		r.UploadSpeed = speed
 	}
+}
+
+// speedTester returns the configured speed test target, or the default.
+func (e *Examiner) speedTester() *SpeedTester {
+	if e.SpeedTester != nil {
+		return e.SpeedTester
+	}
+	return speedtest
 }
 
 // budgetExpired reports whether reqCtx ended because the speed test's own
@@ -733,18 +993,17 @@ func budgetExpired(reqCtx, parent context.Context) bool {
 	return errors.Is(reqCtx.Err(), context.DeadlineExceeded) && parent.Err() == nil
 }
 
-// measureDownload pulls up to amount bytes from the speed test endpoint and
-// returns the throughput in Mbps. The timeout is a measurement window, not a
-// pass/fail bar: when it runs out mid-transfer the bytes that did arrive are
-// measured over the time they took, so a link slower than amount/timeout
-// reports its real speed instead of 0 (issue #69). A transfer that moved
-// nothing at all is still a failure.
-func measureDownload(ctx context.Context, client *http.Client, timeout time.Duration, amount uint64) (float32, error) {
+// MeasureDownload pulls up to amount bytes from tester and returns Mbps. The
+// timeout is a measurement window, so a partial transfer reports its real
+// speed instead of 0 (issue #69). Moving nothing at all is still a failure.
+// Timing starts at the first response byte, so dial and TLS setup through the
+// tunnel are not counted as transfer time.
+func MeasureDownload(ctx context.Context, client *http.Client, tester *SpeedTester, timeout time.Duration, amount uint64) (float32, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	req := speedtest.MakeDownloadHTTPRequest(false, amount)
-	firstByte := time.Now()
+	req := tester.MakeDownloadHTTPRequest(false, amount)
+	var firstByte time.Time
 	trace := &httptrace.ClientTrace{
 		GotFirstResponseByte: func() { firstByte = time.Now() },
 	}
@@ -755,11 +1014,17 @@ func measureDownload(ctx context.Context, client *http.Client, timeout time.Dura
 		return 0, err
 	}
 	defer resp.Body.Close()
+	if firstByte.IsZero() {
+		// Custom RoundTrippers (the scanner's uTLS transport) fire no trace
+		// hooks; response headers in hand is the next best start.
+		firstByte = time.Now()
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return 0, fmt.Errorf("unexpected status %s", resp.Status)
 	}
 
-	read, copyErr := io.Copy(io.Discard, resp.Body)
+	// A plain file may be larger than the requested amount: stop there.
+	read, copyErr := io.Copy(io.Discard, io.LimitReader(resp.Body, int64(amount)))
 	elapsed := time.Since(firstByte)
 	if copyErr != nil && !(read > 0 && budgetExpired(reqCtx, ctx)) {
 		return 0, fmt.Errorf("read body after %d bytes: %w", read, copyErr)
@@ -767,48 +1032,67 @@ func measureDownload(ctx context.Context, client *http.Client, timeout time.Dura
 	return mbps(read, elapsed)
 }
 
-// measureUpload pushes up to amount bytes to the speed test endpoint and
-// returns the throughput in Mbps. As with measureDownload, running out of the
-// window mid-body is not a failure: the bytes handed to the transport so far
-// are measured over the window. That count leads what the server has actually
-// received by the in-flight socket buffers, which is a small overshoot on a
-// multi-second window.
-func measureUpload(ctx context.Context, client *http.Client, timeout time.Duration, amount uint64) (float32, error) {
+// MeasureUpload pushes up to amount bytes to tester and returns Mbps. Like
+// MeasureDownload, running out of the window mid-body is not a failure. The
+// count leads what the server received by the in-flight buffers, a small
+// overshoot.
+func MeasureUpload(ctx context.Context, client *http.Client, tester *SpeedTester, timeout time.Duration, amount uint64) (float32, error) {
+	if !tester.CanUpload() {
+		return 0, errors.New("upload is not supported by a plain download URL")
+	}
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	req := speedtest.MakeUploadHTTPRequest(false, amount)
+	req := tester.MakeUploadHTTPRequest(false, amount)
 
-	counter := &countingReader{}
+	// The transport's write loop reads the body, and a retry (GetBody) may
+	// start while an abandoned attempt is still being read, so every
+	// attempt counts into its own reader and only the latest is measured.
+	var counter atomic.Pointer[countingReader]
 	newBody := func() io.ReadCloser {
-		counter.r = io.LimitReader(zeroReader{}, int64(amount))
-		counter.n.Store(0)
-		return io.NopCloser(counter)
+		c := &countingReader{r: io.LimitReader(zeroReader{}, int64(amount))}
+		counter.Store(c)
+		return io.NopCloser(c)
 	}
+	sent := func() int64 { return counter.Load().n.Load() }
 	req.Body = newBody()
 	req.GetBody = func() (io.ReadCloser, error) { return newBody(), nil }
 
-	bodyStart, gotResponse := time.Now(), time.Now()
+	// The trace hooks fire on transport goroutines (WroteHeaders on the
+	// write loop), so they record offsets from requestStart into atomics;
+	// 0 means the hook did not fire.
+	requestStart := time.Now()
+	var bodyAt, responseAt atomic.Int64
+	mark := func(v *atomic.Int64) func() {
+		return func() { v.Store(max(1, int64(time.Since(requestStart)))) }
+	}
 	trace := &httptrace.ClientTrace{
-		WroteHeaders:         func() { bodyStart = time.Now() },
-		GotFirstResponseByte: func() { gotResponse = time.Now() },
+		WroteHeaders:         mark(&bodyAt),
+		GotFirstResponseByte: mark(&responseAt),
 	}
 	req = req.WithContext(httptrace.WithClientTrace(reqCtx, trace))
 
 	resp, err := client.Do(req)
+	// Custom RoundTrippers fire no trace hooks: fall back to the request's
+	// own start and the moment the response arrived.
+	bodyStart := requestStart.Add(time.Duration(bodyAt.Load()))
 	if err != nil {
-		if sent := counter.n.Load(); sent > 0 && budgetExpired(reqCtx, ctx) {
-			return mbps(sent, time.Since(bodyStart))
+		if n := sent(); n > 0 && budgetExpired(reqCtx, ctx) {
+			return mbps(n, time.Since(bodyStart))
 		}
 		return 0, err
 	}
 	defer resp.Body.Close()
+	gotResponse := time.Now()
+	if at := responseAt.Load(); at != 0 {
+		gotResponse = requestStart.Add(time.Duration(at))
+	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return 0, fmt.Errorf("unexpected status %s", resp.Status)
 	}
-	return mbps(counter.n.Load(), gotResponse.Sub(bodyStart))
+	return mbps(sent(), gotResponse.Sub(bodyStart))
 }
 
 // mbps converts a transferred byte count and its duration into megabits/sec.
@@ -851,11 +1135,16 @@ func CoreHTTPRequestCustom(ctx context.Context, client *http.Client, timeout tim
 	return resp.StatusCode, b, int64(len(b)), nil
 }
 
+// SpeedTester is a speed test target. By default it speaks Cloudflare's
+// speed API (GET /__down?bytes=N, POST /__up) on SNI. When DownloadURL is set
+// the download is a plain GET of that URL and upload is unavailable.
 type SpeedTester struct {
 	SNI              string
 	DownloadEndpoint string
 	UploadEndpoint   string
 	DebugEndpoint    string
+	// DownloadURL, when set, is fetched as a plain file instead of /__down.
+	DownloadURL string
 }
 
 var speedtest = &SpeedTester{
@@ -865,7 +1154,43 @@ var speedtest = &SpeedTester{
 	UploadEndpoint:   "/__up",
 }
 
+// DefaultSpeedTester returns the default target (speed.cloudflare.com).
+func DefaultSpeedTester() *SpeedTester { return speedtest }
+
+// NewSpeedTester builds a target from a URL. A bare https origin
+// (https://host[:port]) must implement Cloudflare's /__down and /__up; a URL
+// with a path is treated as a plain file to download.
+func NewSpeedTester(rawURL string) (*SpeedTester, error) {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u.Host == "" {
+		return nil, fmt.Errorf("invalid speedtest URL %q", rawURL)
+	}
+	switch {
+	case u.Path == "" || u.Path == "/":
+		if u.Scheme != "https" {
+			return nil, fmt.Errorf("speedtest origin %q must be https (Cloudflare-compatible /__down and /__up)", rawURL)
+		}
+		return &SpeedTester{
+			SNI:              u.Host,
+			DebugEndpoint:    "/cdn-cgi/trace",
+			DownloadEndpoint: "/__down",
+			UploadEndpoint:   "/__up",
+		}, nil
+	case u.Scheme == "http" || u.Scheme == "https":
+		return &SpeedTester{SNI: u.Host, DownloadURL: u.String()}, nil
+	default:
+		return nil, fmt.Errorf("speedtest URL %q must be http or https", rawURL)
+	}
+}
+
+// CanUpload reports whether the target accepts upload tests.
+func (c *SpeedTester) CanUpload() bool { return c.DownloadURL == "" }
+
 func (c *SpeedTester) MakeDownloadHTTPRequest(noTLS bool, amount uint64) *http.Request {
+	if c.DownloadURL != "" {
+		u, _ := url.Parse(c.DownloadURL) // validated by NewSpeedTester
+		return &http.Request{Method: "GET", URL: u, Header: make(http.Header), Host: u.Host}
+	}
 	scheme := "https"
 	if noTLS {
 		scheme = "http"
