@@ -42,6 +42,13 @@ func parseTimeLoose(s string) (time.Time, error) {
 	if t, err := time.Parse("2006-01-02 15:04:05.999999999 -0700 MST", s); err == nil {
 		return t, nil
 	}
+	// Zones without a letter abbreviation print the offset twice
+	// ("... +0330 +0330"), which the MST layout cannot read.
+	if f := strings.Fields(s); len(f) == 4 && f[2] == f[3] {
+		if t, err := time.Parse("2006-01-02 15:04:05.999999999 -0700", strings.Join(f[:3], " ")); err == nil {
+			return t, nil
+		}
+	}
 	trimmed := strings.TrimSuffix(s, "Z")
 	for _, f := range scanTimeFormats {
 		if t, err := time.Parse(f, trimmed); err == nil {
