@@ -1,50 +1,71 @@
 package web
 
 import (
-	"encoding/json"
-	"fmt"
 	"log"
 	"path/filepath"
+	"sync"
 	"time"
 
-	pkghttp "github.com/lilendian0x00/xray-knife/v11/pkg/http"
 	"github.com/lilendian0x00/xray-knife/v11/pkg/proxy"
 	"github.com/lilendian0x00/xray-knife/v11/pkg/scanner"
 
 	"github.com/lilendian0x00/xray-knife/v11/utils/xkhome"
 )
 
+// History files live in the xray-knife state directory. They are resolved
+// lazily (resolveHistoryPaths) rather than in init(), so importing the
+// package has no filesystem side effects; tests override the variables.
 var cfScannerHistoryFile string
 var httpTesterHistoryFile string
 
-func init() {
+var historyPathsMu sync.Mutex
+
+// resolveHistoryPaths fills in the history file paths that are still unset.
+func resolveHistoryPaths() {
+	historyPathsMu.Lock()
+	defer historyPathsMu.Unlock()
+	if cfScannerHistoryFile != "" && httpTesterHistoryFile != "" {
+		return
+	}
 	dataDir, err := xkhome.Dir()
 	if err != nil {
 		// Fallback to current directory if the state dir is unavailable
-		cfScannerHistoryFile = "results.csv"
-		httpTesterHistoryFile = "http-results.csv"
-		return
+		dataDir = "."
 	}
-	cfScannerHistoryFile = filepath.Join(dataDir, "results.csv")
-	httpTesterHistoryFile = filepath.Join(dataDir, "http-results.csv")
+	if cfScannerHistoryFile == "" {
+		cfScannerHistoryFile = filepath.Join(dataDir, "results.csv")
+	}
+	if httpTesterHistoryFile == "" {
+		httpTesterHistoryFile = filepath.Join(dataDir, "http-results.csv")
+	}
 }
 
 // ServiceManager holds a registry of all available background services.
 type ServiceManager struct {
-	services map[string]ManagedService
-	done     chan struct{}
+	services  map[string]ManagedService
+	proxy     *ProxyServiceRunner
+	http      *HttpTestRunner
+	scanner   *CfScannerRunner
+	dpi       *DpiRunner
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 // NewServiceManager sets up the service registry and registers all available services.
 func NewServiceManager(logger *log.Logger, hub *Hub) *ServiceManager {
+	resolveHistoryPaths()
 	sm := &ServiceManager{
 		services: make(map[string]ManagedService),
+		proxy:    NewProxyServiceRunner(logger, hub),
+		http:     NewHttpTestRunner(logger, hub),
+		scanner:  NewCfScannerRunner(logger, hub),
+		dpi:      NewDpiRunner(logger, hub),
 		done:     make(chan struct{}),
 	}
-	// Register all the available services
-	sm.registerService(NewProxyServiceRunner(logger, hub))
-	sm.registerService(NewHttpTestRunner(logger, hub))
-	sm.registerService(NewCfScannerRunner(logger, hub))
+	sm.registerService(sm.proxy)
+	sm.registerService(sm.http)
+	sm.registerService(sm.scanner)
+	sm.registerService(sm.dpi)
 
 	// Goroutine to periodically push proxy details
 	go sm.proxyDetailsBroadcaster(hub)
@@ -59,14 +80,10 @@ func (sm *ServiceManager) proxyDetailsBroadcaster(hub *Hub) {
 	for {
 		select {
 		case <-ticker.C:
-			if sm.GetProxyStatus() == "running" {
+			if sm.proxy.Status() == StateRunning {
 				details, err := sm.GetProxyDetails()
 				if err == nil && details != nil {
-					payload, _ := json.Marshal(map[string]interface{}{
-						"type": "proxy_details",
-						"data": details,
-					})
-					hub.Broadcast(payload)
+					hub.Publish("proxy_details", details, nil)
 				}
 			}
 		case <-sm.done:
@@ -77,141 +94,141 @@ func (sm *ServiceManager) proxyDetailsBroadcaster(hub *Hub) {
 
 // Close stops all running services and background goroutines of the ServiceManager.
 func (sm *ServiceManager) Close() {
-	// Stop the proxy service first so system proxy settings are restored on shutdown.
-	for _, svc := range sm.services {
-		if svc.Status() == StateRunning || svc.Status() == StateStarting {
-			svc.Stop()
+	sm.closeOnce.Do(func() {
+		// Stop the proxy first so system proxy settings are restored on
+		// shutdown, then the others in parallel.
+		if isActive(sm.proxy.Status()) {
+			_ = sm.proxy.Stop()
 		}
-	}
-	close(sm.done)
+		var wg sync.WaitGroup
+		for _, svc := range []ManagedService{sm.http, sm.scanner, sm.dpi} {
+			if isActive(svc.Status()) {
+				wg.Add(1)
+				go func(svc ManagedService) {
+					defer wg.Done()
+					_ = svc.Stop()
+				}(svc)
+			}
+		}
+		wg.Wait()
+		close(sm.done)
+	})
+}
+
+// EmergencyCleanup undoes the proxy's host changes before a forced exit.
+func (sm *ServiceManager) EmergencyCleanup(timeout time.Duration) {
+	sm.proxy.EmergencyCleanup(timeout)
+}
+
+func isActive(s ServiceState) bool {
+	return s == StateRunning || s == StateStarting || s == StateStopping
 }
 
 func (sm *ServiceManager) registerService(s ManagedService) {
 	sm.services[s.Type()] = s
 }
 
-func (sm *ServiceManager) getService(serviceType string) (ManagedService, error) {
-	service, ok := sm.services[serviceType]
-	if !ok {
-		return nil, fmt.Errorf("service '%s' not found", serviceType)
+// StateSnapshot is the body of GET /state and of the SSE "state" event.
+type StateSnapshot struct {
+	Seq      uint64                     `json:"seq"`
+	Services map[string]ServiceSnapshot `json:"services"`
+}
+
+// Snapshot returns the state of every service.
+func (sm *ServiceManager) Snapshot(seq uint64) StateSnapshot {
+	proxySnap := sm.proxy.Snapshot()
+	proxySnap.Status = proxyStatusString(sm.proxy.Status())
+	return StateSnapshot{
+		Seq: seq,
+		Services: map[string]ServiceSnapshot{
+			"proxy":  proxySnap,
+			"http":   sm.http.Snapshot(),
+			"cfscan": sm.scanner.Snapshot(),
+			"dpi":    sm.dpi.Snapshot(),
+		},
 	}
-	return service, nil
 }
 
 // --- Proxy Methods ---
 
 func (sm *ServiceManager) StartProxy(cfg proxy.Config) error {
-	service, err := sm.getService("proxy")
-	if err != nil {
-		return err
-	}
-	return service.Start(cfg)
+	return sm.proxy.Start(cfg)
 }
 
 func (sm *ServiceManager) StopProxy() error {
-	service, err := sm.getService("proxy")
-	if err != nil {
-		return err
-	}
-	return service.Stop()
+	return sm.proxy.Stop()
 }
 
-func (sm *ServiceManager) GetProxyStatus() string {
-	service, err := sm.getService("proxy")
-	if err != nil {
-		return "error"
-	}
+func proxyStatusString(s ServiceState) string {
 	// Convert ServiceState to the string values expected by the frontend
-	switch service.Status() {
+	switch s {
 	case StateRunning:
 		return "running"
 	case StateStarting:
 		return "starting"
 	case StateStopping:
 		return "stopping"
+	case StateError:
+		return "error"
 	default:
 		return "stopped"
 	}
 }
 
+func (sm *ServiceManager) GetProxyStatus() string {
+	return proxyStatusString(sm.proxy.Status())
+}
+
+// ProxyRunID is the ID of the current (or last) proxy run.
+func (sm *ServiceManager) ProxyRunID() uint64 { return sm.proxy.Snapshot().RunID }
+
 func (sm *ServiceManager) GetProxyDetails() (*proxy.Details, error) {
-	service, err := sm.getService("proxy")
-	if err != nil {
-		return nil, err
-	}
-	proxyRunner, ok := service.(*ProxyServiceRunner)
-	if !ok {
-		return nil, fmt.Errorf("internal error: service is not a ProxyServiceRunner")
-	}
-	return proxyRunner.GetDetails()
+	return sm.proxy.GetDetails()
 }
 
 func (sm *ServiceManager) RotateProxy() error {
-	service, err := sm.getService("proxy")
-	if err != nil {
-		return err
-	}
-	proxyRunner, ok := service.(*ProxyServiceRunner)
-	if !ok {
-		return fmt.Errorf("internal error: service is not a ProxyServiceRunner")
-	}
-	return proxyRunner.Rotate()
+	return sm.proxy.Rotate()
 }
 
 // --- HTTP Tester Methods ---
 
-func (sm *ServiceManager) StartHttpTest(req pkghttp.HttpTestRequest) error {
-	service, err := sm.getService("http-tester")
-	if err != nil {
-		return err
-	}
-	return service.Start(req)
+func (sm *ServiceManager) StartHttpTest(job *HttpTestJob) error {
+	return sm.http.Start(job)
 }
 
-func (sm *ServiceManager) StopHttpTest() {
-	service, _ := sm.getService("http-tester")
-	if service != nil {
-		service.Stop()
-	}
+func (sm *ServiceManager) StopHttpTest() error {
+	return sm.http.Stop()
 }
 
+// GetHttpTestStatus returns idle|starting|running|stopping|finished|error.
 func (sm *ServiceManager) GetHttpTestStatus() string {
-	service, err := sm.getService("http-tester")
-	if err != nil {
-		return "error"
-	}
-	// Convert ServiceState to the string values expected by the frontend
-	switch service.Status() {
-	case StateRunning:
-		return "testing"
-	case StateStopping:
-		return "stopping"
-	default:
-		return "idle"
-	}
+	return string(sm.http.Status())
 }
+
+// HttpRunID is the ID of the current (or last) HTTP test run.
+func (sm *ServiceManager) HttpRunID() uint64 { return sm.http.Snapshot().RunID }
 
 // --- CF Scanner Methods ---
 
 func (sm *ServiceManager) StartScanner(cfg scanner.ScannerConfig) error {
-	service, err := sm.getService("cf-scanner")
+	job, err := buildCfScanJob(cfg)
 	if err != nil {
 		return err
 	}
-	return service.Start(cfg)
+	return sm.scanner.Start(job)
 }
 
-func (sm *ServiceManager) StopScanner() {
-	service, _ := sm.getService("cf-scanner")
-	if service != nil {
-		service.Stop()
-	}
+func (sm *ServiceManager) StopScanner() error {
+	return sm.scanner.Stop()
 }
 
+// GetScannerStatus reports whether a scan is in flight (including stopping).
 func (sm *ServiceManager) GetScannerStatus() bool {
-	service, err := sm.getService("cf-scanner")
-	if err != nil {
-		return false
-	}
-	return service.Status() == StateRunning || service.Status() == StateStarting
+	return isActive(sm.scanner.Status())
 }
+
+// ScannerState returns idle|starting|running|stopping|finished|error.
+func (sm *ServiceManager) ScannerState() string { return string(sm.scanner.Status()) }
+
+// ScannerRunID is the ID of the current (or last) scan.
+func (sm *ServiceManager) ScannerRunID() uint64 { return sm.scanner.Snapshot().RunID }
