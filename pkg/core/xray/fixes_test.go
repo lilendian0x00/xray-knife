@@ -9,15 +9,18 @@ import (
 
 // TestBuild_TLSInsecureDoesNotError proves B1 is fixed: a TLS config with
 // insecure requested must build (xray-core removed "allowInsecure" and now
-// hard-errors on it after 2026-06-01).
+// hard-errors on it after 2026-06-01). xray can't skip verification, so
+// insecure alone sets nothing; "vcn" from the link is passed through.
 func TestBuild_TLSInsecureDoesNotError(t *testing.T) {
 	cases := []struct {
-		name string
-		link string
+		name    string
+		link    string
+		wantVCN string
 	}{
-		{"vless-tls", "vless://a1a1a1a1-b2b2-c3c3-d4d4-e5e5e5e5e5e5@1.2.3.4:443?encryption=none&security=tls&type=tcp&sni=example.com&allowInsecure=1"},
-		{"trojan-tls", "trojan://password@1.2.3.4:443?security=tls&type=tcp&sni=example.com&allowInsecure=1"},
-		{"vmess-tls", "vmess://" + b64VmessTLS()},
+		{"vless-tls", "vless://a1a1a1a1-b2b2-c3c3-d4d4-e5e5e5e5e5e5@1.2.3.4:443?encryption=none&security=tls&type=tcp&sni=example.com&allowInsecure=1", ""},
+		{"vless-vcn", "vless://a1a1a1a1-b2b2-c3c3-d4d4-e5e5e5e5e5e5@1.2.3.4:443?encryption=none&security=tls&type=tcp&sni=fake.example&vcn=real.example", "real.example"},
+		{"trojan-tls", "trojan://password@1.2.3.4:443?security=tls&type=tcp&sni=example.com&allowInsecure=1", ""},
+		{"vmess-tls", "vmess://" + b64VmessTLS(), ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -33,16 +36,14 @@ func TestBuild_TLSInsecureDoesNotError(t *testing.T) {
 			if err != nil {
 				t.Fatalf("BuildOutboundDetourConfig: %v", err)
 			}
-			// TLSSettings must NOT set AllowInsecure (removed) and SHOULD use
-			// verifyPeerCertByName instead.
 			if ob.StreamSetting.TLSSettings == nil {
 				t.Fatalf("expected TLSSettings")
 			}
 			if ob.StreamSetting.TLSSettings.AllowInsecure {
 				t.Errorf("AllowInsecure must not be set (removed by xray-core)")
 			}
-			if ob.StreamSetting.TLSSettings.VerifyPeerCertByName == "" {
-				t.Errorf("expected VerifyPeerCertByName to emulate insecure")
+			if got := ob.StreamSetting.TLSSettings.VerifyPeerCertByName; got != tc.wantVCN {
+				t.Errorf("VerifyPeerCertByName = %q, want %q", got, tc.wantVCN)
 			}
 			// The full build pipeline must succeed (this is what used to error).
 			if _, err := ob.Build(); err != nil {

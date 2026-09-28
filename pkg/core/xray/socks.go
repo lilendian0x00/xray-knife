@@ -6,14 +6,12 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/protocol"
 	"github.com/lilendian0x00/xray-knife/v11/utils"
 
 	"github.com/fatih/color"
-	net2 "github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/infra/conf"
 )
 
@@ -30,13 +28,12 @@ func (s *Socks) Parse() error {
 		return fmt.Errorf("socks unreconized: %s", s.OrigLink)
 	}
 
-	var err error = nil
-
-	uri, err := url.Parse(s.OrigLink)
+	base, remark := splitRemark(s.OrigLink)
+	uri, err := url.Parse(base)
 	if err != nil {
 		return err
 	}
-	s.Remark = uri.Fragment
+	s.Remark = remark
 	s.Address, s.Port, err = net.SplitHostPort(uri.Host)
 	if err != nil {
 		return err
@@ -62,7 +59,7 @@ func (s *Socks) Parse() error {
 		}
 	}
 
-	return err
+	return nil
 }
 
 func (s *Socks) DetailsStr() string {
@@ -121,84 +118,46 @@ func (s *Socks) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 }
 
 func (s *Socks) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
-	out := &conf.OutboundDetourConfig{}
-	out.Tag = "proxy"
-	out.Protocol = "socks"
-
-	p := conf.TransportProtocol("tcp")
-	sc := &conf.StreamConfig{
-		Network: &p,
+	portNum, err := parsePort(s.Port)
+	if err != nil {
+		return nil, err
 	}
-
-	sc.TCPSettings = &conf.TCPConfig{}
-
-	out.StreamSetting = sc
-	var users string
+	server := map[string]interface{}{
+		"address": s.Address,
+		"port":    portNum,
+	}
 	if s.Username != "" {
-		users += fmt.Sprintf("{\n \"user\": \"%s\",\n\"pass\": \"%s\" \n}", s.Username, s.Password)
+		server["users"] = []map[string]string{{"user": s.Username, "pass": s.Password}}
 	}
-	oset := json.RawMessage([]byte(fmt.Sprintf(`{
-  "servers": [
-    {
-      "address": "%s",
-      "port": %v,
-      "users": [
-         %s
-      ]
-    }
-  ]
-}`, s.Address, s.Port, users)))
-
-	out.Settings = &oset
-	return out, nil
+	settings, err := json.Marshal(map[string]interface{}{
+		"servers": []map[string]interface{}{server},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal socks settings: %w", err)
+	}
+	oset := json.RawMessage(settings)
+	p := conf.TransportProtocol("tcp")
+	return &conf.OutboundDetourConfig{
+		Tag:      "proxy",
+		Protocol: "socks",
+		Settings: &oset,
+		StreamSetting: &conf.StreamConfig{
+			Network:     &p,
+			TCPSettings: &conf.TCPConfig{},
+		},
+	}, nil
 }
 
 func (s *Socks) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
-	p := conf.TransportProtocol("tcp")
-	in := &conf.InboundDetourConfig{
-		Protocol: s.Name(),
-		Tag:      s.Name(),
-		Settings: nil,
-		StreamSetting: &conf.StreamConfig{
-			Network: &p,
-		},
-		ListenOn: &conf.Address{},
+	settings := map[string]interface{}{
+		"auth":             "noauth",
+		"udp":              true,
+		"allowTransparent": false,
 	}
-	// Convert string to uint32
-	uint32Value, err := strconv.ParseUint(s.Port, 10, 32)
-	if err != nil {
-		return nil, fmt.Errorf("error converting port string to uint32: %w", err)
-	}
-
-	// Convert uint64 to uint32
-	uint32Result := uint32(uint32Value)
-
-	// Parse addr
-	listenAddr := s.Address
-	if net.ParseIP(listenAddr) == nil {
-		listenAddr = "0.0.0.0"
-	}
-	in.ListenOn.Address = net2.ParseAddress(listenAddr)
-	in.PortList = &conf.PortList{Range: []conf.PortRange{
-		{From: uint32Result, To: uint32Result},
-	}}
-
-	var auth = "noauth"
-	var accounts = ""
 	if len(s.Username) != 0 {
-		auth = "password"
-		accounts = fmt.Sprintf("{\n\"user\": \"%s\",\n\"pass\": \"%s\"\n}", s.Username, s.Password)
+		settings["auth"] = "password"
+		settings["accounts"] = []map[string]string{{"user": s.Username, "pass": s.Password}}
 	}
-
-	oset := json.RawMessage([]byte(fmt.Sprintf(`{
-	  "auth": "%s",
-        "accounts": [
-    		%s
-  		],
-        "udp": true,
-        "allowTransparent": false
-	}`, auth, accounts)))
-	in.Settings = &oset
-
-	return in, nil
+	p := conf.TransportProtocol("tcp")
+	return inboundDetour(s.Name(), s.Address, s.Port, settings, &conf.StreamConfig{Network: &p})
 }

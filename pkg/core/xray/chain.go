@@ -3,83 +3,62 @@ package xray
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/http"
 	"time"
 
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/protocol"
 
-	"github.com/xtls/xray-core/app/dispatcher"
-	applog "github.com/xtls/xray-core/app/log"
-	"github.com/xtls/xray-core/app/proxyman"
-	xraynet "github.com/xtls/xray-core/common/net"
-	"github.com/xtls/xray-core/common/serial"
 	"github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/infra/conf"
 )
 
+func chainTag(i int) string { return fmt.Sprintf("chain-%d", i) }
+
 // MakeChainedInstance builds an xray-core instance with multiple outbounds
-// chained together. Hop 0 is the entry point (receives inbound traffic),
-// hop N-1 is the exit (connects to the destination). Each intermediate hop
-// uses ProxySettings to dial through the next hop.
+// chained together. Hop 0 is the ENTRY: the only hop dialed directly from
+// this machine (with BindInterface and Fragment applied). Hop N-1 is the
+// EXIT: it connects to the destination and receives the inbound traffic.
+// Each hop i > 0 reaches its own server through hop i-1.
 func (c *Core) MakeChainedInstance(ctx context.Context, hops []protocol.Protocol) (protocol.Instance, error) {
 	if len(hops) < 2 {
 		return nil, fmt.Errorf("chain requires at least 2 hops, got %d", len(hops))
 	}
-
-	clientConfig := &core.Config{
-		App: []*serial.TypedMessage{
-			serial.ToTypedMessage(&applog.Config{
-				ErrorLogType:  c.LogType,
-				AccessLogType: c.LogType,
-				ErrorLogLevel: c.LogLevel,
-				EnableDnsLog:  false,
-			}),
-			serial.ToTypedMessage(&dispatcher.Config{}),
-			serial.ToTypedMessage(&proxyman.OutboundConfig{}),
-		},
+	if err := c.buildable(); err != nil {
+		return nil, err
 	}
 
-	// Build all outbound handlers for the chain.
+	built := make([]*conf.OutboundDetourConfig, len(hops))
 	for i, hop := range hops {
-		out := hop.(Protocol)
+		out, err := asProtocol(hop)
+		if err != nil {
+			return nil, fmt.Errorf("chain hop %d: %w", i, err)
+		}
+		c.warnInsecure(out)
 		ob, err := out.BuildOutboundDetourConfig(c.AllowInsecure)
 		if err != nil {
 			return nil, fmt.Errorf("chain hop %d: failed to build outbound config: %w", i, err)
 		}
-
-		ob.Tag = fmt.Sprintf("chain-%d", i)
-
-		// For all hops except the last, set ProxySettings to route through
-		// the next hop in the chain.
-		if i < len(hops)-1 {
-			ob.ProxySettings = &conf.ProxyConfig{
-				Tag: fmt.Sprintf("chain-%d", i+1),
-			}
+		ob.Tag = chainTag(i)
+		if i > 0 {
+			// Dial through the previous hop at the socket level, so this
+			// hop keeps its own transport and TLS/REALITY (see chainThrough).
+			chainThrough(ob, chainTag(i-1))
 		}
-
-		built, err := ob.Build()
-		if err != nil {
-			return nil, fmt.Errorf("chain hop %d: failed to build outbound handler: %w", i, err)
-		}
-		clientConfig.Outbound = append(clientConfig.Outbound, built)
+		built[i] = ob
 	}
 
-	// Add inbound if configured.
-	if c.Inbound != nil {
-		clientConfig.App = append(clientConfig.App, serial.ToTypedMessage(&proxyman.InboundConfig{}))
-		ibc, err := c.Inbound.BuildInboundDetourConfig()
-		if err != nil {
-			return nil, fmt.Errorf("chain: failed to build inbound config: %w", err)
-		}
-		ibcBuilt, err := ibc.Build()
-		if err != nil {
-			return nil, fmt.Errorf("chain: failed to build inbound handler: %w", err)
-		}
-		clientConfig.Inbound = []*core.InboundHandlerConfig{ibcBuilt}
+	if err := c.prepareEntry(built[0], hops[0].ConvertToGeneralConfig().Address); err != nil {
+		return nil, fmt.Errorf("chain hop 0: %w", err)
 	}
 
-	server, err := core.New(clientConfig)
+	// xray's default route is the first outbound, and traffic must enter
+	// at the exit hop, so list the hops from exit to entry.
+	ordered := make([]*conf.OutboundDetourConfig, 0, len(built))
+	for i := len(built) - 1; i >= 0; i-- {
+		ordered = append(ordered, built[i])
+	}
+
+	server, err := c.newInstance(ordered)
 	if err != nil {
 		return nil, fmt.Errorf("chain: failed to create xray instance: %w", err)
 	}
@@ -87,28 +66,11 @@ func (c *Core) MakeChainedInstance(ctx context.Context, hops []protocol.Protocol
 }
 
 // MakeChainedHttpClient builds a chained xray instance and returns an
-// http.Client that routes traffic through the entry outbound (chain-0).
+// http.Client whose requests travel entry -> ... -> exit.
 func (c *Core) MakeChainedHttpClient(ctx context.Context, hops []protocol.Protocol, maxDelay time.Duration) (*http.Client, protocol.Instance, error) {
 	instance, err := c.MakeChainedInstance(ctx, hops)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	xrayInstance := instance.(*core.Instance)
-
-	tr := &http.Transport{
-		DisableKeepAlives: true,
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			dest, err := xraynet.ParseDestination(fmt.Sprintf("%s:%s", network, addr))
-			if err != nil {
-				return nil, err
-			}
-			return core.Dial(ctx, xrayInstance, dest)
-		},
-	}
-
-	return &http.Client{
-		Transport: tr,
-		Timeout:   maxDelay,
-	}, instance, nil
+	return httpClientFor(instance.(*core.Instance), maxDelay), instance, nil
 }

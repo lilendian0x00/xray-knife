@@ -2,12 +2,8 @@ package singbox
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
-	"net/netip"
-	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/sagernet/sing/common/auth"
@@ -19,10 +15,8 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
 	sing_socks "github.com/sagernet/sing-box/protocol/socks"
-	"github.com/sagernet/sing/common/json/badoption"
 	"github.com/sagernet/sing/common/logger"
 	"github.com/sagernet/sing/service"
-	"github.com/xtls/xray-core/infra/conf"
 )
 
 func NewSocks(link string) Protocol {
@@ -38,13 +32,11 @@ func (s *Socks) Parse() error {
 		return fmt.Errorf("socks unreconized: %s", s.OrigLink)
 	}
 
-	var err error = nil
-
-	uri, err := url.Parse(s.OrigLink)
+	uri, remark, err := parseShareLink(s.OrigLink)
 	if err != nil {
 		return err
 	}
-	s.Remark = uri.Fragment
+	s.Remark = remark
 	s.Address, s.Port, err = net.SplitHostPort(uri.Host)
 	if err != nil {
 		return err
@@ -70,7 +62,7 @@ func (s *Socks) Parse() error {
 		}
 	}
 
-	return err
+	return nil
 }
 
 func (s *Socks) DetailsStr() string {
@@ -108,59 +100,12 @@ func (s *Socks) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	return g
 }
 
-func (s *Socks) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
-	out := &conf.OutboundDetourConfig{}
-	out.Tag = "proxy"
-	out.Protocol = "socks"
-
-	p := conf.TransportProtocol("tcp")
-	sc := &conf.StreamConfig{
-		Network: &p,
+func (s *Socks) CraftInboundOptions() (*option.Inbound, error) {
+	listen, err := listenOptions(s.Address, s.Port)
+	if err != nil {
+		return nil, err
 	}
-
-	sc.TCPSettings = &conf.TCPConfig{}
-
-	out.StreamSetting = sc
-	var users string
-	if s.Username != "" {
-		users += fmt.Sprintf("{\n \"user\": \"%s\",\n\"pass\": \"%s\" \n}", s.Username, s.Password)
-	}
-	oset := json.RawMessage([]byte(fmt.Sprintf(`{
-  "servers": [
-    {
-      "address": "%s",
-      "port": %v,
-      "users": [
-         %s
-      ]
-    }
-  ]
-}`, s.Address, s.Port, users)))
-
-	out.Settings = &oset
-	return out, nil
-}
-
-func (s *Socks) CraftInboundOptions() *option.Inbound {
-	port, _ := strconv.Atoi(s.Port)
-	addr, _ := netip.ParseAddr(s.Address)
-
-	tapAddr := badoption.Addr(addr)
-	opts := option.SocksInboundOptions{
-		ListenOptions: option.ListenOptions{
-			Listen:                      &tapAddr,
-			ListenPort:                  uint16(port),
-			TCPFastOpen:                 false,
-			TCPMultiPath:                false,
-			UDPFragment:                 nil,
-			UDPFragmentDefault:          false,
-			UDPTimeout:                  0,
-			ProxyProtocol:               false,
-			ProxyProtocolAcceptNoHeader: false,
-		},
-		Users: nil,
-	}
-
+	opts := option.SocksInboundOptions{ListenOptions: listen}
 	if s.Username != "" && s.Password != "" {
 		opts.Users = []auth.User{
 			{
@@ -172,19 +117,20 @@ func (s *Socks) CraftInboundOptions() *option.Inbound {
 
 	return &option.Inbound{
 		Type:    s.Name(),
-		Options: opts,
-	}
+		Options: &opts,
+	}, nil
 }
 
 func (s *Socks) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, error) {
-	// Port type checker
-	var port, _ = strconv.Atoi(s.Port)
+	port, err := parsePort(s.Port)
+	if err != nil {
+		return nil, err
+	}
 
 	opts := option.SOCKSOutboundOptions{
-		DialerOptions: option.DialerOptions{},
 		ServerOptions: option.ServerOptions{
-			Server:     s.Address,
-			ServerPort: uint16(port),
+			Server:     serverHost(s.Address),
+			ServerPort: port,
 		},
 		Username: s.Username,
 		Password: s.Password,
@@ -202,8 +148,11 @@ func (s *Socks) CraftOutbound(ctx context.Context, l logger.ContextLogger, allow
 		return nil, err
 	}
 
-	socksOptions, _ := options.Options.(option.SOCKSOutboundOptions)
-	out, err := sing_socks.NewOutbound(ctx, service.FromContext[adapter.Router](ctx), l, "out_socks", socksOptions)
+	socksOptions, ok := options.Options.(*option.SOCKSOutboundOptions)
+	if !ok {
+		return nil, fmt.Errorf("socks: unexpected options type %T", options.Options)
+	}
+	out, err := sing_socks.NewOutbound(ctx, service.FromContext[adapter.Router](ctx), l, "out_socks", *socksOptions)
 	if err != nil {
 		return nil, err
 	}

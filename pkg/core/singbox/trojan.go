@@ -2,12 +2,8 @@ package singbox
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
-	"net/netip"
-	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/protocol"
@@ -17,10 +13,8 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
 	sing_trojan "github.com/sagernet/sing-box/protocol/trojan"
-	"github.com/sagernet/sing/common/json/badoption"
 	"github.com/sagernet/sing/common/logger"
 	"github.com/sagernet/sing/service"
-	"github.com/xtls/xray-core/infra/conf"
 )
 
 func NewTrojan(link string) Protocol {
@@ -35,19 +29,15 @@ func (t *Trojan) Parse() error {
 	if !strings.HasPrefix(t.OrigLink, protocol.TrojanIdentifier) {
 		return fmt.Errorf("trojan unreconized: %s", t.OrigLink)
 	}
-	uri, err := url.Parse(t.OrigLink)
+	uri, remark, err := parseShareLink(t.OrigLink)
 	if err != nil {
 		return fmt.Errorf("failed to parse Trojan link: %w", err)
 	}
 
-	t.Password = uri.User.String()
+	t.Password = userInfoSecret(uri.User)
 	t.Address, t.Port, err = net.SplitHostPort(uri.Host)
 	if err != nil {
 		return fmt.Errorf("failed to split host and port for Trojan link: %w", err)
-	}
-
-	if utils.IsIPv6(t.Address) {
-		t.Address = "[" + t.Address + "]"
 	}
 
 	query := uri.Query()
@@ -83,12 +73,7 @@ func (t *Trojan) Parse() error {
 	t.Key = query.Get("key")                   // For QUIC transport
 	// t.Authority = query.Get("authority") // Not a standard Trojan query param
 
-	unescapedRemark, err := url.PathUnescape(uri.Fragment)
-	if err != nil {
-		t.Remark = uri.Fragment
-	} else {
-		t.Remark = unescapedRemark
-	}
+	t.Remark = remark
 
 	// Apply defaults or adjustments
 	if t.Type == "ws" || t.Type == "http" { // For Sing-box, common transports for Trojan
@@ -209,37 +194,21 @@ func (t *Trojan) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	return g
 }
 
-func (t *Trojan) CraftInboundOptions() *option.Inbound {
-	port, _ := strconv.Atoi(t.Port)
-	addr, _ := netip.ParseAddr(t.Address)
+func (t *Trojan) CraftInboundOptions() (*option.Inbound, error) {
+	listen, err := listenOptions(t.Address, t.Port)
+	if err != nil {
+		return nil, err
+	}
 
 	// TODO: Inbound TLS requires certificates, which are not available from a client link.
 	// Therefore, TLS is not configured for the inbound.
-
-	var transport = &option.V2RayTransportOptions{
-		Type: t.Type,
+	transport, err := buildTransport(v2rayTransport{Network: t.Type, HeaderType: t.HeaderType, Host: t.Host, Path: t.Path, ServiceName: t.ServiceName})
+	if err != nil {
+		return nil, err
 	}
 
-	switch t.Type {
-	case "ws":
-		transport.WebsocketOptions = option.V2RayWebsocketOptions{
-			Path: t.Path,
-		}
-	case "grpc":
-		if len(t.ServiceName) > 0 && t.ServiceName[0] == '/' {
-			t.ServiceName = t.ServiceName[1:]
-		}
-		transport.GRPCOptions = option.V2RayGRPCOptions{
-			ServiceName: t.ServiceName,
-		}
-	}
-
-	tapAddr := badoption.Addr(addr)
 	opts := option.TrojanInboundOptions{
-		ListenOptions: option.ListenOptions{
-			Listen:     &tapAddr,
-			ListenPort: uint16(port),
-		},
+		ListenOptions: listen,
 		Users: []option.TrojanUser{
 			{
 				Name:     "user",
@@ -252,120 +221,44 @@ func (t *Trojan) CraftInboundOptions() *option.Inbound {
 	return &option.Inbound{
 		Type:    t.Name(),
 		Tag:     "trojan-in",
-		Options: opts,
-	}
+		Options: &opts,
+	}, nil
 }
 
 func (t *Trojan) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, error) {
-	port, _ := strconv.Atoi(t.Port)
+	return t.craftOutbound(allowInsecure, utlsAvailable)
+}
 
-	tls := false
-	var alpn []string
-	var fingerprint string
-	var insecure = allowInsecure
-
-	if t.Security == "tls" || t.Security == "reality" {
-		tls = true
-
-		alpn = []string{"http/1.1"}
-		if t.ALPN != "" && t.ALPN != "none" {
-			alpn = strings.Split(t.ALPN, ",")
-		}
-
-		fingerprint = "chrome"
-		if t.TlsFingerprint != "" && t.TlsFingerprint != "none" {
-			fingerprint = t.TlsFingerprint
-		}
-
-		if t.AllowInsecure != "" {
-			if t.AllowInsecure == "1" || t.AllowInsecure == "true" {
-				insecure = true
-			}
-		}
+func (t *Trojan) craftOutbound(allowInsecure, utls bool) (*option.Outbound, error) {
+	port, err := parsePort(t.Port)
+	if err != nil {
+		return nil, err
 	}
 
-	var transport = &option.V2RayTransportOptions{
-		Type: t.Type,
+	tlsOpts, transport, err := buildStream(tlsParams{
+		UTLS:          utls,
+		Security:      t.Security,
+		SNI:           t.SNI,
+		ALPN:          t.ALPN,
+		Fingerprint:   t.TlsFingerprint,
+		AllowInsecure: t.AllowInsecure,
+		PublicKey:     t.PublicKey,
+		ShortID:       t.ShortIds,
+	}, v2rayTransport{Network: t.Type, HeaderType: t.HeaderType, Host: t.Host, Path: t.Path, ServiceName: t.ServiceName}, allowInsecure)
+	if err != nil {
+		return nil, err
 	}
 
-	switch t.Type {
-	case "tcp":
-		break
-	case "ws":
-		transport.WebsocketOptions = option.V2RayWebsocketOptions{
-			Path:                t.Path,
-			Headers:             badoption.HTTPHeader{},
-			MaxEarlyData:        0,
-			EarlyDataHeaderName: "",
-		}
-		transport.WebsocketOptions.Headers["host"] = badoption.Listable[string]{t.Host}
-		transport.WebsocketOptions.Headers["User-Agent"] = badoption.Listable[string]{"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"}
-
-		break
-	case "http":
-		transport.HTTPOptions = option.V2RayHTTPOptions{
-			Host:        nil,
-			Path:        t.Path,
-			Method:      "GET",
-			Headers:     nil,
-			IdleTimeout: 0,
-			PingTimeout: 0,
-		}
-		if t.Host != "" {
-			h := conf.StringList(strings.Split(t.Host, ","))
-			transport.HTTPOptions.Host = badoption.Listable[string](h)
-		}
-		break
-	case "httpupgrade":
-		transport.HTTPUpgradeOptions = option.V2RayHTTPUpgradeOptions{
-			Host:    t.Host,
-			Path:    t.Path,
-			Headers: nil,
-		}
-		break
-	case "grpc":
-		// t.Mode Gun & Multi
-		if len(t.ServiceName) > 0 {
-			if t.ServiceName[0] == '/' {
-				t.ServiceName = t.ServiceName[1:]
-			}
-		}
-		transport.GRPCOptions = option.V2RayGRPCOptions{
-			ServiceName: t.ServiceName,
-		}
-		break
-	case "quic":
-		transport.QUICOptions = option.V2RayQUICOptions{}
-		break
-	}
-
+	// xtls flows do not exist for Trojan (xray-core rejects them too); other
+	// clients ignore a stray flow= and so does this one.
 	opts := option.TrojanOutboundOptions{
-		DialerOptions: option.DialerOptions{},
 		ServerOptions: option.ServerOptions{
-			Server:     t.Address,
-			ServerPort: uint16(port),
+			Server:     serverHost(t.Address),
+			ServerPort: port,
 		},
-		Password:  t.Password,
-		Transport: transport,
-		OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{
-			TLS: &option.OutboundTLSOptions{
-				Enabled:    tls,
-				ServerName: t.SNI,
-				ALPN:       alpn,
-				UTLS: &option.OutboundUTLSOptions{
-					Enabled:     true,
-					Fingerprint: fingerprint,
-				},
-				Insecure: insecure,
-			},
-		},
-	}
-	if t.Security == "reality" {
-		opts.TLS.Reality = &option.OutboundRealityOptions{
-			Enabled:   true,
-			PublicKey: t.PublicKey,
-			ShortID:   t.ShortIds,
-		}
+		Password:                    t.Password,
+		Transport:                   transport,
+		OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{TLS: tlsOpts},
 	}
 
 	return &option.Outbound{
@@ -381,10 +274,13 @@ func (t *Trojan) CraftOutbound(ctx context.Context, l logger.ContextLogger, allo
 		return nil, err
 	}
 
-	trojanOptions, _ := options.Options.(option.TrojanOutboundOptions)
-	out, err := sing_trojan.NewOutbound(ctx, service.FromContext[adapter.Router](ctx), l, "out_trojan", trojanOptions)
+	trojanOptions, ok := options.Options.(*option.TrojanOutboundOptions)
+	if !ok {
+		return nil, fmt.Errorf("trojan: unexpected options type %T", options.Options)
+	}
+	out, err := sing_trojan.NewOutbound(ctx, service.FromContext[adapter.Router](ctx), l, "out_trojan", *trojanOptions)
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("failed creating trojan outbound: %v", err))
+		return nil, fmt.Errorf("failed creating trojan outbound: %w", err)
 	}
 
 	return out, nil

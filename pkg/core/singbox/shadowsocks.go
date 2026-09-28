@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/protocol"
@@ -28,71 +27,113 @@ func (s *Shadowsocks) Name() string {
 	return protocol.ShadowsocksIdentifier
 }
 
+// Parse accepts the three shapes in circulation:
+//
+//	ss://BASE64URL(method:password)@host:port/?plugin=…#remark  (SIP002)
+//	ss://method:password@host:port#remark                      (SIP002 plain, SS-2022)
+//	ss://BASE64(method:password@host:port)#remark              (legacy)
 func (s *Shadowsocks) Parse() error {
-	if !strings.HasPrefix(s.OrigLink, protocol.ShadowsocksIdentifier) {
+	body, ok := strings.CutPrefix(strings.TrimSpace(s.OrigLink), protocol.ShadowsocksIdentifier+"://")
+	if !ok {
 		return fmt.Errorf("shadowsocks unreconized: %s", s.OrigLink)
 	}
-
-	uri, err := url.Parse(s.OrigLink)
-	if err != nil {
-		return err
-	}
-
-	secondPart := strings.SplitN(s.OrigLink[5:], "@", 2)
-
-	var decoded []byte
-	// Encryption part - b64 encoded (EncryptionType : Password)
-	if len(secondPart) > 1 {
-		decoded, err = utils.Base64Decode(secondPart[0])
-		if err != nil {
-			return errors.New("Error when decoding secret part ")
-		}
+	body, frag, _ := strings.Cut(body, "#")
+	if remark, err := url.PathUnescape(frag); err == nil {
+		s.Remark = remark
 	} else {
-		return errors.New("Invalid config link ")
+		s.Remark = frag
 	}
 
-	//link := "ss://" + string(decoded) + "@" + secondPart[1]
-	//uri, err := url.Parse(link)
-	//if err != nil {
-	//	return err
-	//}
-	creds := strings.SplitN(string(decoded), ":", 2)
-	if len(creds) != 2 {
-		return errors.New("error when decoding secret part")
+	legacy := !strings.Contains(body, "@")
+	if legacy {
+		// Legacy form: the whole authority is base64, the query (if any) is not.
+		encoded, query, _ := strings.Cut(body, "?")
+		encoded = strings.TrimSuffix(encoded, "/")
+		decoded, err := utils.Base64Decode(unescapeLenient(encoded))
+		if err != nil || !strings.Contains(string(decoded), "@") {
+			return errors.New("invalid shadowsocks link: neither SIP002 nor legacy base64 form")
+		}
+		body = string(decoded)
+		if query != "" {
+			body += "/?" + query
+		}
 	}
 
-	s.Encryption = creds[0] // Encryption Type
-	s.Password = creds[1]   // Encryption Password
-
-	//hostPortRemark := strings.SplitN(secondPart[1], ":", 2)
+	// Split at the last '@' by hand: url.Parse chokes on the '/' of standard
+	// base64 and on raw '@' in plain passwords, and the host part has neither.
+	at := strings.LastIndex(body, "@")
+	userinfo, hostPart := body[:at], body[at+1:]
+	uri, err := url.Parse(protocol.ShadowsocksIdentifier + "://" + hostPart)
+	if err != nil {
+		return fmt.Errorf("invalid shadowsocks link: %w", err)
+	}
+	if method, password, plain := strings.Cut(userinfo, ":"); plain {
+		// Plain "method:password" (base64 never contains ':'). SIP002
+		// percent-encodes it; the decoded legacy blob is raw.
+		if !legacy {
+			method, password = unescapeLenient(method), unescapeLenient(password)
+		}
+		s.Encryption, s.Password = method, password
+	} else {
+		decoded, err := utils.Base64Decode(unescapeLenient(userinfo))
+		if err != nil {
+			return errors.New("invalid shadowsocks link: userinfo is neither base64 nor method:password")
+		}
+		method, password, found := strings.Cut(string(decoded), ":")
+		if !found {
+			return errors.New("invalid shadowsocks link: userinfo has no method:password pair")
+		}
+		s.Encryption, s.Password = method, password
+	}
+	if s.Encryption == "" {
+		return errors.New("invalid shadowsocks link: empty method")
+	}
 
 	s.Address, s.Port, err = net.SplitHostPort(uri.Host)
 	if err != nil {
 		return err
 	}
 
-	if utils.IsIPv6(s.Address) {
-		s.Address = "[" + s.Address + "]"
+	// Read plugin= from the raw query: SIP002 plugin options are separated
+	// by ';', and url.ParseQuery drops any pair containing a raw ';', which
+	// let "plugin=obfs-local;obfs=http" (and unsupported plugins) slip
+	// through as a plain, plugin-less link.
+	if plugin, found := rawQueryParam(uri.RawQuery, "plugin"); found && plugin != "" {
+		name, opts, _ := strings.Cut(plugin, ";")
+		switch name {
+		case "obfs-local", "simple-obfs":
+			s.Plugin = "obfs-local"
+		case "v2ray-plugin":
+			s.Plugin = name
+		default:
+			// Connecting without the plugin would only produce a false failure.
+			return fmt.Errorf("shadowsocks plugin %q is not supported (obfs-local and v2ray-plugin are)", name)
+		}
+		s.PluginOptions = opts
 	}
-
-	s.Remark, err = url.PathUnescape(uri.Fragment)
-	if err != nil {
-		s.Remark = uri.Fragment
-	}
-
-	//s.Address = hostPortRemark[0]
-	//
-	//PortRemark := strings.SplitN(hostPortRemark[1], "#", 2)
-	//s.Port = PortRemark[0]
-
-	//remarkStr, _, _ := strings.Cut(PortRemark[1], "\n")
-
-	//s.Remark, err = url.PathUnescape(remarkStr)
-	//if err != nil {
-	//	s.Remark = remarkStr
-	//}
 
 	return nil
+}
+
+// rawQueryParam returns the first value of name in rawQuery, splitting on
+// '&' only and percent-decoding leniently ('+' stays '+').
+func rawQueryParam(rawQuery, name string) (string, bool) {
+	for _, pair := range strings.Split(rawQuery, "&") {
+		key, value, _ := strings.Cut(pair, "=")
+		if unescapeLenient(key) == name {
+			return unescapeLenient(value), true
+		}
+	}
+	return "", false
+}
+
+// unescapeLenient percent-decodes s, returning it unchanged if it is not
+// valid percent-encoding (base64 padding often arrives as %3D).
+func unescapeLenient(s string) string {
+	if u, err := url.PathUnescape(s); err == nil {
+		return u
+	}
+	return s
 }
 
 func (s *Shadowsocks) DetailsStr() string {
@@ -103,6 +144,9 @@ func (s *Shadowsocks) DetailsStr() string {
 		color.RedString("Port"), s.Port,
 		color.RedString("Encryption"), s.Encryption,
 		color.RedString("Password"), s.Password)
+	if s.Plugin != "" {
+		info += fmt.Sprintf("%s: %s %s\n", color.RedString("Plugin"), s.Plugin, s.PluginOptions)
+	}
 	return info
 }
 
@@ -121,23 +165,38 @@ func (s *Shadowsocks) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	return g
 }
 
-func (s *Shadowsocks) CraftInboundOptions() *option.Inbound {
-	return &option.Inbound{
-		Type: "shadowsocks",
+func (s *Shadowsocks) CraftInboundOptions() (*option.Inbound, error) {
+	listen, err := listenOptions(s.Address, s.Port)
+	if err != nil {
+		return nil, err
 	}
+	opts := option.ShadowsocksInboundOptions{
+		ListenOptions: listen,
+		Method:        s.Encryption,
+		Password:      s.Password,
+	}
+	return &option.Inbound{
+		Type:    "shadowsocks",
+		Tag:     "shadowsocks-in",
+		Options: &opts,
+	}, nil
 }
 
 func (s *Shadowsocks) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, error) {
-	port, _ := strconv.Atoi(s.Port)
+	port, err := parsePort(s.Port)
+	if err != nil {
+		return nil, err
+	}
 
 	opts := option.ShadowsocksOutboundOptions{
-		DialerOptions: option.DialerOptions{},
 		ServerOptions: option.ServerOptions{
-			Server:     s.Address,
-			ServerPort: uint16(port),
+			Server:     serverHost(s.Address),
+			ServerPort: port,
 		},
-		Password: s.Password,
-		Method:   s.Encryption,
+		Password:      s.Password,
+		Method:        s.Encryption,
+		Plugin:        s.Plugin,
+		PluginOptions: s.PluginOptions,
 	}
 
 	return &option.Outbound{
@@ -153,10 +212,13 @@ func (s *Shadowsocks) CraftOutbound(ctx context.Context, l logger.ContextLogger,
 		return nil, err
 	}
 
-	ssOptions, _ := options.Options.(option.ShadowsocksOutboundOptions)
-	out, err := sing_shadowsocks.NewOutbound(ctx, service.FromContext[adapter.Router](ctx), l, "out_shadowsocks", ssOptions)
+	ssOptions, ok := options.Options.(*option.ShadowsocksOutboundOptions)
+	if !ok {
+		return nil, fmt.Errorf("shadowsocks: unexpected options type %T", options.Options)
+	}
+	out, err := sing_shadowsocks.NewOutbound(ctx, service.FromContext[adapter.Router](ctx), l, "out_shadowsocks", *ssOptions)
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("failed creating shadowsocks outbound: %v", err))
+		return nil, fmt.Errorf("failed creating shadowsocks outbound: %w", err)
 	}
 
 	return out, nil

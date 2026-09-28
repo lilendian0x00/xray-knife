@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -18,10 +17,8 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
 	sing_vmess "github.com/sagernet/sing-box/protocol/vmess"
-	"github.com/sagernet/sing/common/json/badoption"
 	"github.com/sagernet/sing/common/logger"
 	"github.com/sagernet/sing/service"
-	"github.com/xtls/xray-core/infra/conf"
 )
 
 func NewVmess(link string) Protocol {
@@ -33,7 +30,12 @@ func (v *Vmess) Name() string {
 }
 
 func method1(v *Vmess, link string) error {
-	b64encoded := link[8:]
+	b64encoded, ok := strings.CutPrefix(link, protocol.VmessIdentifier+"://")
+	if !ok {
+		return errors.New("missing vmess:// prefix")
+	}
+	// The remark some exporters append after the base64 blob is not part of it.
+	b64encoded, _, _ = strings.Cut(b64encoded, "#")
 	decoded, err := utils.Base64Decode(b64encoded)
 	if err != nil {
 		return err
@@ -41,10 +43,7 @@ func method1(v *Vmess, link string) error {
 	if err = json.Unmarshal(decoded, v); err != nil {
 		return err
 	}
-
-	if utils.IsIPv6(v.Address) {
-		v.Address = "[" + v.Address + "]"
-	}
+	v.Address = serverHost(v.Address)
 	return nil
 }
 
@@ -72,10 +71,6 @@ func method2(v *Vmess, link string) error {
 	v.Address, v.Port, err = net.SplitHostPort(uri.Host)
 	if err != nil {
 		return err
-	}
-
-	if utils.IsIPv6(v.Address) {
-		v.Address = "[" + v.Address + "]"
 	}
 	//parseUint, err := strconv.ParseUint(suhp[2], 10, 16)
 	//if err != nil {
@@ -130,11 +125,10 @@ func (v *Vmess) Parse() error {
 		return fmt.Errorf("vmess unreconized: %s", v.OrigLink)
 	}
 
-	var err error = nil
-
-	if err = method1(v, v.OrigLink); err != nil {
-		if err = method2(v, v.OrigLink); err != nil {
-			return err
+	if err1 := method1(v, v.OrigLink); err1 != nil {
+		if err2 := method2(v, v.OrigLink); err2 != nil {
+			// Neither error quotes the link, so the UUID stays out of reasons and logs.
+			return fmt.Errorf("invalid vmess link: not base64 JSON (%v) nor base64 userinfo (%v)", err1, err2)
 		}
 	}
 
@@ -144,7 +138,7 @@ func (v *Vmess) Parse() error {
 		}
 	}
 
-	return err
+	return nil
 }
 
 func (v *Vmess) DetailsStr() string {
@@ -225,7 +219,6 @@ func (v *Vmess) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	} else {
 		g.TLS = v.TLS
 	}
-	g.TLS = v.TLS
 	g.SNI = v.SNI
 	g.ALPN = v.ALPN
 	g.TlsFingerprint = v.TlsFingerprint
@@ -235,58 +228,76 @@ func (v *Vmess) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	return g
 }
 
-func (v *Vmess) CraftInboundOptions() *option.Inbound {
-	var port int
+// port returns the numeric port; the JSON form carries it as a number or a
+// string.
+func (v *Vmess) port() (uint16, error) {
 	switch p := v.Port.(type) {
 	case float64:
-		port = int(p)
+		if p < 1 || p > 65535 || p != float64(int(p)) {
+			return 0, fmt.Errorf("invalid port %v", p)
+		}
+		return uint16(p), nil
 	case int:
-		port = p
+		if p < 1 || p > 65535 {
+			return 0, fmt.Errorf("invalid port %d", p)
+		}
+		return uint16(p), nil
 	case string:
-		intPort, err := strconv.Atoi(p)
-		if err == nil {
-			port = intPort
+		return parsePort(p)
+	default:
+		return 0, errors.New("invalid port: missing or not a number")
+	}
+}
+
+// alterID returns the numeric alterId; like the port it may be a string.
+func (v *Vmess) alterID() (int, error) {
+	switch aid := v.Aid.(type) {
+	case nil:
+		return 0, nil
+	case int:
+		return aid, nil
+	case float64:
+		return int(aid), nil
+	case string:
+		if aid == "" {
+			return 0, nil
 		}
+		n, err := strconv.Atoi(aid)
+		if err != nil {
+			return 0, fmt.Errorf("invalid alterId %q", aid)
+		}
+		return n, nil
+	default:
+		return 0, errors.New("invalid type of aid")
+	}
+}
+
+// transport returns the link's transport. VMess keeps the gRPC service
+// name in "path" and the TCP header type in "type".
+func (v *Vmess) transport() v2rayTransport {
+	return v2rayTransport{Network: v.Network, HeaderType: v.Type, Host: v.Host, Path: v.Path, ServiceName: v.Path}
+}
+
+func (v *Vmess) CraftInboundOptions() (*option.Inbound, error) {
+	port, err := v.port()
+	if err != nil {
+		return nil, err
+	}
+	listen, err := listenOptions(v.Address, strconv.Itoa(int(port)))
+	if err != nil {
+		return nil, err
+	}
+	aid, err := v.alterID()
+	if err != nil {
+		return nil, err
+	}
+	transport, err := buildTransport(v.transport())
+	if err != nil {
+		return nil, err
 	}
 
-	addr, _ := netip.ParseAddr(v.Address)
-
-	var aid int = 0
-	if v.Aid != nil {
-		switch aidT := v.Aid.(type) {
-		case int:
-			aid = aidT
-		case float64:
-			aid = int(aidT)
-		case string:
-			aid, _ = strconv.Atoi(aidT)
-		}
-	}
-
-	var transport = &option.V2RayTransportOptions{
-		Type: v.Network,
-	}
-
-	switch v.Network {
-	case "ws":
-		transport.WebsocketOptions = option.V2RayWebsocketOptions{
-			Path: v.Path,
-		}
-	case "grpc":
-		if len(v.Path) > 0 && v.Path[0] == '/' {
-			v.Path = v.Path[1:]
-		}
-		transport.GRPCOptions = option.V2RayGRPCOptions{
-			ServiceName: v.Path,
-		}
-	}
-
-	tapAddr := badoption.Addr(addr)
 	opts := option.VMessInboundOptions{
-		ListenOptions: option.ListenOptions{
-			Listen:     &tapAddr,
-			ListenPort: uint16(port),
-		},
+		ListenOptions: listen,
 		Users: []option.VMessUser{
 			{
 				Name:    "user",
@@ -300,142 +311,46 @@ func (v *Vmess) CraftInboundOptions() *option.Inbound {
 	return &option.Inbound{
 		Type:    v.Name(),
 		Tag:     "vmess-in",
-		Options: opts,
-	}
+		Options: &opts,
+	}, nil
 }
 
 func (v *Vmess) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, error) {
-	// Port type checker
-	var port int
-	switch t := v.Port.(type) {
-	case float64:
-		port = int(t)
-	case int:
-		port = t
-	case string:
-		p, err := strconv.Atoi(t)
-		if err != nil {
-			return nil, fmt.Errorf("invalid port %q: %w", v, err)
-		}
-		port = p
-	default:
-		return nil, fmt.Errorf("invalid port %q: unknown port number", v)
+	return v.craftOutbound(allowInsecure, utlsAvailable)
+}
+
+func (v *Vmess) craftOutbound(allowInsecure, utls bool) (*option.Outbound, error) {
+	port, err := v.port()
+	if err != nil {
+		return nil, err
+	}
+	aid, err := v.alterID()
+	if err != nil {
+		return nil, err
 	}
 
-	var aid int = 0
-	if v.Aid != nil {
-		switch aidT := v.Aid.(type) {
-		case int:
-			aid = aidT
-		case float64:
-			aid = int(aidT)
-		case string:
-			aid, _ = strconv.Atoi(aidT)
-		default:
-			return nil, errors.New("invalid type of aid")
-		}
-	}
-
-	tls := false
-	var alpn []string
-	var fingerprint string
-	var insecure = allowInsecure
-
-	if v.TLS == "tls" {
-		tls = true
-
-		alpn = []string{"http/1.1"}
-		if v.ALPN != "" && v.ALPN != "none" {
-			alpn = strings.Split(v.ALPN, ",")
-		}
-
-		fingerprint = "chrome"
-		if v.TlsFingerprint != "" && v.TlsFingerprint != "none" {
-			fingerprint = v.TlsFingerprint
-		}
-
-		if v.AllowInsecure != "" {
-			if v.AllowInsecure == "1" || v.AllowInsecure == "true" {
-				insecure = true
-			}
-		}
-	}
-
-	var transport = &option.V2RayTransportOptions{
-		Type: v.Network,
-	}
-
-	switch v.Network {
-	case "tcp":
-		break
-	case "ws":
-		transport.WebsocketOptions = option.V2RayWebsocketOptions{
-			Path:    v.Path,
-			Headers: badoption.HTTPHeader{},
-		}
-		transport.WebsocketOptions.Headers["Host"] = badoption.Listable[string]{v.Host}
-		transport.WebsocketOptions.Headers["User-Agent"] = badoption.Listable[string]{"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"}
-		break
-	case "http":
-		transport.HTTPOptions = option.V2RayHTTPOptions{
-			Host:        nil,
-			Path:        v.Path,
-			Method:      "GET",
-			Headers:     nil,
-			IdleTimeout: 0,
-			PingTimeout: 0,
-		}
-		if v.Host != "" {
-			h := conf.StringList(strings.Split(v.Host, ","))
-			transport.HTTPOptions.Host = badoption.Listable[string](h)
-		}
-		break
-	case "httpupgrade":
-		transport.HTTPUpgradeOptions = option.V2RayHTTPUpgradeOptions{
-			Host:    v.Host,
-			Path:    v.Path,
-			Headers: nil,
-		}
-		break
-	case "grpc":
-		// v.Mode Gun & Multi
-		if len(v.Path) > 0 {
-			if v.Path[0] == '/' {
-				v.Path = v.Path[1:]
-			}
-		}
-
-		transport.GRPCOptions = option.V2RayGRPCOptions{
-			ServiceName: v.Path,
-		}
-		break
-	case "quic":
-		transport.QUICOptions = option.V2RayQUICOptions{}
-		break
+	tlsOpts, transport, err := buildStream(tlsParams{
+		UTLS:          utls,
+		Security:      v.TLS,
+		SNI:           v.SNI,
+		ALPN:          v.ALPN,
+		Fingerprint:   v.TlsFingerprint,
+		AllowInsecure: fmt.Sprint(v.AllowInsecure),
+	}, v.transport(), allowInsecure)
+	if err != nil {
+		return nil, err
 	}
 
 	opts := option.VMessOutboundOptions{
-		DialerOptions: option.DialerOptions{},
 		ServerOptions: option.ServerOptions{
-			Server:     v.Address,
-			ServerPort: uint16(port),
+			Server:     serverHost(v.Address),
+			ServerPort: port,
 		},
-		UUID:      v.ID,
-		Security:  v.Security,
-		Transport: transport,
-		AlterId:   aid,
-		OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{
-			TLS: &option.OutboundTLSOptions{
-				Enabled:    tls,
-				ServerName: v.SNI,
-				ALPN:       alpn,
-				UTLS: &option.OutboundUTLSOptions{
-					Enabled:     true,
-					Fingerprint: fingerprint,
-				},
-				Insecure: insecure,
-			},
-		},
+		UUID:                        v.ID,
+		Security:                    v.Security,
+		Transport:                   transport,
+		AlterId:                     aid,
+		OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{TLS: tlsOpts},
 	}
 
 	return &option.Outbound{
@@ -451,10 +366,13 @@ func (v *Vmess) CraftOutbound(ctx context.Context, l logger.ContextLogger, allow
 		return nil, err
 	}
 
-	vmessOptions, _ := options.Options.(option.VMessOutboundOptions)
-	out, err := sing_vmess.NewOutbound(ctx, service.FromContext[adapter.Router](ctx), l, "out_vmess", vmessOptions)
+	vmessOptions, ok := options.Options.(*option.VMessOutboundOptions)
+	if !ok {
+		return nil, fmt.Errorf("vmess: unexpected options type %T", options.Options)
+	}
+	out, err := sing_vmess.NewOutbound(ctx, service.FromContext[adapter.Router](ctx), l, "out_vmess", *vmessOptions)
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("failed creating vmess outbound: %v", err))
+		return nil, fmt.Errorf("failed creating vmess outbound: %w", err)
 	}
 
 	return out, nil

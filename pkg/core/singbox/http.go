@@ -3,14 +3,12 @@ package singbox
 import (
 	"context"
 	"fmt"
-	"net/netip"
-	"strconv"
+	"net"
 
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/protocol"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing/common/json/badoption"
 	"github.com/sagernet/sing/common/logger"
 )
 
@@ -31,7 +29,7 @@ func (h *Http) DetailsStr() string {
 }
 
 func (h *Http) GetLink() string {
-	return fmt.Sprintf("http://%s:%s", h.Address, h.Port)
+	return "http://" + net.JoinHostPort(serverHost(h.Address), h.Port)
 }
 
 func (h *Http) ConvertToGeneralConfig() protocol.GeneralConfig {
@@ -45,22 +43,17 @@ func (h *Http) ConvertToGeneralConfig() protocol.GeneralConfig {
 	}
 }
 
-func (h *Http) CraftInboundOptions() *option.Inbound {
-	port, _ := strconv.Atoi(h.Port)
-	addr, _ := netip.ParseAddr(h.Address)
-
-	tapAddr := badoption.Addr(addr)
-	opts := option.HTTPMixedInboundOptions{
-		ListenOptions: option.ListenOptions{
-			Listen:     &tapAddr,
-			ListenPort: uint16(port),
-		},
+func (h *Http) CraftInboundOptions() (*option.Inbound, error) {
+	listen, err := listenOptions(h.Address, h.Port)
+	if err != nil {
+		return nil, err
 	}
+	opts := option.HTTPMixedInboundOptions{ListenOptions: listen}
 
 	return &option.Inbound{
 		Type:    h.Name(),
-		Options: opts,
-	}
+		Options: &opts,
+	}, nil
 }
 
 func (h *Http) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, error) {

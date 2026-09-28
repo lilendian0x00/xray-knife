@@ -115,9 +115,14 @@ func TestProtocol_BuildConfigs(t *testing.T) {
 		expectInbErr bool
 	}{
 		{"VLESS-WS", "vless://a1a1-b2b2-c3c3@1.2.3.4:80?type=ws&host=my.host.com&path=%2F#VLESS+WS", false},
-		{"Trojan-GRPC", "trojan://password@example.com:443?security=tls&sni=sub.domain.com&type=grpc&serviceName=my-service#Trojan+GRPC", false},
-		{"Shadowsocks", "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ=@example.com:443#SS", false},
-		{"SOCKS5-Auth", "socks://dXNlcjpwYXNzd29yZA==@example.com:1080#SOCKS", false},
+		// A hostname is not a listen address: inbounds reject it instead of
+		// silently listening on every interface.
+		{"Trojan-GRPC", "trojan://password@example.com:443?security=tls&sni=sub.domain.com&type=grpc&serviceName=my-service#Trojan+GRPC", true},
+		{"Trojan-GRPC-IP", "trojan://password@127.0.0.1:443?security=tls&sni=sub.domain.com&type=grpc&serviceName=my-service#Trojan+GRPC", false},
+		{"Shadowsocks", "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ=@example.com:443#SS", true},
+		{"Shadowsocks-IP", "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ=@127.0.0.1:443#SS", false},
+		{"SOCKS5-Auth", "socks://dXNlcjpwYXNzd29yZA==@example.com:1080#SOCKS", true},
+		{"SOCKS5-Auth-Localhost", "socks://dXNlcjpwYXNzd29yZA==@localhost:1080#SOCKS", false},
 		{"WireGuard", "wireguard://SECRET_KEY@1.2.3.4:51820?address=10.0.0.2%2F32&publickey=PUBLIC_KEY#WG", true}, // Inbound from client link not supported
 	}
 

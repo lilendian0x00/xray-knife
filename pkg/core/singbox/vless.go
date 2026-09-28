@@ -2,26 +2,19 @@ package singbox
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
-	"net/netip"
-	"net/url"
 	"reflect"
-	"strconv"
 	"strings"
 
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/protocol"
-	"github.com/lilendian0x00/xray-knife/v11/utils"
 
 	"github.com/fatih/color"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
 	sing_vless "github.com/sagernet/sing-box/protocol/vless"
-	"github.com/sagernet/sing/common/json/badoption"
 	"github.com/sagernet/sing/common/logger"
 	"github.com/sagernet/sing/service"
-	"github.com/xtls/xray-core/infra/conf"
 )
 
 func NewVless(link string) Protocol {
@@ -37,20 +30,16 @@ func (v *Vless) Parse() error {
 		return fmt.Errorf("vless unreconized: %s", v.OrigLink)
 	}
 
-	uri, err := url.Parse(v.OrigLink)
+	uri, remark, err := parseShareLink(v.OrigLink)
 	if err != nil {
 		return err
 	}
 
-	v.ID = uri.User.String()
+	v.ID = userInfoSecret(uri.User)
 
 	v.Address, v.Port, err = net.SplitHostPort(uri.Host)
 	if err != nil {
 		return err
-	}
-
-	if utils.IsIPv6(v.Address) {
-		v.Address = "[" + v.Address + "]"
 	}
 
 	// Get the type of the struct
@@ -59,13 +48,14 @@ func (v *Vless) Parse() error {
 	// Get the number of fields in the struct
 	numFields := t.NumField()
 
+	query := uri.Query()
 	// Iterate over each field of the struct
 	for i := 0; i < numFields; i++ {
 		field := t.Field(i)
 		tag := field.Tag.Get("json")
 
 		// If the query value exists for the field, set it
-		if values, ok := uri.Query()[tag]; ok {
+		if values, ok := query[tag]; ok {
 			value := values[0]
 			v := reflect.ValueOf(v).Elem().FieldByName(field.Name)
 
@@ -80,16 +70,7 @@ func (v *Vless) Parse() error {
 		}
 	}
 
-	v.Remark, err = url.PathUnescape(uri.Fragment)
-	if err != nil {
-		v.Remark = uri.Fragment
-	}
-	//portUint, err := strconv.ParseUint(address[1], 10, 16)
-	//if err != nil {
-	//	fmt.Fprintf(os.Stderr, "%v", err)
-	//	os.Exit(1)
-	//}
-	//v.Port = uint16(portUint)
+	v.Remark = remark
 
 	if v.HeaderType == "http" || v.Type == "ws" || v.Type == "h2" {
 		if v.Path == "" {
@@ -198,37 +179,25 @@ func (v *Vless) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	return g
 }
 
-func (v *Vless) CraftInboundOptions() *option.Inbound {
-	port, _ := strconv.Atoi(v.Port)
-	addr, _ := netip.ParseAddr(v.Address)
+func (v *Vless) transport() v2rayTransport {
+	return v2rayTransport{Network: v.Type, HeaderType: v.HeaderType, Host: v.Host, Path: v.Path, ServiceName: v.ServiceName}
+}
+
+func (v *Vless) CraftInboundOptions() (*option.Inbound, error) {
+	listen, err := listenOptions(v.Address, v.Port)
+	if err != nil {
+		return nil, err
+	}
 
 	// TODO: Inbound TLS requires certificates, which are not available from a client link.
 	// Therefore, TLS is not configured for the inbound.
-
-	var transport = &option.V2RayTransportOptions{
-		Type: v.Type,
+	transport, err := buildTransport(v.transport())
+	if err != nil {
+		return nil, err
 	}
 
-	switch v.Type {
-	case "ws":
-		transport.WebsocketOptions = option.V2RayWebsocketOptions{
-			Path: v.Path,
-		}
-	case "grpc":
-		if len(v.ServiceName) > 0 && v.ServiceName[0] == '/' {
-			v.ServiceName = v.ServiceName[1:]
-		}
-		transport.GRPCOptions = option.V2RayGRPCOptions{
-			ServiceName: v.ServiceName,
-		}
-	}
-
-	tapAddr := badoption.Addr(addr)
 	opts := option.VLESSInboundOptions{
-		ListenOptions: option.ListenOptions{
-			Listen:     &tapAddr,
-			ListenPort: uint16(port),
-		},
+		ListenOptions: listen,
 		Users: []option.VLESSUser{
 			{
 				Name: "user", // sing-box requires a name
@@ -242,120 +211,43 @@ func (v *Vless) CraftInboundOptions() *option.Inbound {
 	return &option.Inbound{
 		Type:    v.Name(),
 		Tag:     "vless-in",
-		Options: opts,
-	}
+		Options: &opts,
+	}, nil
 }
 
 func (v *Vless) CraftOutboundOptions(allowInsecure bool) (*option.Outbound, error) {
-	port, _ := strconv.Atoi(v.Port)
+	return v.craftOutbound(allowInsecure, utlsAvailable)
+}
 
-	tls := false
-	var alpn []string
-	var fingerprint string
-	var insecure = allowInsecure
-
-	if v.Security == "tls" || v.Security == "reality" {
-		tls = true
-
-		alpn = []string{"http/1.1"}
-		if v.ALPN != "" && v.ALPN != "none" {
-			alpn = strings.Split(v.ALPN, ",")
-		}
-
-		fingerprint = "chrome"
-		if v.TlsFingerprint != "" && v.TlsFingerprint != "none" {
-			fingerprint = v.TlsFingerprint
-		}
-
-		if v.AllowInsecure != "" {
-			if v.AllowInsecure == "1" || v.AllowInsecure == "true" {
-				insecure = true
-			}
-		}
+func (v *Vless) craftOutbound(allowInsecure, utls bool) (*option.Outbound, error) {
+	port, err := parsePort(v.Port)
+	if err != nil {
+		return nil, err
 	}
 
-	var transport = &option.V2RayTransportOptions{
-		Type: v.Type,
-	}
-
-	switch v.Type {
-	case "tcp":
-		return nil, errors.New("tcp transport not supported")
-	case "ws":
-		transport.WebsocketOptions = option.V2RayWebsocketOptions{
-			Path:                v.Path,
-			Headers:             badoption.HTTPHeader{},
-			MaxEarlyData:        0,
-			EarlyDataHeaderName: "",
-		}
-		transport.WebsocketOptions.Headers["host"] = badoption.Listable[string]{v.Host}
-		transport.WebsocketOptions.Headers["User-Agent"] = badoption.Listable[string]{"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"}
-
-		break
-	case "http":
-		transport.HTTPOptions = option.V2RayHTTPOptions{
-			Host:        nil,
-			Path:        v.Path,
-			Method:      "GET",
-			Headers:     nil,
-			IdleTimeout: 0,
-			PingTimeout: 0,
-		}
-		if v.Host != "" {
-			h := conf.StringList(strings.Split(v.Host, ","))
-			transport.HTTPOptions.Host = badoption.Listable[string](h)
-		}
-		break
-	case "httpupgrade":
-		transport.HTTPUpgradeOptions = option.V2RayHTTPUpgradeOptions{
-			Host: v.Host,
-			Path: v.Path,
-		}
-		break
-	case "grpc":
-		// v.Mode Gun & Multi
-		if len(v.ServiceName) > 0 {
-			if v.ServiceName[0] == '/' {
-				v.ServiceName = v.ServiceName[1:]
-			}
-		}
-		transport.GRPCOptions = option.V2RayGRPCOptions{
-			ServiceName: v.ServiceName,
-		}
-		break
-	case "quic":
-		transport.QUICOptions = option.V2RayQUICOptions{}
-		break
+	tlsOpts, transport, err := buildStream(tlsParams{
+		UTLS:          utls,
+		Security:      v.Security,
+		SNI:           v.SNI,
+		ALPN:          v.ALPN,
+		Fingerprint:   v.TlsFingerprint,
+		AllowInsecure: v.AllowInsecure,
+		PublicKey:     v.PublicKey,
+		ShortID:       v.ShortIds,
+	}, v.transport(), allowInsecure)
+	if err != nil {
+		return nil, err
 	}
 
 	opts := option.VLESSOutboundOptions{
-		DialerOptions: option.DialerOptions{},
 		ServerOptions: option.ServerOptions{
-			Server:     v.Address,
-			ServerPort: uint16(port),
+			Server:     serverHost(v.Address),
+			ServerPort: port,
 		},
-		UUID:      v.ID,
-		Transport: transport,
-		OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{
-			TLS: &option.OutboundTLSOptions{
-				Enabled:    tls,
-				ServerName: v.SNI,
-				ALPN:       alpn,
-				UTLS: &option.OutboundUTLSOptions{
-					Enabled:     true,
-					Fingerprint: fingerprint,
-				},
-				Insecure: insecure,
-			},
-		},
-		Flow: v.Flow,
-	}
-	if v.Security == "reality" {
-		opts.TLS.Reality = &option.OutboundRealityOptions{
-			Enabled:   true,
-			PublicKey: v.PublicKey,
-			ShortID:   v.ShortIds,
-		}
+		UUID:                        v.ID,
+		Transport:                   transport,
+		OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{TLS: tlsOpts},
+		Flow:                        v.Flow,
 	}
 
 	return &option.Outbound{
@@ -371,10 +263,13 @@ func (v *Vless) CraftOutbound(ctx context.Context, l logger.ContextLogger, allow
 		return nil, err
 	}
 
-	vlessOptions, _ := options.Options.(option.VLESSOutboundOptions)
-	out, err := sing_vless.NewOutbound(ctx, service.FromContext[adapter.Router](ctx), l, "out_vless", vlessOptions)
+	vlessOptions, ok := options.Options.(*option.VLESSOutboundOptions)
+	if !ok {
+		return nil, fmt.Errorf("vless: unexpected options type %T", options.Options)
+	}
+	out, err := sing_vless.NewOutbound(ctx, service.FromContext[adapter.Router](ctx), l, "out_vless", *vlessOptions)
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("failed creating vless outbound: %v", err))
+		return nil, fmt.Errorf("failed creating vless outbound: %w", err)
 	}
 
 	return out, nil

@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/protocol"
-	"github.com/lilendian0x00/xray-knife/v11/utils"
 
 	"github.com/fatih/color"
 	"github.com/xtls/xray-core/infra/conf"
@@ -24,7 +22,9 @@ func (h *Hysteria2) Name() string {
 }
 
 func (h *Hysteria2) Parse() error {
-	uri, err := url.Parse(h.OrigLink)
+	base, remark := splitRemark(h.OrigLink)
+	base, h.Ports = extractPortHopping(base)
+	uri, err := url.Parse(base)
 	if err != nil {
 		return fmt.Errorf("failed to parse Hysteria2 link: %w", err)
 	}
@@ -34,15 +34,17 @@ func (h *Hysteria2) Parse() error {
 		return fmt.Errorf("hysteria2/hy2 unrecognized scheme: %s", uri.Scheme)
 	}
 
-	h.Password = uri.User.String() // Hysteria2 auth string (password)
+	// Hysteria2 auth string, decoded ("user:pass" auth keeps its colon).
+	h.Password = userSecret(uri.User)
 
-	h.Address, h.Port, err = net.SplitHostPort(uri.Host)
-	if err != nil {
-		return fmt.Errorf("failed to split host and port for Hysteria2 link: %w", err)
+	// The URI scheme defaults the port to 443 when it is omitted.
+	h.Address = uri.Hostname()
+	h.Port = uri.Port()
+	if h.Port == "" {
+		h.Port = "443"
 	}
-
-	if utils.IsIPv6(h.Address) {
-		h.Address = "[" + h.Address + "]"
+	if h.Address == "" {
+		return fmt.Errorf("hysteria2 link has no server address")
 	}
 
 	query := uri.Query()
@@ -50,25 +52,51 @@ func (h *Hysteria2) Parse() error {
 	h.ObfusType = query.Get("obfs")
 	h.ObfusPassword = query.Get("obfs-password")
 	h.Insecure = query.Get("insecure") // "0", "1", "false", "true"
-
-	if h.SNI != "" && !utils.IsValidHostOrSNI(h.SNI) {
-		return fmt.Errorf("invalid characters in 'sni' parameter: %s", h.SNI)
+	h.PinSHA256 = query.Get("pinSHA256")
+	if mport := query.Get("mport"); mport != "" && h.Ports == "" {
+		h.Ports = mport
 	}
 
-	unescapedRemark, err := url.PathUnescape(uri.Fragment)
-	if err != nil {
-		h.Remark = uri.Fragment
-	} else {
-		h.Remark = unescapedRemark
+	if h.SNI != "" && !validSNI(h.SNI) {
+		return fmt.Errorf("invalid characters in 'sni' parameter: %q", h.SNI)
 	}
+
+	h.Remark = remark
 
 	// Hysteria2 mandates TLS, which needs a server name. Fall back to the
-	// address when SNI is omitted.
+	// (unbracketed) address when SNI is omitted.
 	if h.SNI == "" {
 		h.SNI = h.Address
 	}
 
 	return nil
+}
+
+// extractPortHopping rewrites "host:443,20000-30000" (port hopping) to
+// "host:443" so url.Parse accepts it, returning the full port spec.
+func extractPortHopping(link string) (string, string) {
+	scheme, rest, found := strings.Cut(link, "://")
+	if !found {
+		return link, ""
+	}
+	end := strings.IndexAny(rest, "/?")
+	if end < 0 {
+		end = len(rest)
+	}
+	authority := rest[:end]
+	colon := strings.LastIndex(authority, ":")
+	if colon < 0 || strings.LastIndex(authority, "]") > colon {
+		return link, ""
+	}
+	ports := authority[colon+1:]
+	if !strings.ContainsAny(ports, ",-") {
+		return link, ""
+	}
+	first := ports
+	if i := strings.IndexAny(first, ",-"); i >= 0 {
+		first = first[:i]
+	}
+	return scheme + "://" + authority[:colon+1] + first + rest[end:], ports
 }
 
 func (h *Hysteria2) DetailsStr() string {
@@ -84,11 +112,12 @@ func (h *Hysteria2) DetailsStr() string {
 		info += fmt.Sprintf("%s: %v\n", color.RedString("Insecure"), h.Insecure)
 	}
 	if h.ObfusType != "" {
-		// xray-core's hysteria transport has no obfs support (salamander);
-		// surface it so the user knows it won't be applied on this core.
-		info += fmt.Sprintf("%s: %s (unsupported on xray core)\n%s: %s\n",
+		info += fmt.Sprintf("%s: %s\n%s: %s\n",
 			color.RedString("Obfs"), h.ObfusType,
 			color.RedString("Obfs-Password"), h.ObfusPassword)
+	}
+	if h.Ports != "" {
+		info += fmt.Sprintf("%s: %s (xray core uses port %s only)\n", color.RedString("Port hopping"), h.Ports, h.Port)
 	}
 	return info
 }
@@ -111,6 +140,7 @@ func (h *Hysteria2) GetLink() string {
 	addQueryParam("sni", h.SNI)
 	addQueryParam("obfs", h.ObfusType)
 	addQueryParam("obfs-password", h.ObfusPassword)
+	addQueryParam("pinSHA256", h.PinSHA256)
 	if s, ok := h.Insecure.(string); ok {
 		addQueryParam("insecure", s)
 	}
@@ -128,20 +158,19 @@ func (h *Hysteria2) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Remark = h.Remark
 	g.SNI = h.SNI
 	g.TLS = "tls"
+	g.Network = "udp"
 	g.OrigLink = h.GetLink()
 	return g
 }
 
-func (h *Hysteria2) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
-	portNum, err := strconv.ParseUint(h.Port, 10, 16)
-	if err != nil {
-		return nil, fmt.Errorf("invalid port %q: %w", h.Port, err)
-	}
+// wantsInsecure reports whether the link asks to skip certificate checks.
+func (h *Hysteria2) wantsInsecure() bool { return truthy(h.Insecure) }
 
-	out := &conf.OutboundDetourConfig{}
-	out.Tag = "proxy"
-	// xray-core registers this proxy under the name "hysteria" (Hysteria2).
-	out.Protocol = "hysteria"
+func (h *Hysteria2) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
+	portNum, err := parsePort(h.Port)
+	if err != nil {
+		return nil, err
+	}
 
 	// Outbound settings only carry version + endpoint (HysteriaClientConfig).
 	settingsBytes, err := json.Marshal(map[string]interface{}{
@@ -153,10 +182,11 @@ func (h *Hysteria2) BuildOutboundDetourConfig(allowInsecure bool) (*conf.Outboun
 		return nil, fmt.Errorf("marshal hysteria2 settings: %w", err)
 	}
 	oset := json.RawMessage(settingsBytes)
-	out.Settings = &oset
 
 	// The auth string lives in the transport's hysteriaSettings; TLS/SNI is
 	// read from the stream security settings (tls.ConfigFromStreamSettings).
+	// Certificate checks can only be relaxed by pinning (pinSHA256): see
+	// transportSpec.applyOutboundSecurity.
 	network := conf.TransportProtocol("hysteria")
 	s := &conf.StreamConfig{
 		Network:  &network,
@@ -165,27 +195,32 @@ func (h *Hysteria2) BuildOutboundDetourConfig(allowInsecure bool) (*conf.Outboun
 			Version: 2,
 			Auth:    h.Password,
 		},
+		TLSSettings: &conf.TLSConfig{
+			ServerName:           h.SNI,
+			PinnedPeerCertSha256: h.PinSHA256,
+		},
 	}
 
-	insecure := allowInsecure
-	if str, ok := h.Insecure.(string); ok && (str == "1" || str == "true") {
-		insecure = true
-	}
-	if b, ok := h.Insecure.(bool); ok && b {
-		insecure = true
-	}
-
-	s.TLSSettings = &conf.TLSConfig{
-		ServerName: h.SNI,
-	}
-	// xray-core removed "allowInsecure"; verifyPeerCertByName is the sanctioned
-	// replacement (accepts self-signed certs valid for this name).
-	if insecure && h.SNI != "" {
-		s.TLSSettings.VerifyPeerCertByName = h.SNI
+	switch strings.ToLower(h.ObfusType) {
+	case "", "none":
+	case "salamander":
+		// xray-core moved Hysteria2's obfuscation into finalmask.
+		mask, err := json.Marshal(map[string]string{"password": h.ObfusPassword})
+		if err != nil {
+			return nil, err
+		}
+		raw := json.RawMessage(mask)
+		s.FinalMask = &conf.FinalMask{Udp: []conf.Mask{{Type: "salamander", Settings: &raw}}}
+	default:
+		return nil, fmt.Errorf("unsupported hysteria2 obfs %q", h.ObfusType)
 	}
 
-	out.StreamSetting = s
-	return out, nil
+	return &conf.OutboundDetourConfig{
+		Tag:           "proxy",
+		Protocol:      "hysteria", // xray-core registers Hysteria2 as "hysteria"
+		Settings:      &oset,
+		StreamSetting: s,
+	}, nil
 }
 
 func (h *Hysteria2) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {

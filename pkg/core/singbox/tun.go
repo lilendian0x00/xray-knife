@@ -67,7 +67,7 @@ func (t *Tun) ConvertToGeneralConfig() protocol.GeneralConfig {
 // by sing-box core. Note: traffic sniffing must be configured via a route
 // rule with action "sniff" — the InboundOptions.Sniff* fields were removed
 // in sing-box 1.13 final.
-func (t *Tun) CraftInboundOptions() *option.Inbound {
+func (t *Tun) CraftInboundOptions() (*option.Inbound, error) {
 	opts := option.TunInboundOptions{
 		InterfaceName: t.InterfaceName,
 		MTU:           t.MTU,
@@ -83,7 +83,7 @@ func (t *Tun) CraftInboundOptions() *option.Inbound {
 		Type:    t.Name(),
 		Tag:     "TUN_INBOUND",
 		Options: &opts,
-	}
+	}, nil
 }
 
 func (t *Tun) CraftOutboundOptions(bool) (*option.Outbound, error) {

@@ -37,6 +37,11 @@ type Vmess struct {
 	// comma-separated SHA-256 hex, colons allowed. Maps to xray-core's
 	// tlsSettings.pinnedPeerCertSha256.
 	PinnedPeerCertSha256 string `json:"pcs,omitempty"`
+	// VerifyPeerCertByName ("vcn") verifies the server certificate against
+	// these names instead of the SNI (xray tlsSettings.verifyPeerCertByName).
+	VerifyPeerCertByName string `json:"vcn,omitempty"`
+	// ECHConfigList ("ech") enables Encrypted Client Hello.
+	ECHConfigList string `json:"ech,omitempty"`
 
 	//// It's also possible for Vmess to have REALITY...
 	//PublicKey string `json:"pbk"`
@@ -70,6 +75,8 @@ type Vless struct {
 	TlsFingerprint       string `json:"fp"`            // TLS fingerprint
 	AllowInsecure        string `json:"allowInsecure"` // Insecure TLS
 	PinnedPeerCertSha256 string `json:"pcs"`           // TLS cert SHA-256 pin(s), comma-separated (xray pinnedPeerCertSha256)
+	VerifyPeerCertByName string `json:"vcn"`           // Names to verify the cert against (xray verifyPeerCertByName)
+	ECHConfigList        string `json:"ech"`           // Encrypted Client Hello config list
 	Type                 string `json:"type"`          // Network (XHTTP, ...)
 	Remark               string `json:"ps"`            // Config's name
 	Authority            string `json:"authority"`     // GRPC
@@ -86,6 +93,7 @@ type Shadowsocks struct {
 	Port       string
 	Encryption string
 	Password   string
+	Plugin     string // SIP003 plugin ("obfs-local;obfs=http;..."), unsupported by xray-core
 	Remark     string
 	OrigLink   string // Original link
 }
@@ -107,6 +115,8 @@ type Trojan struct {
 	TlsFingerprint       string `json:"fp"`            // TLS fingerprint
 	AllowInsecure        string `json:"allowInsecure"` // Insecure TLS
 	PinnedPeerCertSha256 string `json:"pcs"`           // TLS cert SHA-256 pin(s), comma-separated (xray pinnedPeerCertSha256)
+	VerifyPeerCertByName string `json:"vcn"`           // Names to verify the cert against (xray verifyPeerCertByName)
+	ECHConfigList        string `json:"ech"`           // Encrypted Client Hello config list
 	Type                 string `json:"type"`          // Network (XHTTP, ...)
 	Remark               string // Config's name
 	Authority            string `json:"authority"`   // GRPC
@@ -155,5 +165,7 @@ type Hysteria2 struct {
 	ObfusPassword string
 	SNI           string
 	Insecure      interface{}
+	PinSHA256     string // Server certificate SHA-256 pin ("pinSHA256")
+	Ports         string // Port-hopping spec ("443,20000-30000"); xray uses Port only
 	OrigLink      string // Original link
 }

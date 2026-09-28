@@ -3,9 +3,11 @@ package xray
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/url"
-	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -53,58 +55,89 @@ func (w *Wireguard) Name() string {
 }
 
 func (w *Wireguard) Parse() error {
-	if !strings.HasPrefix(w.OrigLink, protocol.WireguardIdentifier) {
+	if !strings.HasPrefix(w.OrigLink, protocol.WireguardIdentifier+"://") {
 		return fmt.Errorf("wireguard unreconized: %s", w.OrigLink)
 	}
 
-	uri, err := url.Parse(w.OrigLink)
-	if err != nil {
-		return err
+	// Split by hand rather than with url.Parse: WireGuard keys are
+	// standard base64, and an unencoded "/" in the private key would end
+	// the URL authority early. Keys also keep a literal "+".
+	base, remark := splitRemark(w.OrigLink)
+	body := strings.TrimPrefix(base, protocol.WireguardIdentifier+"://")
+	body, rawQuery, _ := strings.Cut(body, "?")
+	at := strings.LastIndex(body, "@")
+	if at < 0 {
+		return errors.New("wireguard link has no private key")
 	}
+	w.SecretKey = lenientUnescape(body[:at])
+	w.Endpoint = strings.TrimSuffix(body[at+1:], "/")
+	w.Remark = remark
 
-	unescapedSecretKey, err0 := url.PathUnescape(uri.User.String())
-	if err0 != nil {
-		return err0
+	query := rawQueryValues(rawQuery)
+	// Parameter names are matched case-insensitively, in the order given
+	// (the first spelling that is present wins), independent of map order.
+	keys := make([]string, 0, len(query))
+	for key := range query {
+		keys = append(keys, key)
 	}
-
-	w.SecretKey = unescapedSecretKey
-
-	w.Endpoint = uri.Host
-
-	// Get the type of the struct
-	t := reflect.TypeOf(*w)
-
-	// Get the number of fields in the struct
-	numFields := t.NumField()
-
-	// Iterate over each field of the struct
-	for i := 0; i < numFields; i++ {
-		field := t.Field(i)
-		tag := field.Tag.Get("json")
-
-		// If the query value exists for the field, set it
-		if values, ok := uri.Query()[tag]; ok {
-			value := values[0]
-			v := reflect.ValueOf(w).Elem().FieldByName(field.Name)
-
-			switch v.Type().String() {
-			case "string":
-				v.SetString(value)
-			case "int32":
-				var intValue int
-				fmt.Sscanf(value, "%d", &intValue)
-				v.SetInt(int64(intValue))
-
+	sort.Strings(keys)
+	get := func(names ...string) string {
+		for _, name := range names {
+			for _, key := range keys {
+				if values := query[key]; strings.EqualFold(key, name) && len(values) > 0 {
+					return strings.TrimSpace(values[0])
+				}
 			}
 		}
+		return ""
+	}
+	atoi := func(s string) int32 {
+		n, _ := strconv.ParseInt(s, 10, 32)
+		return int32(n)
 	}
 
-	w.Remark, err = url.PathUnescape(uri.Fragment)
-	if err != nil {
-		w.Remark = uri.Fragment
+	if sk := get("secretkey", "privatekey"); sk != "" {
+		w.SecretKey = sk
 	}
+	w.PublicKey = get("publickey", "peer_public_key")
+	w.PreSharedKey = get("presharedkey", "psk", "pre_shared_key")
+	w.LocalAddress = get("address", "ip")
+	w.Mtu = atoi(get("mtu"))
+	w.KeepAlive = atoi(get("keepalive", "persistent_keepalive_interval"))
+	w.AllowedIPs = get("allowedips")
+	w.Reserved = get("reserved")
 
+	if w.SecretKey == "" {
+		return errors.New("wireguard link has no private key")
+	}
+	if _, _, err := net.SplitHostPort(w.Endpoint); err != nil {
+		return fmt.Errorf("invalid wireguard endpoint %q: %w", w.Endpoint, err)
+	}
 	return nil
+}
+
+// localAddresses returns the interface addresses as CIDRs; a bare IP gets
+// a host prefix (/32 or /128).
+func (w *Wireguard) localAddresses() ([]string, error) {
+	var out []string
+	for _, a := range splitList(w.LocalAddress) {
+		if !strings.Contains(a, "/") {
+			ip := net.ParseIP(unbracket(a))
+			if ip == nil {
+				return nil, fmt.Errorf("invalid wireguard address %q", a)
+			}
+			if ip.To4() != nil {
+				a = ip.String() + "/32"
+			} else {
+				a = ip.String() + "/128"
+			}
+		}
+		out = append(out, a)
+	}
+	if len(out) == 0 {
+		return nil, errors.New("wireguard link has no local address (address=...)")
+	}
+	return out, nil
 }
 
 func (w *Wireguard) DetailsStr() string {
@@ -164,7 +197,9 @@ func (w *Wireguard) GetLink() string {
 
 func (w *Wireguard) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Protocol = w.Name()
-	g.Address = w.Endpoint
+	g.Address, g.Port, _ = net.SplitHostPort(w.Endpoint)
+	g.Remark = w.Remark
+	g.Network = "udp"
 	g.OrigLink = w.GetLink()
 
 	return g
@@ -187,44 +222,10 @@ type Config struct {
 }
 
 func (w *Wireguard) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
-	out := &conf.OutboundDetourConfig{}
-	out.Tag = "proxy"
-	out.Protocol = w.Name()
-
-	//c := conf.WireGuardConfig{
-	//	IsClient:   true,
-	//	KernelMode: nil,
-	//	SecretKey:  w.SecretKey,
-	//	Address:    strings.Split(w.LocalAddress, ","),
-	//	Peers: []*conf.WireGuardPeerConfig{
-	//		{
-	//			PublicKey:    w.PublicKey,
-	//			PreSharedKey: "",
-	//			Endpoint:     w.Endpoint,
-	//			KeepAlive:    0,
-	//			AllowedIPs:   nil,
-	//		},
-	//	},
-	//	MTU:            w.Mtu,
-	//	DomainStrategy: "ForceIPv6v4",
-	//}
-
-	//oset := json.RawMessage(fmt.Sprintf({
-	//	"secretKey": "%s",
-	//		"address": ["%s", "%s"],
-	//"peers": [
-	//{
-	//"endpoint": "%s",
-	//"publicKey": "%s"
-	//}
-	//],
-	//"mtu": %d
-	//}
-	//, w.SecretKey, strings.Split(w.LocalAddress, ",")[0], strings.Split(w.LocalAddress, ",")[1], w.Endpoint, w.PublicKey, w.Mtu,
-	//))
-
-	// Prepare the address slice safely.
-	addresses := strings.Split(w.LocalAddress, ",")
+	addresses, err := w.localAddresses()
+	if err != nil {
+		return nil, err
+	}
 
 	peer := Peer{
 		Endpoint:     w.Endpoint,
@@ -234,15 +235,7 @@ func (w *Wireguard) BuildOutboundDetourConfig(allowInsecure bool) (*conf.Outboun
 	if w.KeepAlive > 0 {
 		peer.KeepAlive = uint32(w.KeepAlive)
 	}
-	if w.AllowedIPs != "" {
-		var ips []string
-		for _, ip := range strings.Split(w.AllowedIPs, ",") {
-			if ip = strings.TrimSpace(ip); ip != "" {
-				ips = append(ips, ip)
-			}
-		}
-		peer.AllowedIPs = ips
-	}
+	peer.AllowedIPs = splitList(w.AllowedIPs)
 
 	cfg := Config{
 		SecretKey: w.SecretKey,
@@ -250,21 +243,24 @@ func (w *Wireguard) BuildOutboundDetourConfig(allowInsecure bool) (*conf.Outboun
 		Peers:     []Peer{peer},
 		MTU:       int(w.Mtu),
 	}
-	if r := parseReserved(w.Reserved); len(r) > 0 {
+	if w.Reserved != "" {
+		r := parseReserved(w.Reserved)
+		if len(r) != 3 {
+			return nil, fmt.Errorf("invalid wireguard reserved %q: want 3 bytes", w.Reserved)
+		}
 		cfg.Reserved = r
 	}
 
 	jsonData, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, err
-		// handle error
 	}
-
-	//out.Settings = &oset
 	rawMSG := json.RawMessage(jsonData)
-	out.Settings = &rawMSG
-
-	return out, nil
+	return &conf.OutboundDetourConfig{
+		Tag:      "proxy",
+		Protocol: w.Name(),
+		Settings: &rawMSG,
+	}, nil
 }
 
 func (w *Wireguard) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {

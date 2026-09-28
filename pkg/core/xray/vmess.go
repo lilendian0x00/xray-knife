@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	net2 "github.com/xtls/xray-core/common/net"
-
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/protocol"
 	"github.com/lilendian0x00/xray-knife/v11/utils"
 
@@ -25,11 +23,13 @@ func (v *Vmess) Name() string {
 	return "vmess"
 }
 
+// method1 parses the common form: base64 of a v2rayN JSON object.
 func method1(v *Vmess, link string) error {
-	if len(link) <= 8 {
+	base, remark := splitRemark(link)
+	b64encoded := strings.TrimPrefix(base, protocol.VmessIdentifier+"://")
+	if b64encoded == "" {
 		return fmt.Errorf("vmess link too short: %s", link)
 	}
-	b64encoded := link[8:]
 	decoded, err := utils.Base64Decode(b64encoded)
 	if err != nil {
 		return err
@@ -39,15 +39,17 @@ func method1(v *Vmess, link string) error {
 	}
 
 	// SNI & HOST Validation
-	if !utils.IsValidHostOrSNI(v.Host) {
-		return fmt.Errorf("invalid characters in 'host' parameter: %s", v.Host)
+	if !validHostList(strings.TrimSpace(v.Host)) {
+		return fmt.Errorf("invalid characters in 'host' parameter: %q", v.Host)
 	}
-	if !utils.IsValidHostOrSNI(v.SNI) {
-		return fmt.Errorf("invalid characters in 'sni' parameter: %s", v.SNI)
+	if !validSNI(strings.TrimSpace(v.SNI)) {
+		return fmt.Errorf("invalid characters in 'sni' parameter: %q", v.SNI)
 	}
-
-	if utils.IsIPv6(v.Address) {
-		v.Address = "[" + v.Address + "]"
+	v.Host = strings.TrimSpace(v.Host)
+	v.SNI = strings.TrimSpace(v.SNI)
+	v.Address = unbracket(strings.TrimSpace(v.Address))
+	if v.Remark == "" {
+		v.Remark = remark
 	}
 	return nil
 }
@@ -55,6 +57,7 @@ func method1(v *Vmess, link string) error {
 // Example:
 // vmess://YXV0bzpjYmI0OTM1OC00NGQxLTQ4MmYtYWExNC02ODA3NzNlNWNjMzdAc25hcHBmb29kLmlyOjQ0Mw?remarks=sth&obfsParam=huhierg.com&path=/&obfs=websocket&tls=1&peer=gdfgreg.com&alterId=0
 func method2(v *Vmess, link string) error {
+	link, _ = splitRemark(link)
 	uri, err := url.Parse(link)
 	if err != nil {
 		return err
@@ -77,14 +80,6 @@ func method2(v *Vmess, link string) error {
 	if err != nil {
 		return err
 	}
-
-	if utils.IsIPv6(v.Address) {
-		v.Address = "[" + v.Address + "]"
-	}
-	//parseUint, err := strconv.ParseUint(suhp[2], 10, 16)
-	//if err != nil {
-	//	return err
-	//}
 
 	queryValues := uri.Query()
 	if value := queryValues.Get("remarks"); value != "" {
@@ -123,13 +118,13 @@ func method2(v *Vmess, link string) error {
 	}
 
 	// SNI & HOST Validation
-	if !utils.IsValidHostOrSNI(host) {
-		return fmt.Errorf("invalid characters in 'host' parameter: %s", host)
+	if !validHostList(host) {
+		return fmt.Errorf("invalid characters in 'host' parameter: %q", host)
 	}
 	v.Host = host
 
-	if !utils.IsValidHostOrSNI(sni) {
-		return fmt.Errorf("invalid characters in 'sni' parameter: %s", sni)
+	if !validSNI(sni) {
+		return fmt.Errorf("invalid characters in 'sni' parameter: %q", sni)
 	}
 	v.SNI = sni
 
@@ -145,11 +140,11 @@ func (v *Vmess) Parse() error {
 		return fmt.Errorf("vmess unreconized: %s", v.OrigLink)
 	}
 
-	var err error = nil
-
-	if err = method1(v, v.OrigLink); err != nil {
-		if err = method2(v, v.OrigLink); err != nil {
-			return err
+	if err1 := method1(v, v.OrigLink); err1 != nil {
+		// Start from a clean struct: method1 may have partially filled it.
+		*v = Vmess{OrigLink: v.OrigLink, CertFile: v.CertFile, KeyFile: v.KeyFile}
+		if err2 := method2(v, v.OrigLink); err2 != nil {
+			return fmt.Errorf("invalid vmess link: not base64 JSON (%v) nor legacy form (%v)", err1, err2)
 		}
 	}
 
@@ -165,7 +160,7 @@ func (v *Vmess) Parse() error {
 		v.Network = "tcp"
 	}
 
-	return err
+	return nil
 }
 
 func (v *Vmess) DetailsStr() string {
@@ -226,9 +221,8 @@ func (v *Vmess) DetailsStr() string {
 			color.RedString("ALPN"), copyV.ALPN,
 			color.RedString("Fingerprint"), copyV.TlsFingerprint)
 
-		if v.AllowInsecure != "" {
-			info += fmt.Sprintf("%s: %v\n",
-				color.RedString("Insecure"), v.AllowInsecure)
+		if truthy(v.AllowInsecure) {
+			info += fmt.Sprintf("%s: true\n", color.RedString("Insecure"))
 		}
 		if v.PinnedPeerCertSha256 != "" {
 			info += fmt.Sprintf("%s: %s\n",
@@ -245,19 +239,18 @@ func (v *Vmess) GetLink() string {
 func (v *Vmess) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	g.Protocol = v.Name()
 	g.Address = v.Address
-	g.Aid = fmt.Sprintf("%v", v.Aid)
+	g.Aid = portString(v.Aid)
 	g.Host = v.Host
 	g.ID = v.ID
 	g.Network = v.Network
 	g.Path = v.Path
-	g.Port = fmt.Sprintf("%v", v.Port)
+	g.Port = portString(v.Port)
 	g.Remark = v.Remark
 	if v.TLS == "" {
 		g.TLS = "none"
 	} else {
 		g.TLS = v.TLS
 	}
-	g.TLS = v.TLS
 	g.SNI = v.SNI
 	g.ALPN = v.ALPN
 	g.TlsFingerprint = v.TlsFingerprint
@@ -267,159 +260,62 @@ func (v *Vmess) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	return g
 }
 
-func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
-	out := &conf.OutboundDetourConfig{}
-	out.Tag = "proxy"
-	out.Protocol = v.Name()
-
-	p := conf.TransportProtocol(v.Network)
-	s := &conf.StreamConfig{
-		Network:  &p,
-		Security: v.TLS,
+// transport maps the VMess JSON fields onto the shared stream builders.
+// VMess overloads "type": the TCP header type, the xhttp mode or the gRPC
+// mode; for gRPC "path" is the service name and "host" the authority.
+func (v *Vmess) transport() transportSpec {
+	ts := transportSpec{
+		Network:              v.Network,
+		Host:                 v.Host,
+		Path:                 v.Path,
+		Security:             v.TLS,
+		SNI:                  v.SNI,
+		ALPN:                 v.ALPN,
+		Fingerprint:          v.TlsFingerprint,
+		PinnedPeerCertSha256: v.PinnedPeerCertSha256,
+		VerifyPeerCertByName: v.VerifyPeerCertByName,
+		ECHConfigList:        v.ECHConfigList,
 	}
-
-	switch v.Network {
-	case "tcp":
-		s.TCPSettings = &conf.TCPConfig{}
-		if v.Type == "" || v.Type == "none" {
-			s.TCPSettings.HeaderConfig = json.RawMessage([]byte(`{ "type": "none" }`))
-		} else {
-			pathb, _ := json.Marshal(strings.Split(v.Path, ","))
-			hostb, _ := json.Marshal(strings.Split(v.Host, ","))
-			s.TCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`
-			{
-				"type": "http",
-				"request": {
-					"path": %s,
-					"headers": {
-						"Host": %s,
-						"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"
-					}
-				}
-			}
-			`, string(pathb), string(hostb))))
-		}
-		break
-	case "kcp":
-		// mKCP header/seed removed from xray-core; use bare defaults.
-		s.KCPSettings = &conf.KCPConfig{}
-		break
-	case "ws":
-		s.WSSettings = &conf.WebSocketConfig{}
-		s.WSSettings.Path = v.Path
-		s.WSSettings.Headers = map[string]string{
-			"Host":       v.Host,
-			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36",
-		}
-		break
-		//case "h2", "http":
+	switch ts.network() {
+	case "tcp", "raw":
+		ts.HeaderType = v.Type
 	case "xhttp":
-		s.XHTTPSettings = &conf.SplitHTTPConfig{
-			Host: v.Host,
-			Path: v.Path,
-			Mode: v.Type,
-		}
-		//if v.Host != "" {
-		//	h := conf.StringList(strings.Split(v.Host, ","))
-		//	s.XHTTPSettings.Host = &h
-		//}
-		if v.Type == "" {
-			s.XHTTPSettings.Mode = "auto"
-		}
-		break
-	case "httpupgrade":
-		s.HTTPUPGRADESettings = &conf.HttpUpgradeConfig{
-			Host: v.Host,
-			Path: v.Path,
-		}
-		break
-	case "splithttp":
-		s.SplitHTTPSettings = &conf.SplitHTTPConfig{
-			Host: v.Host,
-			Path: v.Path,
-		}
-		break
+		ts.Mode = v.Type
 	case "grpc":
-		if len(v.Path) > 0 {
-			if v.Path[0] == '/' {
-				v.Path = v.Path[1:]
-			}
-		}
-		// multiMode is enabled only when explicitly requested (default: "gun").
-		multiMode := v.Type == "multi"
-		s.GRPCSettings = &conf.GRPCConfig{
-			InitialWindowsSize: 65536,
-			HealthCheckTimeout: 20,
-			MultiMode:          multiMode,
-			IdleTimeout:        60,
-			Authority:          v.Host,
-			ServiceName:        v.Path,
-		}
-		break
-		//case "quic":
-		//	t := "none"
-		//	if v.Type != "" {
-		//		t = v.Type
-		//	}
-		//	s.QUICSettings = &conf.QUICConfig{
-		//		Header:   json.RawMessage(fmt.Sprintf(`{ "type": "%s" }`, t))),
-		//		Security: v.Host,
-		//		Key:      v.Path,
-		//	}
-		//	break
+		ts.Mode = v.Type
+		ts.ServiceName = v.Path
+		ts.Authority = v.Host
 	}
+	return ts
+}
 
-	if v.TLS == "tls" {
-		insecureFlag := allowInsecure
-		if s, ok := v.AllowInsecure.(string); ok && (s == "1" || s == "true") {
-			insecureFlag = true
-		}
-		if b, ok := v.AllowInsecure.(bool); ok && b {
-			insecureFlag = true
-		}
-		if v.TlsFingerprint == "" {
-			v.TlsFingerprint = "chrome"
-		}
-		s.TLSSettings = &conf.TLSConfig{
-			Fingerprint: v.TlsFingerprint,
-		}
-		if v.SNI != "" {
-			s.TLSSettings.ServerName = v.SNI
-		} else {
-			s.TLSSettings.ServerName = v.Host
-		}
-		// xray-core removed "allowInsecure"; emulate with verifyPeerCertByName
-		// (accepts self-signed certs valid for this name). See vless.go.
-		if insecureFlag && s.TLSSettings.ServerName != "" {
-			s.TLSSettings.VerifyPeerCertByName = s.TLSSettings.ServerName
-		}
-		// Certificate pinning (share-link "pcs"). xray-core splits the list on
-		// commas and accepts hex with or without OpenSSL colons; a pinned cert
-		// is accepted even when it fails CA validation.
-		s.TLSSettings.PinnedPeerCertSha256 = v.PinnedPeerCertSha256
-		if v.ALPN != "" {
-			alpns := conf.StringList(strings.Split(v.ALPN, ","))
-			s.TLSSettings.ALPN = &alpns
-		}
+// wantsInsecure reports whether the link asks to skip certificate checks.
+func (v *Vmess) wantsInsecure() bool { return truthy(v.AllowInsecure) }
+
+// alterID returns the numeric alterId (0 when absent or malformed).
+func (v *Vmess) alterID() uint64 {
+	n, err := strconv.ParseUint(portString(v.Aid), 10, 32)
+	if err != nil {
+		return 0
 	}
+	return n
+}
 
-	if v.Aid == nil {
-		v.Aid = "0"
+func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
+	ts := v.transport()
+	if ts.security() == "reality" {
+		return nil, fmt.Errorf("vmess does not support REALITY")
 	}
-
-	out.StreamSetting = s
+	s, err := ts.outboundStream()
+	if err != nil {
+		return nil, err
+	}
 
 	// Build Settings via json.Marshal on a typed map so addresses/IDs
 	// containing special chars cannot corrupt the JSON output.
-	portStr := fmt.Sprintf("%v", v.Port)
-	portNum, err := strconv.ParseUint(portStr, 10, 16)
+	portNum, err := parsePort(portString(v.Port))
 	if err != nil {
-		return nil, fmt.Errorf("invalid port %q: %w", portStr, err)
-	}
-	aidStr := fmt.Sprintf("%v", v.Aid)
-	aidNum, err := strconv.ParseUint(aidStr, 10, 32)
-	if err != nil {
-		aidNum = 0
+		return nil, err
 	}
 	security := v.Security
 	if security == "" {
@@ -433,7 +329,7 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 				"users": []map[string]interface{}{
 					{
 						"id":       v.ID,
-						"alterId":  aidNum,
+						"alterId":  v.alterID(),
 						"security": security,
 					},
 				},
@@ -444,139 +340,25 @@ func (v *Vmess) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDet
 		return nil, fmt.Errorf("marshal vmess settings: %w", err)
 	}
 	oset := json.RawMessage(settingsBytes)
-	out.Settings = &oset
-	return out, nil
+	return &conf.OutboundDetourConfig{
+		Tag:           "proxy",
+		Protocol:      v.Name(),
+		Settings:      &oset,
+		StreamSetting: s,
+	}, nil
 }
 
 func (v *Vmess) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
-	p := conf.TransportProtocol(v.Network)
-	streamConfig := &conf.StreamConfig{
-		Network:  &p,
-		Security: v.TLS,
+	ts := v.transport()
+	stream, err := ts.inboundStream(v.CertFile, v.KeyFile)
+	if err != nil {
+		return nil, err
 	}
-
-	switch v.Network {
-	case "tcp":
-		streamConfig.TCPSettings = &conf.TCPConfig{}
-		if v.Type == "" || v.Type == "none" {
-			streamConfig.TCPSettings.HeaderConfig = json.RawMessage([]byte(`{ "type": "none" }`))
-		} else {
-			pathb, _ := json.Marshal(strings.Split(v.Path, ","))
-			hostb, _ := json.Marshal(strings.Split(v.Host, ","))
-			streamConfig.TCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`
-			{
-				"type": "http",
-				"request": {
-					"path": %s,
-					"headers": {
-						"Host": %s
-					}
-				}
-			}
-			`, string(pathb), string(hostb))))
-		}
-	case "kcp":
-		// mKCP header/seed removed from xray-core; use bare defaults.
-		streamConfig.KCPSettings = &conf.KCPConfig{}
-	case "ws":
-		streamConfig.WSSettings = &conf.WebSocketConfig{}
-		streamConfig.WSSettings.Path = v.Path
-		streamConfig.WSSettings.Headers = map[string]string{
-			"Host": v.Host,
-		}
-	case "xhttp":
-		streamConfig.XHTTPSettings = &conf.SplitHTTPConfig{
-			Host: v.Host,
-			Path: v.Path,
-			Mode: v.Type,
-		}
-		if v.Type == "" {
-			streamConfig.XHTTPSettings.Mode = "auto"
-		}
-	case "httpupgrade":
-		streamConfig.HTTPUPGRADESettings = &conf.HttpUpgradeConfig{
-			Host: v.Host,
-			Path: v.Path,
-		}
-	case "splithttp":
-		streamConfig.SplitHTTPSettings = &conf.SplitHTTPConfig{
-			Host: v.Host,
-			Path: v.Path,
-		}
-	case "grpc":
-		if len(v.Path) > 0 {
-			if v.Path[0] == '/' {
-				v.Path = v.Path[1:]
-			}
-		}
-		// multiMode is enabled only when explicitly requested (default: "gun").
-		multiMode := v.Type == "multi"
-		streamConfig.GRPCSettings = &conf.GRPCConfig{
-			InitialWindowsSize: 65536,
-			HealthCheckTimeout: 20,
-			MultiMode:          multiMode,
-			IdleTimeout:        60,
-			Authority:          v.Host,
-			ServiceName:        v.Path,
-		}
-	}
-
-	if v.TLS == "tls" && v.CertFile != "" && v.KeyFile != "" {
-		streamConfig.TLSSettings = &conf.TLSConfig{
-			ServerName: v.SNI,
-			Certs: []*conf.TLSCertConfig{
-				{
-					KeyFile:  v.KeyFile,
-					CertFile: v.CertFile,
-				},
-			},
-		}
-		if v.ALPN != "" {
-			alpns := conf.StringList(strings.Split(v.ALPN, ","))
-			streamConfig.TLSSettings.ALPN = &alpns
-		}
-	} else if v.TLS != "none" && v.TLS != "" {
-		// If security is set but no certs, fallback to none for inbound.
-		streamConfig.Security = "none"
-	}
-
-	clients := fmt.Sprintf(`{
-      "id": "%s",
-      "alterId": %v
-    }`, v.ID, v.Aid)
-
-	settings := json.RawMessage(fmt.Sprintf(`{
-      "clients": [ %s ]
-    }`, clients))
-
-	var port uint32
-	switch p := v.Port.(type) {
-	case string:
-		parsed, err := strconv.ParseUint(p, 10, 32)
-		if err != nil {
-			return nil, fmt.Errorf("invalid port from string: %s", p)
-		}
-		port = uint32(parsed)
-	case float64:
-		port = uint32(p)
-	default:
-		return nil, fmt.Errorf("unsupported port type: %T for value %v", v.Port, v.Port)
-	}
-
-	listenAddr := v.Address
-	if net.ParseIP(listenAddr) == nil {
-		listenAddr = "0.0.0.0"
-	}
-	in := &conf.InboundDetourConfig{
-		Protocol:      v.Name(),
-		Tag:           v.Name(),
-		Settings:      &settings,
-		StreamSetting: streamConfig,
-		ListenOn:      &conf.Address{Address: net2.ParseAddress(listenAddr)},
-		PortList: &conf.PortList{Range: []conf.PortRange{
-			{From: port, To: port},
+	settings := map[string]interface{}{
+		"clients": []map[string]interface{}{{
+			"id":      v.ID,
+			"alterId": v.alterID(),
 		}},
 	}
-
-	return in, nil
+	return inboundDetour(v.Name(), v.Address, portString(v.Port), settings, stream)
 }

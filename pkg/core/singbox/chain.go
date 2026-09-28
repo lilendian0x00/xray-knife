@@ -3,96 +3,103 @@ package singbox
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/http"
 	"time"
 
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/protocol"
 
-	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/option"
-	M "github.com/sagernet/sing/common/metadata"
 )
 
-// setDetour sets the Detour field on the outbound's concrete options type.
-// All supported outbound option types embed DialerOptions which contains Detour.
-func setDetour(outbound *option.Outbound, detourTag string) error {
+// dialerOptions returns the DialerOptions embedded in the outbound's
+// concrete options type.
+func dialerOptions(outbound *option.Outbound) (*option.DialerOptions, error) {
 	switch o := outbound.Options.(type) {
 	case *option.VLESSOutboundOptions:
-		o.Detour = detourTag
+		return &o.DialerOptions, nil
 	case *option.VMessOutboundOptions:
-		o.Detour = detourTag
+		return &o.DialerOptions, nil
 	case *option.TrojanOutboundOptions:
-		o.Detour = detourTag
+		return &o.DialerOptions, nil
 	case *option.ShadowsocksOutboundOptions:
-		o.Detour = detourTag
+		return &o.DialerOptions, nil
 	case *option.Hysteria2OutboundOptions:
-		o.Detour = detourTag
+		return &o.DialerOptions, nil
 	case *option.WireGuardEndpointOptions:
-		o.Detour = detourTag
+		return &o.DialerOptions, nil
 	case *option.SOCKSOutboundOptions:
-		o.Detour = detourTag
+		return &o.DialerOptions, nil
+	case *option.TUICOutboundOptions:
+		return &o.DialerOptions, nil
+	case *option.HysteriaOutboundOptions:
+		return &o.DialerOptions, nil
+	case *option.AnyTLSOutboundOptions:
+		return &o.DialerOptions, nil
+	case *option.SSHOutboundOptions:
+		return &o.DialerOptions, nil
+	case *option.HTTPOutboundOptions:
+		return &o.DialerOptions, nil
 	default:
-		return fmt.Errorf("unsupported outbound options type for detour: %T", outbound.Options)
+		return nil, fmt.Errorf("unsupported outbound options type: %T", outbound.Options)
 	}
+}
+
+// setDetour makes the outbound dial through the outbound tagged detourTag.
+func setDetour(outbound *option.Outbound, detourTag string) error {
+	d, err := dialerOptions(outbound)
+	if err != nil {
+		return fmt.Errorf("cannot set detour: %w", err)
+	}
+	d.Detour = detourTag
 	return nil
+}
+
+func chainTag(i int) string { return fmt.Sprintf("chain-%d", i) }
+
+// craftChain crafts the hops of a chain. Hop 0 is the entry, dialed directly
+// from this machine; every later hop is dialed through the one before it, so
+// hop N-1 is the exit that reaches the destination. The returned tag is the
+// exit's, which is where traffic must be routed.
+func (c *Core) craftChain(hops []protocol.Protocol) ([]option.Outbound, string, error) {
+	if len(hops) < 2 {
+		return nil, "", fmt.Errorf("chain requires at least 2 hops, got %d", len(hops))
+	}
+
+	outbounds := make([]option.Outbound, 0, len(hops))
+	for i, hop := range hops {
+		out, err := c.craftOutbound(hop, chainTag(i), i == 0)
+		if err != nil {
+			return nil, "", fmt.Errorf("chain hop %d: failed to craft outbound options: %w", i, err)
+		}
+		if i > 0 {
+			if err := setDetour(&out, chainTag(i-1)); err != nil {
+				return nil, "", fmt.Errorf("chain hop %d: %w", i, err)
+			}
+		}
+		outbounds = append(outbounds, out)
+	}
+	return outbounds, chainTag(len(hops) - 1), nil
 }
 
 // MakeChainedInstance builds a sing-box instance with multiple outbounds
 // chained together via Detour. Hop 0 is the entry point, hop N-1 is the exit.
 func (c *Core) MakeChainedInstance(ctx context.Context, hops []protocol.Protocol) (protocol.Instance, error) {
-	if len(hops) < 2 {
-		return nil, fmt.Errorf("chain requires at least 2 hops, got %d", len(hops))
-	}
-
-	var outbounds []option.Outbound
-
-	for i, hop := range hops {
-		out := hop.(Protocol)
-		outOpts, err := out.CraftOutboundOptions(c.AllowInsecure)
-		if err != nil {
-			return nil, fmt.Errorf("chain hop %d: failed to craft outbound options: %w", i, err)
-		}
-
-		outOpts.Tag = fmt.Sprintf("chain-%d", i)
-
-		// For all hops except the last, set the Detour to route through
-		// the next hop in the chain.
-		if i < len(hops)-1 {
-			if err := setDetour(outOpts, fmt.Sprintf("chain-%d", i+1)); err != nil {
-				return nil, fmt.Errorf("chain hop %d: %w", i, err)
-			}
-		}
-
-		outbounds = append(outbounds, *outOpts)
+	outbounds, exitTag, err := c.craftChain(hops)
+	if err != nil {
+		return nil, err
 	}
 
 	opts := option.Options{
-		Inbounds: []option.Inbound{},
 		Route: &option.RouteOptions{
-			Final: "chain-0",
-		},
-		Log: &option.LogOptions{
-			Disabled: true,
+			Final: exitTag,
 		},
 	}
 	placeOutbounds(&opts, outbounds...)
-
-	if c.Verbose {
-		opts.Log = &option.LogOptions{
-			Disabled: false,
-			Level:    "trace",
-		}
+	if err := c.withInbound(&opts); err != nil {
+		return nil, err
 	}
 
-	if c.Inbound != nil {
-		opts.Inbounds = append(opts.Inbounds, *c.Inbound)
-	}
-
-	singboxInstance, err := box.New(box.Options{
-		Options: opts,
-		Context: boxContext(ctx),
-	})
+	singboxInstance, err := c.newBox(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("chain: failed to create sing-box instance: %w", err)
 	}
@@ -101,80 +108,27 @@ func (c *Core) MakeChainedInstance(ctx context.Context, hops []protocol.Protocol
 }
 
 // MakeChainedHttpClient builds a chained sing-box instance and returns an
-// http.Client that routes traffic through the entry outbound (chain-0).
+// http.Client that routes traffic through the whole chain (it dials the exit
+// hop, which reaches its server through the hops before it).
 func (c *Core) MakeChainedHttpClient(ctx context.Context, hops []protocol.Protocol, maxDelay time.Duration) (*http.Client, protocol.Instance, error) {
-	if len(hops) < 2 {
-		return nil, nil, fmt.Errorf("chain requires at least 2 hops, got %d", len(hops))
-	}
-
-	var outbounds []option.Outbound
-
-	for i, hop := range hops {
-		out := hop.(Protocol)
-		outOpts, err := out.CraftOutboundOptions(c.AllowInsecure)
-		if err != nil {
-			return nil, nil, fmt.Errorf("chain hop %d: failed to craft outbound options: %w", i, err)
-		}
-
-		outOpts.Tag = fmt.Sprintf("chain-%d", i)
-
-		if i < len(hops)-1 {
-			if err := setDetour(outOpts, fmt.Sprintf("chain-%d", i+1)); err != nil {
-				return nil, nil, fmt.Errorf("chain hop %d: %w", i, err)
-			}
-		}
-
-		outbounds = append(outbounds, *outOpts)
+	outbounds, exitTag, err := c.craftChain(hops)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	opts := option.Options{
-		Inbounds: []option.Inbound{},
 		Route: &option.RouteOptions{
-			Final: "chain-0",
-		},
-		Log: &option.LogOptions{
-			Disabled: true,
+			Final: exitTag,
 		},
 	}
 	placeOutbounds(&opts, outbounds...)
-	if c.Verbose {
-		opts.Log = &option.LogOptions{
-			Disabled: false,
-			Level:    "trace",
-		}
+	if len(opts.Endpoints) > 0 {
+		preferIPv4(&opts)
 	}
 
-	ctx = boxContext(ctx)
-
-	instance, err := box.New(box.Options{
-		Options: opts,
-		Context: ctx,
-	})
+	client, instance, err := c.startHttpClient(ctx, opts, exitTag, maxDelay)
 	if err != nil {
-		return nil, nil, fmt.Errorf("chain: failed to create sing-box instance: %w", err)
+		return nil, nil, fmt.Errorf("chain: %w", err)
 	}
-
-	if err := instance.Start(); err != nil {
-		instance.Close()
-		return nil, nil, fmt.Errorf("chain: failed to start sing-box instance: %w", err)
-	}
-
-	// Retrieve the entry outbound adapter (chain-0).
-	outboundAdapter, ok := instance.Outbound().Outbound("chain-0")
-	if !ok {
-		instance.Close()
-		return nil, nil, fmt.Errorf("chain: outbound adapter not found for tag chain-0")
-	}
-
-	tr := &http.Transport{
-		DisableKeepAlives: true,
-		DialContext: withEOFNormalization(func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return outboundAdapter.DialContext(ctx, network, M.ParseSocksaddr(addr))
-		}),
-	}
-
-	return &http.Client{
-		Transport: tr,
-		Timeout:   maxDelay,
-	}, instance, nil
+	return client, instance, nil
 }

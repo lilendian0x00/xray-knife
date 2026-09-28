@@ -9,7 +9,6 @@
 package netbind
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -56,14 +55,25 @@ func (b *Binder) Enabled() bool {
 	return b != nil && b.iface != ""
 }
 
-// Control returns a control.Func suitable for net.Dialer.Control or for
-// xray-core's transport/internet.RegisterDialerController. Returns nil
-// when binding is disabled (callers must handle nil and skip wiring).
+// Control returns a control.Func suitable for net.Dialer.Control.
+// Returns nil when binding is disabled (callers must handle nil and skip
+// wiring).
+//
+// The interface index is looked up on every dial rather than once: a
+// VPN interface such as wg0 gets a new index each time it is recreated,
+// and a cached index would make every later dial fail (or bind to a
+// different interface that reused the number).
 func (b *Binder) Control() control.Func {
 	if !b.Enabled() {
 		return nil
 	}
-	return control.BindToInterface(b.finder, b.iface, -1)
+	return control.BindToInterfaceFunc(b.finder, func(network, address string) (string, int, error) {
+		iface, err := net.InterfaceByName(b.iface)
+		if err != nil {
+			return "", -1, fmt.Errorf("netbind: interface %q: %w", b.iface, err)
+		}
+		return b.iface, iface.Index, nil
+	})
 }
 
 // ApplyDialer copies the binder's control function onto the given dialer.
@@ -83,6 +93,3 @@ func (b *Binder) ApplyDialer(d *net.Dialer) {
 		return bindCtl(network, address, c)
 	}
 }
-
-// ErrPermission is returned by upstream when CAP_NET_RAW is missing.
-var ErrPermission = errors.New("netbind: missing CAP_NET_RAW (run as root or grant cap_net_raw+ep)")

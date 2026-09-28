@@ -16,7 +16,7 @@ type Protocol interface {
 	GetLink() string
 	ConvertToGeneralConfig() protocol.GeneralConfig
 	CraftOutboundOptions(allowInsecure bool) (*option.Outbound, error)
-	CraftInboundOptions() *option.Inbound
+	CraftInboundOptions() (*option.Inbound, error)
 	CraftOutbound(ctx context.Context, l logger.ContextLogger, allowInsecure bool) (adapter.Outbound, error)
 	Name() string
 }
@@ -80,7 +80,11 @@ type Shadowsocks struct {
 	Encryption string
 	Password   string
 	Remark     string
-	OrigLink   string // Original link
+	// Plugin is a SIP003 plugin sing-box implements natively
+	// ("obfs-local" or "v2ray-plugin"); PluginOptions are its "k=v;k=v" args.
+	Plugin        string
+	PluginOptions string
+	OrigLink      string // Original link
 }
 
 type Trojan struct {
@@ -120,6 +124,8 @@ type Wireguard struct {
 	Reserved     string `json:"reserved"`
 	LocalAddress string `json:"address"` // Local address IPv4/IPv6 seperated by commas
 	Mtu          int32  `json:"mtu"`
+	PreSharedKey string `json:"presharedkey"`
+	Keepalive    int32  `json:"keepalive"` // Persistent keepalive, seconds
 
 	OrigLink string `json:"-"` // Original link
 }
@@ -133,6 +139,71 @@ type Socks struct {
 	OrigLink string // Original link
 }
 
+// Tuic is a TUIC v5 link (see tuic.go for the accepted parameters).
+type Tuic struct {
+	Remark            string
+	Address           string
+	Port              string
+	UUID              string
+	Password          string
+	CongestionControl string
+	UDPRelayMode      string
+	ALPN              string
+	SNI               string
+	DisableSNI        bool
+	Insecure          bool
+	ZeroRTT           bool
+	OrigLink          string
+}
+
+// AnyTLS is an AnyTLS link (see anytls.go).
+type AnyTLS struct {
+	Remark         string
+	Address        string
+	Port           string
+	Password       string
+	Security       string // "tls" or "reality"
+	SNI            string
+	ALPN           string
+	TlsFingerprint string
+	Insecure       bool
+	PublicKey      string // REALITY
+	ShortID        string // REALITY
+	OrigLink       string
+}
+
+// Hysteria is a Hysteria v1 link (see hysteria.go).
+type Hysteria struct {
+	Remark       string
+	Address      string
+	Port         string
+	Auth         string
+	SNI          string
+	ALPN         string
+	Insecure     bool
+	UpMbps       int
+	DownMbps     int
+	ObfsPassword string // xplus
+	ServerPorts  []string
+	OrigLink     string
+}
+
+// SSH is an SSH tunnel link (see ssh.go).
+type SSH struct {
+	Remark               string
+	Address              string
+	Port                 string
+	User                 string
+	Password             string
+	PrivateKey           string // PEM
+	PrivateKeyPassphrase string
+	HostKeys             []string // authorized_keys format; empty accepts any host key
+	OrigLink             string
+
+	passphrases []string     // decodings of pkp, tried in order
+	key         *sshKeyCache // decrypted PrivateKey, filled on first Craft
+}
+
 type Hysteria2 struct {
 	Remark        string
 	Address       string
@@ -141,6 +212,12 @@ type Hysteria2 struct {
 	ObfusType     string `json:"obfs"`
 	ObfusPassword string `json:"obfs-password"`
 	SNI           string `json:"sni"`
+	ALPN          string `json:"alpn"`
 	Insecure      string `json:"insecure"`
-	OrigLink      string // Original link
+	// PinSHA256 is the link's certificate pin. It is kept for display and
+	// dedup only: sing-box can pin a public key but not a certificate hash.
+	PinSHA256 string `json:"pinSHA256"`
+	// ServerPorts are port-hopping ranges in sing-box's "start:end" form.
+	ServerPorts []string
+	OrigLink    string // Original link
 }

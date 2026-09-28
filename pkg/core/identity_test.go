@@ -144,3 +144,111 @@ func TestConnectionFingerprintMTProto(t *testing.T) {
 		}
 	}
 }
+
+func TestFingerprintProtocolMatchesLinkFingerprint(t *testing.T) {
+	c := NewAutomaticCore(false, false)
+	const id = "00000000-0000-0000-0000-000000000000"
+	links := []string{
+		"vless://" + id + "@Example.com:443?security=tls&sni=a.com&type=ws&path=%2Fx&future=1#one",
+		"vless://" + id + "@1.2.3.4:443?security=tls&type=ws&allowInsecure=1#moved-to-sing-box",
+		"trojan://p%40ss@1.2.3.4:443#t",
+		"ss://" + base64.StdEncoding.EncodeToString([]byte("aes-128-gcm:pass")) + "@host:443#ss",
+		"socks://alice:pass@host:1080",
+		"hy2://pass@host:443?sni=a.com",
+		"vmess://" + base64.StdEncoding.EncodeToString([]byte(`{"add":"host","port":443,"id":"uuid","net":"ws","ps":"x"}`)),
+		"tg://proxy?server=proxy.example.com&port=443&secret=dd00112233445566778899aabbccddeeff&future-option=1",
+	}
+	for _, link := range links {
+		p, err := c.CreateProtocol(link)
+		if err != nil {
+			t.Fatalf("CreateProtocol(%s): %v", link, err)
+		}
+		if err := p.Parse(); err != nil {
+			t.Fatalf("Parse(%s): %v", link, err)
+		}
+		got, err := FingerprintProtocol(p)
+		if err != nil {
+			t.Fatalf("FingerprintProtocol(%s): %v", link, err)
+		}
+		if want := fingerprint(t, c, link); got != want {
+			t.Errorf("%s: FingerprintProtocol %s != ConnectionFingerprint %s", link, got, want)
+		}
+	}
+	if _, err := FingerprintProtocol(nil); err == nil {
+		t.Fatal("nil protocol accepted")
+	}
+}
+
+func TestFingerprintNewSchemesAndHopping(t *testing.T) {
+	c := NewAutomaticCore(false, false)
+	const id = "11111111-1111-1111-1111-111111111111"
+	same := [][]string{
+		// Port hopping: authority form, mport form, order and ":" spelling.
+		{"hysteria2://pw@h.example.com:443,20000-30000/?sni=h.example.com",
+			"hysteria2://pw@h.example.com:443/?sni=h.example.com&mport=20000-30000",
+			"hy2://pw@h.example.com:443?mport=20000-30000,443&sni=h.example.com"},
+		{"hysteria2://pw@h.example.com?sni=h.example.com", "hysteria2://pw@h.example.com:443?sni=h.example.com"},
+		{"hysteria://h.example.com:443,5000-6000?auth=pw&peer=h.example.com&upmbps=10&downmbps=50",
+			"hysteria://h.example.com:443?auth_str=pw&sni=h.example.com&mport=5000-6000&protocol=udp"},
+		{"hysteria://h.example.com:443?auth=pw&peer=p&obfs=xplus&obfsParam=o", "hysteria://h.example.com:443?auth=pw&peer=p&obfs=o"},
+		{"tuic://" + id + ":pw@q.example.com:443?sni=q.example.com&congestion_control=bbr&allow_insecure=1",
+			"tuic://" + id + ":pw@q.example.com:443?peer=q.example.com&congestion-control=bbr&insecure=true&udp_relay_mode=native"},
+		{"anytls://pw@a.example.com:443?sni=a.example.com&insecure=1", "anytls://pw@a.example.com:443?peer=a.example.com&allowInsecure=true&security=tls"},
+		{"ssh://u:pw@s.example.com?hk=ssh-ed25519%20AAAA", "ssh://u:pw@s.example.com:22?host_key=ssh-ed25519%20AAAA"},
+		// WireGuard keys: raw "+" and "/" or percent-encoded.
+		{"wireguard://aa+bb/cc==@1.2.3.4:51820?publickey=x+y/z=&address=10.0.0.2",
+			"wireguard://aa%2Bbb%2Fcc%3D%3D@1.2.3.4:51820?publickey=x%2By%2Fz%3D&address=10.0.0.2"},
+	}
+	for _, group := range same {
+		want := fingerprint(t, c, group[0])
+		for _, link := range group[1:] {
+			if got := fingerprint(t, c, link); got != want {
+				t.Errorf("%s did not collapse onto %s", link, group[0])
+			}
+		}
+	}
+	for _, pair := range [][2]string{
+		{"hysteria2://pw@h.example.com:443?sni=a&mport=20000-30000", "hysteria2://pw@h.example.com:443?sni=a&mport=20000-30001"},
+		{"tuic://" + id + ":pw@q:443?congestion_control=bbr", "tuic://" + id + ":pw@q:443?congestion_control=new_reno"},
+		{"wireguard://aa+bb@1.2.3.4:51820?publickey=x&address=10.0.0.2", "wireguard://aa bb@1.2.3.4:51820?publickey=x&address=10.0.0.2"},
+	} {
+		a, errA := ConnectionFingerprint(c, pair[0])
+		b, errB := ConnectionFingerprint(c, pair[1])
+		if errA == nil && errB == nil && a == b {
+			t.Errorf("%s and %s collapsed", pair[0], pair[1])
+		}
+	}
+}
+
+// Canonicalisation follows the parsers exactly: aliases are
+// case-sensitive and ranked as the parser ranks them, VMess JSON keys fold
+// case as encoding/json does.
+func TestFingerprintMatchesParserSemantics(t *testing.T) {
+	c := NewAutomaticCore(false, false)
+	const id = "11111111-1111-1111-1111-111111111111"
+	vm := func(j string) string { return "vmess://" + base64.StdEncoding.EncodeToString([]byte(j)) }
+	same := [][2]string{
+		{vm(`{"Add":"h.example.com","PORT":"443","id":"u","net":"ws"}`), vm(`{"add":"h.example.com","port":"443","id":"u","net":"ws"}`)},
+		{vm(`{"add":"a.example.com","Add":"h.example.com","port":443,"id":"u"}`), vm(`{"add":"h.example.com","port":443,"id":"u"}`)},
+		{"tuic://" + id + ":pw@q:443?cc=BBR", "tuic://" + id + ":pw@q:443?congestion_control=bbr"},
+		{"tuic://" + id + ":pw@q:443?congestion_control=newreno", "tuic://" + id + ":pw@q:443?congestion_control=new_reno"},
+		{"vless://" + id + "@h:443?security=tls&insecure=1&allow_insecure=0", "vless://" + id + "@h:443?security=tls&allowInsecure=1"},
+		{"ssh://u:p@h:22?hk=A&host_key=B", "ssh://u:p@h:22?hk=A&hk=B"},
+	}
+	for _, pair := range same {
+		if fingerprint(t, c, pair[0]) != fingerprint(t, c, pair[1]) {
+			t.Errorf("%s and %s did not collapse", pair[0], pair[1])
+		}
+	}
+	// The parsers ignore "PEER" (case) and lower-ranked spellings don't
+	// override higher ones, so these stay distinct.
+	distinct := [][2]string{
+		{"tuic://" + id + ":pw@q:443?PEER=a.example.com", "tuic://" + id + ":pw@q:443?sni=a.example.com"},
+		{"vless://" + id + "@h:443?security=tls&allowInsecure=0&insecure=1", "vless://" + id + "@h:443?security=tls&allowInsecure=1"},
+	}
+	for _, pair := range distinct {
+		if fingerprint(t, c, pair[0]) == fingerprint(t, c, pair[1]) {
+			t.Errorf("%s and %s collapsed", pair[0], pair[1])
+		}
+	}
+}

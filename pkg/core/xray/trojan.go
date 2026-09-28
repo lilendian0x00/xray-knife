@@ -5,13 +5,9 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"strconv"
 	"strings"
 
-	net2 "github.com/xtls/xray-core/common/net"
-
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/protocol"
-	"github.com/lilendian0x00/xray-knife/v11/utils"
 
 	"github.com/fatih/color"
 	"github.com/xtls/xray-core/infra/conf"
@@ -26,22 +22,20 @@ func (t *Trojan) Name() string {
 }
 
 func (t *Trojan) Parse() error {
-	if !strings.HasPrefix(t.OrigLink, protocol.TrojanIdentifier) {
+	if !strings.HasPrefix(t.OrigLink, protocol.TrojanIdentifier+"://") {
 		return fmt.Errorf("trojan unreconized: %s", t.OrigLink)
 	}
-	uri, err := url.Parse(t.OrigLink)
+	base, remark := splitRemark(t.OrigLink)
+	uri, err := url.Parse(base)
 	if err != nil {
 		return fmt.Errorf("failed to parse Trojan link: %w", err)
 	}
 
-	t.Password = uri.User.String()
+	// Decoded password: "p%40ss" must be sent as "p@ss".
+	t.Password = userSecret(uri.User)
 	t.Address, t.Port, err = net.SplitHostPort(uri.Host)
 	if err != nil {
 		return fmt.Errorf("failed to split host and port for Trojan link: %w", err)
-	}
-
-	if utils.IsIPv6(t.Address) {
-		t.Address = "[" + t.Address + "]"
 	}
 
 	query := uri.Query()
@@ -54,13 +48,13 @@ func (t *Trojan) Parse() error {
 	t.Type = query.Get("type") // network type
 
 	// Validate host and sni parameters before assigning them
-	sni := query.Get("sni")
-	if !utils.IsValidHostOrSNI(sni) {
-		return fmt.Errorf("invalid characters in 'sni' parameter: %s", sni)
+	sni := strings.TrimSpace(query.Get("sni"))
+	if !validSNI(sni) {
+		return fmt.Errorf("invalid characters in 'sni' parameter: %q", sni)
 	}
-	host := query.Get("host")
-	if !utils.IsValidHostOrSNI(host) {
-		return fmt.Errorf("invalid characters in 'host' parameter: %s", host)
+	host := strings.TrimSpace(query.Get("host"))
+	if !validHostList(host) {
+		return fmt.Errorf("invalid characters in 'host' parameter: %q", host)
 	}
 
 	t.SNI = sni
@@ -73,18 +67,15 @@ func (t *Trojan) Parse() error {
 	t.ShortIds = query.Get("sid")
 	t.SpiderX = query.Get("spx")
 	t.Mldsa65Verify = query.Get("pqv")
-	t.AllowInsecure = query.Get("allowInsecure")
+	t.AllowInsecure = firstQuery(query, "allowInsecure", "insecure", "allow_insecure")
 	t.QuicSecurity = query.Get("quicSecurity")
 	t.Key = query.Get("key")
 	t.Authority = query.Get("authority")
 	t.PinnedPeerCertSha256 = query.Get("pcs") // TLS cert SHA-256 pin(s)
+	t.VerifyPeerCertByName = query.Get("vcn") // names to verify the cert against
+	t.ECHConfigList = query.Get("ech")        // Encrypted Client Hello
 
-	unescapedRemark, err := url.PathUnescape(uri.Fragment)
-	if err != nil {
-		t.Remark = uri.Fragment
-	} else {
-		t.Remark = unescapedRemark
-	}
+	t.Remark = remark
 
 	// Apply defaults or adjustments
 	if t.HeaderType == "xhttp" || t.HeaderType == "http" || t.Type == "ws" || t.Type == "h2" || t.Type == "xhttp" {
@@ -217,6 +208,8 @@ func (t *Trojan) GetLink() string {
 		addQueryParam("key", t.Key)
 		addQueryParam("authority", t.Authority)
 		addQueryParam("pcs", t.PinnedPeerCertSha256)
+		addQueryParam("vcn", t.VerifyPeerCertByName)
+		addQueryParam("ech", t.ECHConfigList)
 
 		baseURL.RawQuery = params.Encode()
 
@@ -252,304 +245,78 @@ func (t *Trojan) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	return g
 }
 
+// transport describes the link's transport and security for the shared
+// stream builders.
+func (t *Trojan) transport() transportSpec {
+	return transportSpec{
+		Network:              t.Type,
+		HeaderType:           t.HeaderType,
+		Host:                 t.Host,
+		Path:                 t.Path,
+		Mode:                 t.Mode,
+		ServiceName:          t.ServiceName,
+		Authority:            t.Authority,
+		Security:             t.Security,
+		SNI:                  t.SNI,
+		ALPN:                 t.ALPN,
+		Fingerprint:          t.TlsFingerprint,
+		PinnedPeerCertSha256: t.PinnedPeerCertSha256,
+		VerifyPeerCertByName: t.VerifyPeerCertByName,
+		ECHConfigList:        t.ECHConfigList,
+		PublicKey:            t.PublicKey,
+		ShortID:              t.ShortIds,
+		SpiderX:              t.SpiderX,
+		Mldsa65Verify:        t.Mldsa65Verify,
+	}
+}
+
+// wantsInsecure reports whether the link asks to skip certificate checks.
+func (t *Trojan) wantsInsecure() bool { return truthy(t.AllowInsecure) }
+
 func (t *Trojan) BuildOutboundDetourConfig(allowInsecure bool) (*conf.OutboundDetourConfig, error) {
-	out := &conf.OutboundDetourConfig{}
-	out.Tag = "proxy"
-	out.Protocol = t.Name()
-
-	p := conf.TransportProtocol(t.Type)
-	s := &conf.StreamConfig{
-		Network:  &p,
-		Security: t.Security,
+	ts := t.transport()
+	s, err := ts.outboundStream()
+	if err != nil {
+		return nil, err
 	}
 
-	switch t.Type {
-	case "tcp":
-		s.TCPSettings = &conf.TCPConfig{}
-		if t.HeaderType == "" || t.HeaderType == "none" {
-			s.TCPSettings.HeaderConfig = json.RawMessage([]byte(`{ "type": "none" }`))
-		} else { // headerType=http
-			pathb, _ := json.Marshal(strings.Split(t.Path, ","))
-			hostb, _ := json.Marshal(strings.Split(t.Host, ","))
-			s.TCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`
-			{
-				"type": "http",
-				"request": {
-					"path": %s,
-					"headers": {
-						"Host": %s,
-						"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"
-					}
-				}
-			}
-			`, string(pathb), string(hostb))))
-		}
-	case "kcp":
-		// mKCP header/seed removed from xray-core; use bare defaults.
-		s.KCPSettings = &conf.KCPConfig{}
-	case "ws":
-		s.WSSettings = &conf.WebSocketConfig{}
-		s.WSSettings.Path = t.Path
-		s.WSSettings.Headers = map[string]string{
-			"Host":       t.Host,
-			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36",
-		}
-		break
-	//case "h2", "http":
-	case "xhttp":
-		s.XHTTPSettings = &conf.SplitHTTPConfig{
-			Host: t.Host,
-			Path: t.Path,
-			Mode: t.Mode,
-		}
-		//if v.Host != "" {
-		//	h := conf.StringList(strings.Split(v.Host, ","))
-		//	s.XHTTPSettings.Host = &h
-		//}
-		if t.Mode == "" {
-			s.XHTTPSettings.Mode = "auto"
-		}
-	case "httpupgrade":
-		s.HTTPUPGRADESettings = &conf.HttpUpgradeConfig{
-			Host: t.Host,
-			Path: t.Path,
-		}
-	case "splithttp":
-		s.SplitHTTPSettings = &conf.SplitHTTPConfig{
-			Host: t.Host,
-			Path: t.Path,
-		}
-	case "grpc":
-		if len(t.ServiceName) > 0 {
-			if t.ServiceName[0] == '/' {
-				t.ServiceName = t.ServiceName[1:]
-			}
-		}
-		// multiMode is true only when explicitly set to "multi"
-		multiMode := t.Mode == "multi"
-		s.GRPCSettings = &conf.GRPCConfig{
-			Authority:          t.Authority,
-			InitialWindowsSize: 65536,
-			HealthCheckTimeout: 20,
-			MultiMode:          multiMode,
-			IdleTimeout:        60,
-			ServiceName:        t.ServiceName,
-		}
-
-		t.Flow = ""
-		//case "quic":
-		//	tp := "none"
-		//	if t.HeaderType != "" {
-		//		tp = t.HeaderType
-		//	}
-		//
-		//	s.QUICSettings = &conf.QUICConfig{
-		//		Header:   json.RawMessage(fmt.Sprintf(`{ "type": "%s" }`, tp)),
-		//		Security: t.QuicSecurity,
-		//		Key:      t.Key,
-		//	}
-		//	break
+	portNum, err := parsePort(t.Port)
+	if err != nil {
+		return nil, err
 	}
-
-	if t.Security == "tls" {
-		var insecure = allowInsecure
-		if t.AllowInsecure != "" {
-			if t.AllowInsecure == "1" || t.AllowInsecure == "true" {
-				insecure = true
-			}
-		}
-
-		if t.TlsFingerprint == "" {
-			t.TlsFingerprint = "chrome"
-		}
-		s.TLSSettings = &conf.TLSConfig{
-			Fingerprint: t.TlsFingerprint,
-		}
-
-		if t.SNI != "" {
-			s.TLSSettings.ServerName = t.SNI
-		} else {
-			s.TLSSettings.ServerName = t.Host
-		}
-		// xray-core removed "allowInsecure"; emulate with verifyPeerCertByName
-		// (accepts self-signed certs valid for this name). See vless.go.
-		if insecure && s.TLSSettings.ServerName != "" {
-			s.TLSSettings.VerifyPeerCertByName = s.TLSSettings.ServerName
-		}
-		// Certificate pinning (share-link "pcs"). xray-core splits the list on
-		// commas and accepts hex with or without OpenSSL colons; a pinned cert
-		// is accepted even when it fails CA validation.
-		s.TLSSettings.PinnedPeerCertSha256 = t.PinnedPeerCertSha256
-		if t.ALPN != "" {
-			alpns := conf.StringList(strings.Split(t.ALPN, ","))
-			s.TLSSettings.ALPN = &alpns
-		}
-	} else if t.Security == "reality" {
-		fp := t.TlsFingerprint
-		if fp == "" {
-			fp = "chrome"
-		}
-		s.REALITYSettings = &conf.REALITYConfig{
-			Show:          false,
-			Fingerprint:   fp,
-			ServerName:    t.SNI,
-			PublicKey:     t.PublicKey,
-			ShortId:       t.ShortIds,
-			SpiderX:       t.SpiderX,
-			Mldsa65Verify: t.Mldsa65Verify,
-		}
-	}
-
-	out.StreamSetting = s
 
 	// Build Settings via json.Marshal on a typed map to avoid JSON injection
-	// when password/address contain special chars, and to keep the output
-	// schema-clean (no bogus "method"/"ota" fields that aren't in
-	// xray-core's TrojanServerTarget).
-	portNum, err := strconv.ParseUint(t.Port, 10, 16)
-	if err != nil {
-		return nil, fmt.Errorf("invalid port %q: %w", t.Port, err)
-	}
-	server := map[string]interface{}{
-		"address":  t.Address,
-		"port":     portNum,
-		"password": t.Password,
-	}
-	if t.Flow != "" {
-		server["flow"] = t.Flow
-	}
+	// when password/address contain special chars. "flow" is left out on
+	// purpose: xray-core removed Trojan flows and hard-errors on them, while
+	// other clients ignore the parameter.
 	settingsBytes, err := json.Marshal(map[string]interface{}{
-		"servers": []map[string]interface{}{server},
+		"servers": []map[string]interface{}{{
+			"address":  t.Address,
+			"port":     portNum,
+			"password": t.Password,
+		}},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal trojan settings: %w", err)
 	}
 	oset := json.RawMessage(settingsBytes)
-	out.Settings = &oset
-	return out, nil
+	return &conf.OutboundDetourConfig{
+		Tag:           "proxy",
+		Protocol:      t.Name(),
+		Settings:      &oset,
+		StreamSetting: s,
+	}, nil
 }
 
 func (t *Trojan) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
-	port, err := strconv.ParseUint(t.Port, 10, 32)
+	ts := t.transport()
+	// Inbound TLS/REALITY requires certs, which aren't in the link.
+	stream, err := ts.inboundStream("", "")
 	if err != nil {
-		return nil, fmt.Errorf("error converting port string to uint32: %w", err)
+		return nil, err
 	}
-	uint32Port := uint32(port)
-
-	// Create the client part of the settings
-	clients := fmt.Sprintf(`{ "password": "%s" }`, t.Password)
-
-	// Create the main settings JSON
-	settings := json.RawMessage(fmt.Sprintf(`{ "clients": [ %s ] }`, clients))
-
-	// Stream settings (copied and adapted from outbound)
-	p := conf.TransportProtocol(t.Type)
-	streamConfig := &conf.StreamConfig{
-		Network:  &p,
-		Security: t.Security,
+	settings := map[string]interface{}{
+		"clients": []map[string]interface{}{{"password": t.Password}},
 	}
-
-	switch t.Type {
-	case "raw":
-		streamConfig.RAWSettings = &conf.TCPConfig{}
-		if t.HeaderType == "" || t.HeaderType == "none" {
-			streamConfig.RAWSettings.HeaderConfig = json.RawMessage([]byte(`{ "type": "none" }`))
-		} else { // headerType=http
-			pathb, _ := json.Marshal(strings.Split(t.Path, ","))
-			hostb, _ := json.Marshal(strings.Split(t.Host, ","))
-			streamConfig.RAWSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`
-			{
-				"type": "http",
-				"request": {
-					"path": %s,
-					"headers": {
-						"Host": %s
-					}
-				}
-			}
-			`, string(pathb), string(hostb))))
-		}
-	case "tcp":
-		streamConfig.TCPSettings = &conf.TCPConfig{}
-		if t.HeaderType == "" || t.HeaderType == "none" {
-			streamConfig.TCPSettings.HeaderConfig = json.RawMessage([]byte(`{ "type": "none" }`))
-		} else { // headerType=http
-			pathb, _ := json.Marshal(strings.Split(t.Path, ","))
-			hostb, _ := json.Marshal(strings.Split(t.Host, ","))
-			streamConfig.TCPSettings.HeaderConfig = json.RawMessage([]byte(fmt.Sprintf(`
-			{
-				"type": "http",
-				"request": {
-					"path": %s,
-					"headers": {
-						"Host": %s
-					}
-				}
-			}
-			`, string(pathb), string(hostb))))
-		}
-	case "kcp":
-		// mKCP header/seed removed from xray-core; use bare defaults.
-		streamConfig.KCPSettings = &conf.KCPConfig{}
-	case "ws":
-		streamConfig.WSSettings = &conf.WebSocketConfig{}
-		streamConfig.WSSettings.Path = t.Path
-		streamConfig.WSSettings.Headers = map[string]string{
-			"Host": t.Host,
-		}
-	case "xhttp":
-		streamConfig.XHTTPSettings = &conf.SplitHTTPConfig{
-			Host: t.Host,
-			Path: t.Path,
-			Mode: t.Mode,
-		}
-		if t.Mode == "" {
-			streamConfig.XHTTPSettings.Mode = "auto"
-		}
-	case "httpupgrade":
-		streamConfig.HTTPUPGRADESettings = &conf.HttpUpgradeConfig{
-			Host: t.Host,
-			Path: t.Path,
-		}
-	case "splithttp":
-		streamConfig.SplitHTTPSettings = &conf.SplitHTTPConfig{
-			Host: t.Host,
-			Path: t.Path,
-		}
-	case "grpc":
-		if len(t.ServiceName) > 0 {
-			if t.ServiceName[0] == '/' {
-				t.ServiceName = t.ServiceName[1:]
-			}
-		}
-		// multiMode is true only when explicitly set to "multi"
-		multiMode := t.Mode == "multi"
-		streamConfig.GRPCSettings = &conf.GRPCConfig{
-			Authority:   t.Authority,
-			ServiceName: t.ServiceName,
-			MultiMode:   multiMode,
-		}
-	}
-
-	// Inbound TLS/REALITY requires certs, which aren't in the link. Fallback to none.
-	if streamConfig.Security == "tls" || streamConfig.Security == "reality" {
-		streamConfig.Security = "none"
-	}
-
-	listenAddr := t.Address
-	if net.ParseIP(listenAddr) == nil {
-		listenAddr = "0.0.0.0"
-	}
-	in := &conf.InboundDetourConfig{
-		Protocol: t.Name(),
-		Tag:      t.Name(),
-		ListenOn: &conf.Address{Address: net2.ParseAddress(listenAddr)},
-		PortList: &conf.PortList{Range: []conf.PortRange{
-			{From: uint32Port, To: uint32Port},
-		}},
-		Settings:      &settings,
-		StreamSetting: streamConfig,
-	}
-
-	return in, nil
+	return inboundDetour(t.Name(), t.Address, t.Port, settings, stream)
 }
