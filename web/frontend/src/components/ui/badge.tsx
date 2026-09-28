@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
@@ -17,6 +18,11 @@ const badgeVariants = cva(
           "border-transparent bg-destructive text-white [a&]:hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60",
         outline:
           "text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
+        pass: "border-pass/30 bg-pass/10 text-pass",
+        semi: "border-semi/30 bg-semi/10 text-semi",
+        fail: "border-fail/30 bg-fail/10 text-fail",
+        info: "border-info/30 bg-info/10 text-info",
+        neutral: "border-border bg-muted text-muted-foreground",
       },
     },
     defaultVariants: {

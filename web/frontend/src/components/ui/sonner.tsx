@@ -1,17 +1,14 @@
 import { useTheme } from "@/components/theme-provider"
 import { Toaster as Sonner } from "sonner"
 
-// This is the key change. We are creating our own ToasterProps type
-// by inferring the props from the imported Sonner component.
-// We are NOT importing it from the 'sonner' library.
 type ToasterProps = React.ComponentProps<typeof Sonner>
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme()
+  const { resolved } = useTheme()
 
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      theme={resolved}
       className="toaster group"
       toastOptions={{
         classNames: {

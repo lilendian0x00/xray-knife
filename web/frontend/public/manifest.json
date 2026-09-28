@@ -1,0 +1,14 @@
+{
+  "name": "xray-knife",
+  "short_name": "xray-knife",
+  "description": "Test proxy configs, scan Cloudflare IPs and run a rotating local proxy.",
+  "start_url": "./#/proxy",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0a1520",
+  "theme_color": "#0b6e7d",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
