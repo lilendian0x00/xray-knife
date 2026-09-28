@@ -1,43 +1,92 @@
 // Package subscription fetches and decodes share-link lists without CLI or database state.
 // Callers control network access and validate the resulting configs.
+//
+// Besides plain and base64 link lists, Decode imports structured client
+// configs, detected from the content (never from headers):
+//
+//   - Clash / mihomo YAML: the top-level proxies: list.
+//   - sing-box JSON: outbounds and endpoints.
+//   - xray JSON: outbounds of one config, or of an array of configs (the
+//     v2rayN "custom config" form, whose "remarks" name each proxy).
+//
+// Each proxy entry becomes a share link (vmess, vless incl. REALITY/flow,
+// trojan, ss incl. obfs-local/v2ray-plugin, hysteria2 incl. obfs and port
+// hopping, hysteria, tuic, anytls, wireguard, socks5, http). Entries that
+// cannot be expressed are skipped and counted by reason in
+// DecodeResult.Skipped; non-proxy entries (direct, block, selector, ...)
+// are ignored. A document with no usable proxy fails with
+// ErrNoSupportedProxies (which is also an ErrInvalidFormat).
 package subscription
 
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 )
 
 const (
 	DefaultMaxBytes int64 = 64 << 20
-	DefaultMaxLinks       = 100000
-	DefaultTimeout        = 30 * time.Second
+	// DefaultMaxStructuredBytes caps Clash YAML and sing-box/xray JSON
+	// bodies: parsing takes many times their size in memory.
+	DefaultMaxStructuredBytes int64 = 8 << 20
+	DefaultMaxLinks                 = 100000
+	DefaultTimeout                  = 30 * time.Second
 )
 
 var (
 	ErrTooLarge      = errors.New("subscription exceeds size limit")
 	ErrTooManyLinks  = errors.New("subscription exceeds link limit")
-	ErrInvalidFormat = errors.New("subscription must contain a plain or base64-encoded share-link list")
+	ErrInvalidFormat = errors.New("subscription must contain a plain or base64-encoded share-link list, Clash YAML, or sing-box/xray JSON")
+	// ErrNoSupportedProxies reports a structured config whose proxies were
+	// all skipped. errors.Is(err, ErrInvalidFormat) holds for it too.
+	ErrNoSupportedProxies = fmt.Errorf("%w: no proxy in it can be expressed as a supported share link", ErrInvalidFormat)
 )
+
+// DecodeResult is a decoded subscription.
+type DecodeResult struct {
+	Links  []string
+	Format Format
+	// Skipped counts structured entries that could not become share links,
+	// by reason (e.g. "unsupported clash proxy type ssr": 3).
+	Skipped map[string]int
+}
 
 type DecodeOptions struct {
 	// Zero selects the default; negative limits are invalid.
 	MaxBytes int64
 	MaxLinks int
+	// MaxStructuredBytes caps structured documents (Clash YAML, sing-box
+	// or xray JSON), before or after base64 decoding; at most MaxBytes.
+	MaxStructuredBytes int64
 }
 
-// Decode reads plain or base64 lists, preserving duplicates and malformed config options.
+// Decode reads plain or base64 lists, preserving duplicates and malformed config options,
+// and structured client configs (see the package documentation).
 // Invalid documents and limit breaches return an error, never a partial list.
 func Decode(body []byte, opts DecodeOptions) ([]string, error) {
+	res, err := DecodeDetailed(body, opts)
+	if err != nil {
+		return nil, err
+	}
+	return res.Links, nil
+}
+
+// DecodeDetailed is Decode, also reporting the detected format and the
+// structured entries that were skipped. On ErrNoSupportedProxies the
+// result is still returned so callers can show why.
+func DecodeDetailed(body []byte, opts DecodeOptions) (*DecodeResult, error) {
 	maxBytes, maxLinks, err := limits(opts)
 	if err != nil {
 		return nil, err
@@ -47,16 +96,35 @@ func Decode(body []byte, opts DecodeOptions) ([]string, error) {
 	}
 	body = trimBody(body)
 	if len(body) == 0 {
-		return []string{}, nil
+		return &DecodeResult{Links: []string{}, Format: FormatPlain}, nil
 	}
+	maxStructured := opts.MaxStructuredBytes
+	if maxStructured == 0 {
+		maxStructured = DefaultMaxStructuredBytes
+	}
+	if kind := structuredFormat(body); kind != "" {
+		return decodeStructured(body, kind, maxLinks, maxStructured)
+	}
+	format := FormatPlain
 	if !bytes.Contains(body, []byte("://")) {
-		// Allow base64 wrapped across lines by subscription providers.
+		// Allow base64 wrapped across lines by subscription providers, and
+		// "#" metadata lines around it. "//" is not a comment here: a wrapped
+		// base64 line may legitimately start with it.
+		var kept strings.Builder
+		for _, line := range strings.FieldsFunc(string(body), func(r rune) bool { return r == '\n' || r == '\r' }) {
+			if line = strings.TrimSpace(line); !strings.HasPrefix(line, "#") {
+				kept.WriteString(line)
+			}
+		}
 		encoded := strings.Map(func(r rune) rune {
-			if r == ' ' || r == '\t' || r == '\r' || r == '\n' {
+			if r == ' ' || r == '\t' {
 				return -1
 			}
 			return r
-		}, string(body))
+		}, kept.String())
+		if encoded == "" {
+			return &DecodeResult{Links: []string{}, Format: FormatPlain}, nil
+		}
 		decoded := false
 		for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
 			if b, err := enc.DecodeString(encoded); err == nil {
@@ -68,14 +136,23 @@ func Decode(body []byte, opts DecodeOptions) ([]string, error) {
 		if !decoded {
 			return nil, ErrInvalidFormat
 		}
+		// Some providers base64-encode a whole Clash or JSON config.
+		if kind := structuredFormat(body); kind != "" {
+			return decodeStructured(body, kind, maxLinks, maxStructured)
+		}
+		format = FormatBase64
 	}
 	if !utf8.Valid(body) {
 		return nil, ErrInvalidFormat
 	}
 	links := make([]string, 0)
-	for line := range strings.SplitSeq(string(body), "\n") {
+	// Split on CR as well as LF: some providers emit classic-Mac line endings.
+	lines := strings.FieldsFunc(string(body), func(r rune) bool { return r == '\n' || r == '\r' })
+	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if line == "" {
+		// Providers prepend metadata such as "#profile-title:" or
+		// "#profile-update-interval:"; comments never make a source invalid.
+		if line == "" || isComment(line) {
 			continue
 		}
 		scheme, value, ok := strings.Cut(line, "://")
@@ -87,7 +164,13 @@ func Decode(body []byte, opts DecodeOptions) ([]string, error) {
 		}
 		links = append(links, line)
 	}
-	return links, nil
+	return &DecodeResult{Links: links, Format: format}, nil
+}
+
+// isComment reports whether a subscription line is metadata or a comment
+// rather than a share link.
+func isComment(line string) bool {
+	return strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//")
 }
 
 func trimBody(body []byte) []byte {
@@ -110,7 +193,7 @@ func validScheme(s string) bool {
 func asciiLetter(c byte) bool { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }
 
 func limits(opts DecodeOptions) (int64, int, error) {
-	if opts.MaxBytes < 0 || opts.MaxLinks < 0 {
+	if opts.MaxBytes < 0 || opts.MaxLinks < 0 || opts.MaxStructuredBytes < 0 {
 		return 0, 0, errors.New("subscription limits must not be negative")
 	}
 	if opts.MaxBytes == 0 {
@@ -131,6 +214,8 @@ type FetchOptions struct {
 
 type FetchResult struct {
 	Links        []string
+	Format       Format         // detected document format
+	Skipped      map[string]int // structured entries skipped, by reason
 	StatusCode   int
 	NotModified  bool // HTTP 304: preserve the previous source snapshot.
 	ETag         string
@@ -139,6 +224,7 @@ type FetchResult struct {
 
 // Fetch downloads a bounded list; a nil client uses http.DefaultClient.
 // The caller's client controls redirects and network access. HTTP 304 preserves the snapshot.
+// On ErrNoSupportedProxies the result, with Format and Skipped, is returned alongside the error.
 func Fetch(ctx context.Context, client *http.Client, rawURL string, opts FetchOptions) (*FetchResult, error) {
 	maxBytes, _, err := limits(opts.DecodeOptions)
 	if err != nil {
@@ -194,8 +280,15 @@ func Fetch(ctx context.Context, client *http.Client, rawURL string, opts FetchOp
 	if err != nil {
 		return nil, &fetchError{err: err}
 	}
-	result.Links, err = Decode(body, opts.DecodeOptions)
+	decoded, err := DecodeDetailed(body, opts.DecodeOptions)
+	if decoded != nil {
+		result.Links, result.Format, result.Skipped = decoded.Links, decoded.Format, decoded.Skipped
+	}
 	if err != nil {
+		if errors.Is(err, ErrNoSupportedProxies) {
+			// Like DecodeDetailed: report the skips with the error.
+			return result, err
+		}
 		return nil, err
 	}
 	return result, nil
@@ -205,5 +298,44 @@ func Fetch(ctx context.Context, client *http.Client, rawURL string, opts FetchOp
 // net/http's *url.Error or a custom transport's error in ordinary logs.
 type fetchError struct{ err error }
 
-func (e *fetchError) Error() string { return "subscription request failed" }
+func (e *fetchError) Error() string {
+	if cause := safeCause(e.err); cause != "" {
+		return "subscription request failed: " + cause
+	}
+	return "subscription request failed"
+}
 func (e *fetchError) Unwrap() error { return e.err }
+
+// safeCause names the network-level reason for a failed request using only
+// error types whose text carries no request URL (a *url.Error, or a custom
+// transport or redirect policy error, may embed the tokenized URL).
+func safeCause(err error) string {
+	var dnsErr *net.DNSError
+	var opErr *net.OpError
+	var certErr *tls.CertificateVerificationError
+	var recordErr tls.RecordHeaderError
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timed out"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.As(err, &dnsErr):
+		if dnsErr.IsNotFound {
+			return "DNS lookup failed: no such host"
+		}
+		return "DNS lookup failed"
+	case errors.As(err, &certErr):
+		return "TLS certificate verification failed"
+	case errors.As(err, &recordErr):
+		return "TLS handshake failed"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return "connection refused"
+	case errors.Is(err, syscall.ECONNRESET):
+		return "connection reset"
+	case errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, io.EOF):
+		return "connection closed by the server"
+	case errors.As(err, &opErr):
+		return opErr.Op + " failed"
+	}
+	return ""
+}

@@ -228,3 +228,53 @@ func TestDecodePreservesMTProtoLinks(t *testing.T) {
 		}
 	}
 }
+
+// Providers prepend metadata lines; they must not invalidate the source.
+func TestDecodeSkipsCommentLines(t *testing.T) {
+	const input = "#profile-title: base64:TXkgUHJvdmlkZXI=\n#profile-update-interval: 12\n" +
+		"// Updated 2026-09-20\nvless://uuid@host:443#one\n  # indented note\nsocks://host:1080\n"
+	want := []string{"vless://uuid@host:443#one", "socks://host:1080"}
+	for _, body := range []string{input, base64.StdEncoding.EncodeToString([]byte(input))} {
+		got, err := Decode([]byte(body), DecodeOptions{})
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatalf("decoded %v, error %v", got, err)
+		}
+	}
+	got, err := Decode([]byte("# nothing but a comment\n"), DecodeOptions{})
+	if err != nil || len(got) != 0 {
+		t.Fatalf("comment-only source: %v, %v", got, err)
+	}
+}
+
+func TestDecodeSplitsCarriageReturns(t *testing.T) {
+	got, err := Decode([]byte("vless://a@h:1\rvmess://b\r\rtrojan://c@h:2"), DecodeOptions{})
+	want := []string{"vless://a@h:1", "vmess://b", "trojan://c@h:2"}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("decoded %v, error %v", got, err)
+	}
+}
+
+// The cause is named without leaking the tokenized URL.
+func TestFetchErrorNamesCause(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	addr := server.URL
+	server.Close() // nothing listens any more: connection refused
+	_, err := Fetch(context.Background(), http.DefaultClient, addr+"/sub?token=super-secret", FetchOptions{})
+	if err == nil || strings.Contains(err.Error(), "super-secret") {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(err.Error(), "connection refused") && !strings.Contains(err.Error(), "dial failed") {
+		t.Fatalf("cause missing from %q", err)
+	}
+}
+
+// A wrapped base64 line may start with "//"; only "#" lines are metadata there.
+func TestDecodeBase64LineStartingWithSlashes(t *testing.T) {
+	encoded := "dm1lc3M6Ly9h" + "\n" + "//8=" // "vmess://a" + bytes 0xff 0xff
+	_, err := Decode([]byte(encoded), DecodeOptions{})
+	// The payload is not valid UTF-8 once "//8=" is kept, so the decoder must
+	// reject it rather than silently decode a truncated body.
+	if !errors.Is(err, ErrInvalidFormat) {
+		t.Fatalf("err = %v, want ErrInvalidFormat (line kept, not dropped as a comment)", err)
+	}
+}
