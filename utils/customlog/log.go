@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fatih/color"
@@ -46,7 +47,15 @@ var (
 	// Default output is os.Stderr
 	output io.Writer = os.Stderr
 	mu     sync.Mutex
+	quiet  atomic.Bool
 )
+
+// SetQuiet makes Printf drop everything but warnings and failures (the
+// global --quiet flag).
+func SetQuiet(q bool) { quiet.Store(q) }
+
+// Quiet reports whether --quiet is in effect.
+func Quiet() bool { return quiet.Load() }
 
 // SetOutput redirects log output (e.g. to a file or websocket).
 func SetOutput(w io.Writer) {
@@ -64,6 +73,9 @@ func GetOutput() io.Writer {
 // Printf prints a formatted, timestamped, and colored log message.
 // It prepends the corresponding symbol and current time to the message.
 func Printf(logType Type, format string, v ...interface{}) {
+	if quiet.Load() && logType != Failure && logType != Warning {
+		return
+	}
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -71,8 +83,9 @@ func Printf(logType Type, format string, v ...interface{}) {
 	// This check is a bit tricky as the `output` can be anything.
 	// We'll assume color is enabled unless we're sure it's not a tty.
 	if f, ok := output.(*os.File); ok {
-		stat, _ := f.Stat()
-		color.NoColor = (stat.Mode() & os.ModeCharDevice) != os.ModeCharDevice
+		color.NoColor = !ColorEnabled(f)
+	} else if noColorRequested() {
+		color.NoColor = true
 	} else {
 		// For non-file writers (like web sockets), we typically want to send the raw string without ANSI color codes.
 		// However, fatih/color handles this by checking the NO_COLOR env var. We can also force it.
