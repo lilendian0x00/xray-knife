@@ -34,6 +34,7 @@ var canonicalShorthands = map[string]string{
 	"r": "remark",
 	"s": "subnets",
 	"t": "threads",
+	"n": "count",
 	"u": "url",
 	"v": "verbose",
 	"w": "workers",
@@ -62,12 +63,12 @@ var grandfathered = map[string]bool{}
 var removedShorthands = map[string]string{
 	"k": "-k was --only-speedtest; use --only-speedtest",
 	"C": "-C was --config; use -c",
-	"E": "-E was --insecure; use --insecure (it becomes -e in v12)",
+	"E": "-E was --insecure; use --insecure (-e on http and proxy; cfscanner gets -e in v12)",
 	"P": "-P was --port; use -p",
 	"g": "-g was --uuid; use --uuid",
 	"I": "-I was --inbound-config; use --inbound-config",
-	"n": "-n was --concurrency; use --threads",
-	"i": "-i was --shuffle-ip on cfscanner; use --shuffle-ip",
+	"n": "-n was --concurrency; use --threads (-n is now --count, which this command does not take)",
+	"i": "-i was --shuffle-ip on cfscanner; use --shuffle-ip (elsewhere -i is --stdin, which this command does not take)",
 	"e": "-e was --shuffle-subnet on cfscanner; use --shuffle-subnet",
 	"a": "-a was --amount on http and --user-agent on subs; use the long flag",
 	"r": "-r was --rip on http and --retry on cfscanner; use the long flag",
@@ -77,7 +78,7 @@ var removedShorthands = map[string]string{
 	"m": "-m was --upload-mb on cfscanner; use --upload-mb",
 	"b": "-b was --batch on proxy; use --batch",
 	"j": "-j was --inbound on proxy; use --inbound",
-	"t": "-t was --rotate on proxy; use -R (it becomes --threads in v12)",
+	"t": "-t was --rotate on proxy; use -R/--rotate (on proxy, -t becomes --threads in v12)",
 	"p": "-p was --speedtest on http and cfscanner; use -S",
 }
 
@@ -90,16 +91,19 @@ var unknownShorthandRE = regexp.MustCompile(`unknown shorthand flag: '(.)' in`)
 // Several of these letters are still valid shorthands on other commands; the
 // hint only fires where pflag actually rejected the letter, so a valid use is
 // never intercepted.
+//
+// Every flag error is returned as a usageError, so the process exits with the
+// usage code (2).
 func flagErrorFunc(cmd *cobra.Command, err error) error {
 	m := unknownShorthandRE.FindStringSubmatch(err.Error())
 	if m == nil {
-		return err
+		return usageError{err}
 	}
 	hint, ok := removedShorthands[m[1]]
 	if !ok {
-		return err
+		return usageError{err}
 	}
-	return fmt.Errorf("%w\n\nshorthand flags were realigned in v11: %s\nsee MIGRATION-v11.md", err, hint)
+	return usageError{fmt.Errorf("%w\n\nshorthand flags were realigned in v11: %s\nsee MIGRATION-v11.md", err, hint)}
 }
 
 // visitShorthands walks the command tree and calls fn once for every flag that

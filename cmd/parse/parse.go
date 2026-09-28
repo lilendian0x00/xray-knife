@@ -1,19 +1,19 @@
 package parse
 
 import (
-	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/lilendian0x00/xray-knife/v11/pkg/core"
-	"github.com/lilendian0x00/xray-knife/v11/pkg/core/xray"
-	"github.com/lilendian0x00/xray-knife/v11/utils/customlog"
-	"github.com/xtls/xray-core/infra/conf"
+	"io"
 	"os"
 	"reflect"
 	"strings"
-	"time"
 
+	"github.com/lilendian0x00/xray-knife/v11/pkg/core"
+	"github.com/lilendian0x00/xray-knife/v11/pkg/core/xray"
 	"github.com/lilendian0x00/xray-knife/v11/utils"
+	"github.com/lilendian0x00/xray-knife/v11/utils/customlog"
+	"github.com/xtls/xray-core/infra/conf"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -176,92 +176,136 @@ func generateAndPrintXrayJSON(configLink string) error {
 	return nil
 }
 
+// stdinIsTerminal is swapped in tests.
+var stdinIsTerminal = func() bool { return customlog.IsTerminal(os.Stdin) }
+
+// readStdinLinks reads links from stdin until EOF, or until ctx is cancelled
+// (Ctrl-C) while waiting. On a terminal it prompts on stderr, so stdout
+// stays clean for --json.
+func readStdinLinks(ctx context.Context, in io.Reader, interactive bool) ([]string, error) {
+	if interactive {
+		fmt.Fprintln(os.Stderr, "Paste config link(s), one per line, then press Ctrl-D:")
+	}
+	type result struct {
+		links []string
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		links, err := utils.ReadLinksFrom(in)
+		done <- result{links, err}
+	}()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			return nil, fmt.Errorf("error reading from stdin: %w", r.err)
+		}
+		return r.links, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// collectLinks gathers links from positional arguments, -c, -f and stdin.
+// With no explicit source and piped stdin, stdin is read.
+func collectLinks(ctx context.Context, cfg *parseCmdConfig, args []string) ([]string, error) {
+	var links []string
+	for _, a := range args {
+		if a = strings.TrimSpace(a); a != "" {
+			links = append(links, a)
+		}
+	}
+	if cfg.configLink != "" {
+		links = append(links, strings.TrimSpace(cfg.configLink))
+	}
+	if cfg.configLinksFile != "" {
+		fileLinks, err := utils.ReadLinks(cfg.configLinksFile)
+		if err != nil {
+			return nil, err
+		}
+		links = append(links, fileLinks...)
+	}
+	readStdin := cfg.readFromSTDIN || (len(links) == 0 && cfg.configLinksFile == "" && !stdinIsTerminal())
+	if readStdin && cfg.configLinksFile != "-" {
+		stdinLinks, err := readStdinLinks(ctx, os.Stdin, stdinIsTerminal())
+		if err != nil {
+			return nil, err
+		}
+		links = append(links, stdinLinks...)
+	}
+	return links, nil
+}
+
 func newParseCommand() *cobra.Command {
 	cfg := &parseCmdConfig{}
 
 	cmd := &cobra.Command{
-		Use:   "parse",
+		Use:   "parse [link...]",
 		Short: "Decode and display a detailed, human-readable breakdown of a proxy configuration link.",
+		Long: `Decodes proxy share links and prints their fields.
+
+Links can be given as arguments, with -c, from a file with -f ("-" for stdin),
+or on stdin with -i (also read automatically when stdin is a pipe). With
+--json, the full xray-core JSON configuration (with a default SOCKS inbound)
+is printed for a single link; nothing else is written to stdout.
+
+Examples:
+  xray-knife parse "vless://..."
+  xray-knife parse -f configs.txt
+  cat configs.txt | xray-knife parse
+  xray-knife parse -i --json < link.txt > config.json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) < 1 && !cfg.readFromSTDIN && cfg.configLink == "" && cfg.configLinksFile == "" {
-				cmd.Help()
-				return nil
+			if len(args) == 0 && !cfg.readFromSTDIN && cfg.configLink == "" && cfg.configLinksFile == "" && stdinIsTerminal() {
+				return cmd.Help()
 			}
 
-			var links []string
-
-			if cfg.readFromSTDIN {
-				reader := bufio.NewReader(os.Stdin)
-				fmt.Println("Enter your config link:")
-				text, err := reader.ReadString('\n')
-				if err != nil {
-					return fmt.Errorf("error reading from stdin: %w", err)
-				}
-				links = append(links, text)
-			} else if cfg.configLink != "" {
-				links = append(links, cfg.configLink)
-			} else if cfg.configLinksFile != "" {
-				// Assuming utils.ParseFileByNewline internally handles and logs errors
-				// or consider changing it to return an error.
-				parsedLinks := utils.ParseFileByNewline(cfg.configLinksFile)
-				if len(parsedLinks) == 0 && cfg.configLinksFile != "" {
-					// This condition might indicate an empty file or a parsing issue.
-					// If utils.ParseFileByNewline doesn't return an error, this check is minimal.
-					customlog.Printf(customlog.Processing, "Warning: File '%s' was empty or failed to parse any links.\n", cfg.configLinksFile)
-				}
-				links = append(links, parsedLinks...)
+			links, err := collectLinks(cmd.Context(), cfg, args)
+			if err != nil {
+				return err
 			}
-
 			if len(links) == 0 {
 				return fmt.Errorf("no config links provided or found")
 			}
 
-			// New logic branch for JSON output
 			if cfg.outputJSON {
 				if len(links) > 1 {
-					return fmt.Errorf("--json flag only supports one config link at a time")
+					return fmt.Errorf("--json only supports one config link at a time (got %d)", len(links))
 				}
-				trimmedLink := strings.TrimSpace(links[0])
-				if trimmedLink == "" {
-					return fmt.Errorf("provided config link is empty")
-				}
-				return generateAndPrintXrayJSON(trimmedLink)
+				return generateAndPrintXrayJSON(links[0])
 			}
 
 			c := core.NewAutomaticCore(true, true)
 
 			d := color.New(color.FgCyan, color.Bold)
+			failed := 0
 			for i, link := range links {
-				trimmedLink := strings.TrimSpace(link)
-				if trimmedLink == "" {
-					continue
-				}
 				if len(links) > 1 {
 					d.Printf("Config Number: %d\n", i+1)
 				}
 
 				fmt.Printf("\n")
-				p, err := c.CreateProtocol(trimmedLink)
-				if err != nil {
-					return fmt.Errorf("failed to create protocol for link %d ('%s'): %w", i+1, trimmedLink, err)
+				p, err := c.CreateProtocol(link)
+				if err == nil {
+					err = p.Parse()
 				}
-
-				err = p.Parse()
 				if err != nil {
-					return fmt.Errorf("failed to parse for link %d ('%s'): %w", i+1, trimmedLink, err)
+					failed++
+					customlog.Printf(customlog.Failure, "Link %d could not be parsed: %v\n", i+1, err)
+					continue
 				}
 
 				fmt.Println(p.DetailsStr())
-
-				time.Sleep(time.Duration(25) * time.Millisecond)
+			}
+			if failed > 0 {
+				return fmt.Errorf("%d of %d link(s) could not be parsed", failed, len(links))
 			}
 			return nil
 		},
 	}
 
-	cmd.Flags().BoolVarP(&cfg.readFromSTDIN, "stdin", "i", false, "Read config link from the console")
+	cmd.Flags().BoolVarP(&cfg.readFromSTDIN, "stdin", "i", false, "Read config links from stdin (one per line)")
 	cmd.Flags().StringVarP(&cfg.configLink, "config", "c", "", "The config link")
-	cmd.Flags().StringVarP(&cfg.configLinksFile, "file", "f", "", "Read config links from a file")
+	cmd.Flags().StringVarP(&cfg.configLinksFile, "file", "f", "", "Read config links from a file (\"-\" for stdin)")
 	cmd.Flags().BoolVarP(&cfg.outputJSON, "json", "j", false, "Output full xray-core JSON configuration with a default inbound")
 	return cmd
 }
