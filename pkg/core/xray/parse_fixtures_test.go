@@ -102,14 +102,14 @@ func TestParseRemarks(t *testing.T) {
 }
 
 func TestParseVlessDefaultsAndHosts(t *testing.T) {
-	v := parseLink(t, "vless://00000000-0000-0000-0000-000000000000@1.2.3.4:80?security=none").(*Vless)
+	v := parseLink(t, "vless://00000000-0000-0000-0000-000000000000@10.0.0.1:80?security=none").(*Vless)
 	if v.Type != "tcp" {
 		t.Errorf("type = %q, want tcp default", v.Type)
 	}
 	buildOK(t, v)
 
 	for _, host := range []string{"a.example.com,b.example.com", "my_host.example.com", "cdn.example.com:8080"} {
-		v := parseLink(t, "vless://00000000-0000-0000-0000-000000000000@1.2.3.4:80?type=tcp&headerType=http&host="+url.QueryEscape(host)).(*Vless)
+		v := parseLink(t, "vless://00000000-0000-0000-0000-000000000000@10.0.0.1:80?type=tcp&headerType=http&host="+url.QueryEscape(host)).(*Vless)
 		buildOK(t, v)
 	}
 	if _, err := (&Core{}).CreateProtocol("vless://x@1.2.3.4:80?host=a%20b"); err == nil {

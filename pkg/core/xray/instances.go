@@ -168,7 +168,7 @@ func chainThrough(ob *conf.OutboundDetourConfig, prev string) {
 func tagPrefix(id uint64) string { return "xk" + strconv.FormatUint(id, 10) + "-" }
 
 // renameTags gives every tagged outbound in obs the instance prefix and
-// rewrites the references between them (chain markers, proxy settings).
+// rewrites the chain markers that reference them.
 func renameTags(prefix string, obs []*conf.OutboundDetourConfig) {
 	rename := map[string]string{}
 	for _, ob := range obs {
@@ -179,11 +179,6 @@ func renameTags(prefix string, obs []*conf.OutboundDetourConfig) {
 	for _, ob := range obs {
 		if nt, ok := rename[ob.Tag]; ok {
 			ob.Tag = nt
-		}
-		if ob.ProxySettings != nil {
-			if nt, ok := rename[ob.ProxySettings.Tag]; ok {
-				ob.ProxySettings.Tag = nt
-			}
 		}
 		if ob.StreamSetting != nil && ob.StreamSetting.SocketSettings != nil {
 			so := ob.StreamSetting.SocketSettings

@@ -56,7 +56,7 @@ func TestBuild_TLSInsecureDoesNotError(t *testing.T) {
 // TestBuild_KCPDoesNotError proves B2 is fixed: mKCP header/seed were removed
 // and hard-error; a kcp config must build with bare defaults.
 func TestBuild_KCPDoesNotError(t *testing.T) {
-	link := "vless://a1a1a1a1-b2b2-c3c3-d4d4-e5e5e5e5e5e5@1.2.3.4:443?encryption=none&security=none&type=kcp"
+	link := "vless://a1a1a1a1-b2b2-c3c3-d4d4-e5e5e5e5e5e5@10.0.0.1:443?encryption=none&security=none&type=kcp"
 	v := &Vless{OrigLink: link}
 	if err := v.Parse(); err != nil {
 		t.Fatalf("Parse: %v", err)

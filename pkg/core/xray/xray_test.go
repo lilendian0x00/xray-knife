@@ -114,7 +114,7 @@ func TestProtocol_BuildConfigs(t *testing.T) {
 		link         string
 		expectInbErr bool
 	}{
-		{"VLESS-WS", "vless://a1a1-b2b2-c3c3@1.2.3.4:80?type=ws&host=my.host.com&path=%2F#VLESS+WS", false},
+		{"VLESS-WS", "vless://a1a1-b2b2-c3c3@10.0.0.1:80?type=ws&host=my.host.com&path=%2F#VLESS+WS", false},
 		// A hostname is not a listen address: inbounds reject it instead of
 		// silently listening on every interface.
 		{"Trojan-GRPC", "trojan://password@example.com:443?security=tls&sni=sub.domain.com&type=grpc&serviceName=my-service#Trojan+GRPC", true},
@@ -189,7 +189,7 @@ func TestCore_MakeHttpClient(t *testing.T) {
 	// This is an integration test to ensure the client construction pipeline works.
 	// It does not make a real network request.
 	x := NewXrayService(false, false)
-	link := "vless://00000000-0000-0000-0000-000000000000@1.1.1.1:80?type=ws&host=example.com&path=%2F"
+	link := "vless://00000000-0000-0000-0000-000000000000@10.0.0.1:80?type=ws&host=example.com&path=%2F"
 
 	protocol, err := x.CreateProtocol(link)
 	if err != nil {
