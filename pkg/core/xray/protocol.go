@@ -6,6 +6,8 @@ import (
 
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/mtproto"
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/protocol"
+	"github.com/xtls/xray-core/common/geodata"
+	xnet "github.com/xtls/xray-core/common/net"
 )
 
 // NormalizeLink trims a share link and lower-cases its scheme, so
@@ -62,7 +64,9 @@ func (c *Core) CreateProtocol(configLink string) (protocol.Protocol, error) {
 //   - a request to skip TLS verification: xray-core can only pin or verify,
 //     so self-signed servers would always fail there. Links that pin their
 //     certificate ("pcs") stay on xray, as do transports and features only
-//     xray implements (xhttp, kcp, REALITY, TCP HTTP obfuscation).
+//     xray implements (xhttp, kcp, REALITY, TCP HTTP obfuscation),
+//   - VLESS or Trojan without TLS to a public server, which xray-core
+//     refuses to build.
 func SingboxReason(p Protocol, insecure bool) string {
 	switch v := p.(type) {
 	case *Shadowsocks:
@@ -84,9 +88,15 @@ func SingboxReason(p Protocol, insecure bool) string {
 			// link on xray even when insecure TLS then can't be honoured.
 			return removedTransport(&ts)
 		}
+		if reason := ts.plaintextReason(v.Address); reason != "" {
+			return reason
+		}
 		return ts.singboxReason(insecure || v.wantsInsecure())
 	case *Trojan:
 		ts := v.transport()
+		if reason := ts.plaintextReason(v.Address); reason != "" {
+			return reason
+		}
 		return ts.singboxReason(insecure || v.wantsInsecure())
 	case *Vmess:
 		ts := v.transport()
@@ -102,6 +112,35 @@ func removedTransport(t *transportSpec) string {
 		return "transport " + n + " (removed from xray-core)"
 	}
 	return ""
+}
+
+// plaintextReason moves a link without TLS to a public server to sing-box,
+// when sing-box has its transport. xray-core only allows that to private
+// addresses (infra/conf validateOutboundTransportSecurity).
+func (t *transportSpec) plaintextReason(address string) string {
+	if t.security() != "none" || !isPublicAddress(address) {
+		return ""
+	}
+	switch t.network() {
+	case "tcp", "raw":
+		if ht := strings.ToLower(t.HeaderType); ht != "" && ht != "none" {
+			return ""
+		}
+	case "ws", "grpc", "httpupgrade":
+	default:
+		return ""
+	}
+	return "no TLS to a public server (refused by xray-core)"
+}
+
+// isPublicAddress matches xray-core's rule: anything outside its private IP
+// and private domain lists.
+func isPublicAddress(address string) bool {
+	addr := xnet.ParseAddress(address)
+	if addr.Family().IsIP() {
+		return !geodata.GetPrivateIPMatcher().Match(addr.IP())
+	}
+	return !geodata.GetPrivateDomainMatcher().MatchAny(strings.TrimSuffix(strings.ToLower(addr.Domain()), "."))
 }
 
 func (t *transportSpec) singboxReason(insecure bool) string {
