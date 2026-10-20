@@ -194,3 +194,36 @@ func b64VmessTLS() string {
 	j := `{"v":"2","add":"1.2.3.4","port":"443","id":"a1a1a1a1-b2b2-c3c3-d4d4-e5e5e5e5e5e5","aid":"0","net":"tcp","tls":"tls","sni":"example.com","ps":"x"}`
 	return base64.StdEncoding.EncodeToString([]byte(j))
 }
+
+// TestJunkTcpHeaderType: http is the only tcp header type. Exports sometimes
+// put a cipher name or another transport's header (srtp, utp) there, which
+// must not turn on HTTP obfuscation against a plain tcp server.
+func TestJunkTcpHeaderType(t *testing.T) {
+	v := &Vmess{Network: "raw", Type: "aes-128-gcm", Port: "443", ID: "a1a1a1a1-b2b2-c3c3-d4d4-e5e5e5e5e5e5", Address: "1.2.3.4"}
+	ob, err := v.BuildOutboundDetourConfig(false)
+	if err != nil {
+		t.Fatalf("vmess Build: %v", err)
+	}
+	if h := string(ob.StreamSetting.RAWSettings.HeaderConfig); !strings.Contains(h, `"none"`) {
+		t.Errorf("vmess header = %s", h)
+	}
+
+	vl := parseLink(t, "vless://a1a1a1a1-b2b2-c3c3-d4d4-e5e5e5e5e5e5@1.2.3.4:443?security=tls&type=tcp&sni=a.com&headerType=srtp")
+	ob, err = vl.BuildOutboundDetourConfig(false)
+	if err != nil {
+		t.Fatalf("vless Build: %v", err)
+	}
+	if h := string(ob.StreamSetting.TCPSettings.HeaderConfig); !strings.Contains(h, `"none"`) {
+		t.Errorf("vless header = %s", h)
+	}
+
+	// headerType=http still enables it.
+	vl = parseLink(t, "vless://a1a1a1a1-b2b2-c3c3-d4d4-e5e5e5e5e5e5@1.2.3.4:443?security=tls&type=tcp&sni=a.com&headerType=HTTP&host=a.com")
+	ob, err = vl.BuildOutboundDetourConfig(false)
+	if err != nil {
+		t.Fatalf("vless http Build: %v", err)
+	}
+	if h := string(ob.StreamSetting.TCPSettings.HeaderConfig); !strings.Contains(h, `"http"`) {
+		t.Errorf("vless http header = %s", h)
+	}
+}
