@@ -194,3 +194,29 @@ func b64VmessTLS() string {
 	j := `{"v":"2","add":"1.2.3.4","port":"443","id":"a1a1a1a1-b2b2-c3c3-d4d4-e5e5e5e5e5e5","aid":"0","net":"tcp","tls":"tls","sni":"example.com","ps":"x"}`
 	return base64.StdEncoding.EncodeToString([]byte(j))
 }
+
+// TestEchPlusKept: query parsing turns a raw '+' into a space, which broke
+// ech values written without percent-encoding: "name+dns-url" lists and
+// base64 config lists. An encoded %2B must keep working too.
+func TestEchPlusKept(t *testing.T) {
+	for _, tc := range []struct{ raw, want string }{
+		{"cloudflare-ech.com+https://1.1.1.1/dns-query", "cloudflare-ech.com+https://1.1.1.1/dns-query"},
+		{"AEX+/wBBAA==", "AEX+/wBBAA=="},
+		{"AEX%2B%2FwBBAA%3D%3D", "AEX+/wBBAA=="},
+	} {
+		v := &Vless{OrigLink: "vless://a1a1a1a1-b2b2-c3c3-d4d4-e5e5e5e5e5e5@1.2.3.4:443?security=tls&type=ws&sni=a.com&ech=" + tc.raw}
+		tr := &Trojan{OrigLink: "trojan://pw@1.2.3.4:443?security=tls&type=ws&sni=a.com&ech=" + tc.raw}
+		if err := v.Parse(); err != nil || v.ECHConfigList != tc.want {
+			t.Errorf("vless ech %q = %q, err %v", tc.raw, v.ECHConfigList, err)
+		}
+		if err := tr.Parse(); err != nil || tr.ECHConfigList != tc.want {
+			t.Errorf("trojan ech %q = %q, err %v", tc.raw, tr.ECHConfigList, err)
+		}
+		// A rebuilt link must carry the same value.
+		v.OrigLink = ""
+		again := &Vless{OrigLink: v.GetLink()}
+		if err := again.Parse(); err != nil || again.ECHConfigList != tc.want {
+			t.Errorf("vless ech %q after round trip = %q, err %v", tc.raw, again.ECHConfigList, err)
+		}
+	}
+}

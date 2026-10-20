@@ -78,6 +78,8 @@ func (v *Vless) Parse() error {
 	v.VerifyPeerCertByName = query.Get("vcn")                                          // names to verify the cert against
 	v.ECHConfigList = query.Get("ech")                                                 // Encrypted Client Hello
 
+	// a raw '+' in ech (base64, or name+dns-url) comes out of the query as a space
+	v.ECHConfigList = strings.ReplaceAll(v.ECHConfigList, " ", "+")
 	v.Remark = remark
 
 	// Apply defaults or adjustments after parsing
