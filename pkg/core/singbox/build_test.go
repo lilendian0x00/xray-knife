@@ -599,3 +599,23 @@ func TestShadowsocksRawSemicolonPluginOptions(t *testing.T) {
 		t.Fatalf("crafted plugin = %q %q", o.Plugin, o.PluginOptions)
 	}
 }
+
+// TestShadowsocksPlainIsNone: "plain" is xray's name for the none cipher.
+// sing-box only knows "none" and fails to start with "unknown method: plain",
+// and the automatic core sends such links here.
+func TestShadowsocksPlainIsNone(t *testing.T) {
+	c := NewSingboxService(false, false)
+	ss := parseLink(t, c, "ss://plain:pw@1.2.3.4:8388#x").(*Shadowsocks)
+	out, err := ss.CraftOutboundOptions(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := out.Options.(*option.ShadowsocksOutboundOptions).Method; m != "none" {
+		t.Fatalf("method = %q", m)
+	}
+	inst, err := c.MakeInstance(context.Background(), ss)
+	if err != nil {
+		t.Fatalf("MakeInstance: %v", err)
+	}
+	_ = inst.Close()
+}

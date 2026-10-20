@@ -188,13 +188,17 @@ func (s *Shadowsocks) CraftOutboundOptions(allowInsecure bool) (*option.Outbound
 		return nil, err
 	}
 
+	method := s.Encryption
+	if method == "plain" {
+		method = "none" // xray's name for it; sing-box only knows none
+	}
 	opts := option.ShadowsocksOutboundOptions{
 		ServerOptions: option.ServerOptions{
 			Server:     serverHost(s.Address),
 			ServerPort: port,
 		},
 		Password:      s.Password,
-		Method:        s.Encryption,
+		Method:        method,
 		Plugin:        s.Plugin,
 		PluginOptions: s.PluginOptions,
 	}
