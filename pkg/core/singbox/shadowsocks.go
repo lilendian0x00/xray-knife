@@ -165,6 +165,15 @@ func (s *Shadowsocks) ConvertToGeneralConfig() (g protocol.GeneralConfig) {
 	return g
 }
 
+// method is the cipher as sing-box names it. "plain" is xray's alias for
+// none, which sing-box doesn't know.
+func (s *Shadowsocks) method() string {
+	if s.Encryption == "plain" {
+		return "none"
+	}
+	return s.Encryption
+}
+
 func (s *Shadowsocks) CraftInboundOptions() (*option.Inbound, error) {
 	listen, err := listenOptions(s.Address, s.Port)
 	if err != nil {
@@ -172,7 +181,7 @@ func (s *Shadowsocks) CraftInboundOptions() (*option.Inbound, error) {
 	}
 	opts := option.ShadowsocksInboundOptions{
 		ListenOptions: listen,
-		Method:        s.Encryption,
+		Method:        s.method(),
 		Password:      s.Password,
 	}
 	return &option.Inbound{
@@ -188,17 +197,13 @@ func (s *Shadowsocks) CraftOutboundOptions(allowInsecure bool) (*option.Outbound
 		return nil, err
 	}
 
-	method := s.Encryption
-	if method == "plain" {
-		method = "none" // xray's name for it; sing-box only knows none
-	}
 	opts := option.ShadowsocksOutboundOptions{
 		ServerOptions: option.ServerOptions{
 			Server:     serverHost(s.Address),
 			ServerPort: port,
 		},
 		Password:      s.Password,
-		Method:        method,
+		Method:        s.method(),
 		Plugin:        s.Plugin,
 		PluginOptions: s.PluginOptions,
 	}

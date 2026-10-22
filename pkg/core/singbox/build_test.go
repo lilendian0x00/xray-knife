@@ -613,6 +613,13 @@ func TestShadowsocksPlainIsNone(t *testing.T) {
 	if m := out.Options.(*option.ShadowsocksOutboundOptions).Method; m != "none" {
 		t.Fatalf("method = %q", m)
 	}
+	in, err := ss.CraftInboundOptions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := in.Options.(*option.ShadowsocksInboundOptions).Method; m != "none" {
+		t.Fatalf("inbound method = %q", m)
+	}
 	inst, err := c.MakeInstance(context.Background(), ss)
 	if err != nil {
 		t.Fatalf("MakeInstance: %v", err)
