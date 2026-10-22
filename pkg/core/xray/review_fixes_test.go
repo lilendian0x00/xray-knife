@@ -133,6 +133,11 @@ func TestSingboxReasonKeepsXrayOnlyFeatures(t *testing.T) {
 		"vless://" + id + "@1.2.3.4:80?security=none&type=kcp": false, // kcp is xray-only
 		"trojan://pw@example.com:80?security=none&type=grpc":   true,
 		"trojan://pw@localhost:80?security=none&type=grpc":     false,
+		// http is the only tcp header; a junk headerType is plain tcp
+		"vless://" + id + "@1.2.3.4:80?security=none&type=tcp&headerType=srtp": true,
+		"vless://" + id + "@1.2.3.4:80?security=none&type=tcp&headerType=http": false,
+		"trojan://pw@1.2.3.4:443?type=tcp&headerType=aes-128-gcm&insecure=1":   true,
+		"trojan://pw@1.2.3.4:443?type=tcp&headerType=HTTP&insecure=1":          false,
 	}
 	for link, want := range cases {
 		if got := SingboxReason(parseLink(t, link), false) != ""; got != want {

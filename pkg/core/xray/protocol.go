@@ -123,7 +123,7 @@ func (t *transportSpec) plaintextReason(address string) string {
 	}
 	switch t.network() {
 	case "tcp", "raw":
-		if ht := strings.ToLower(t.HeaderType); ht != "" && ht != "none" {
+		if t.httpObfs() {
 			return ""
 		}
 	case "ws", "grpc", "httpupgrade":
@@ -155,7 +155,7 @@ func (t *transportSpec) singboxReason(insecure bool) string {
 	}
 	switch t.network() {
 	case "tcp", "raw":
-		if ht := strings.ToLower(t.HeaderType); ht != "" && ht != "none" {
+		if t.httpObfs() {
 			return "" // TCP HTTP obfuscation is xray-only
 		}
 	case "ws", "grpc", "httpupgrade":

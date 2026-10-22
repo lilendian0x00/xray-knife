@@ -124,10 +124,16 @@ func (t *transportSpec) streamConfig(outbound bool) (*conf.StreamConfig, error) 
 	return s, nil
 }
 
+// httpObfs reports whether the link asks for TCP HTTP obfuscation. http is
+// the only tcp header type: exports sometimes put a cipher name or another
+// transport's header (srtp, utp) there, and those mean plain tcp.
+func (t *transportSpec) httpObfs() bool {
+	return strings.EqualFold(t.HeaderType, "http")
+}
+
 // tcpHeader returns the TCP header config: none, or HTTP obfuscation.
 func (t *transportSpec) tcpHeader(outbound bool) json.RawMessage {
-	// http is the only tcp header; exports sometimes put a cipher name here
-	if ht := strings.ToLower(t.HeaderType); ht != "http" {
+	if !t.httpObfs() {
 		return json.RawMessage(`{"type":"none"}`)
 	}
 	paths := splitList(t.Path)
