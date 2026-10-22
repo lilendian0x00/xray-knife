@@ -76,6 +76,8 @@ func (t *Trojan) Parse() error {
 	t.VerifyPeerCertByName = query.Get("vcn") // names to verify the cert against
 	t.ECHConfigList = query.Get("ech")        // Encrypted Client Hello
 
+	// a raw '+' in ech (base64, or name+dns-url) comes out of the query as a space
+	t.ECHConfigList = strings.ReplaceAll(t.ECHConfigList, " ", "+")
 	t.Remark = remark
 
 	// Apply defaults or adjustments
