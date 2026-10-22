@@ -126,7 +126,8 @@ func (t *transportSpec) streamConfig(outbound bool) (*conf.StreamConfig, error) 
 
 // tcpHeader returns the TCP header config: none, or HTTP obfuscation.
 func (t *transportSpec) tcpHeader(outbound bool) json.RawMessage {
-	if ht := strings.ToLower(t.HeaderType); ht == "" || ht == "none" {
+	// http is the only tcp header; exports sometimes put a cipher name here
+	if ht := strings.ToLower(t.HeaderType); ht != "http" {
 		return json.RawMessage(`{"type":"none"}`)
 	}
 	paths := splitList(t.Path)
