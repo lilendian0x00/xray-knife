@@ -194,3 +194,24 @@ func b64VmessTLS() string {
 	j := `{"v":"2","add":"1.2.3.4","port":"443","id":"a1a1a1a1-b2b2-c3c3-d4d4-e5e5e5e5e5e5","aid":"0","net":"tcp","tls":"tls","sni":"example.com","ps":"x"}`
 	return base64.StdEncoding.EncodeToString([]byte(j))
 }
+
+// TestTrojan_XHTTPExtra: Trojan passes the xhttp "extra" JSON through like
+// VLESS, and keeps it in a rebuilt link.
+func TestTrojan_XHTTPExtra(t *testing.T) {
+	link := "trojan://pw@1.2.3.4:443?security=tls&type=xhttp&sni=a.com&extra=%7B%22xPaddingBytes%22%3A%22100-1000%22%7D"
+	tr := parseLink(t, link).(*Trojan)
+	ob, err := tr.BuildOutboundDetourConfig(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if x := ob.StreamSetting.XHTTPSettings; x == nil || string(x.Extra) != `{"xPaddingBytes":"100-1000"}` {
+		t.Fatalf("xhttp settings = %+v", x)
+	}
+	if _, err := ob.Build(); err != nil {
+		t.Fatal(err)
+	}
+	tr.OrigLink = "" // force GetLink to rebuild the link
+	if again := parseLink(t, tr.GetLink()).(*Trojan); again.Extra != tr.Extra {
+		t.Errorf("extra after round trip = %q, want %q", again.Extra, tr.Extra)
+	}
+}
