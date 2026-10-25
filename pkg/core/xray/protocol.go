@@ -118,7 +118,8 @@ func removedTransport(t *transportSpec) string {
 // when sing-box has its transport. xray-core only allows that to private
 // addresses (infra/conf validateOutboundTransportSecurity).
 func (t *transportSpec) plaintextReason(address string) string {
-	if t.security() != "none" || !isPublicAddress(address) {
+	// sing-box would drop the finalmask; xray's refusal is the honest result.
+	if t.security() != "none" || t.FinalMask != "" || !isPublicAddress(address) {
 		return ""
 	}
 	switch t.network() {

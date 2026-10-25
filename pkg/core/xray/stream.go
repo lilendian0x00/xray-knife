@@ -25,6 +25,7 @@ type transportSpec struct {
 	ServiceName string // gRPC
 	Authority   string // gRPC
 	Extra       string // xhttp "extra" (raw JSON)
+	Seed        string // legacy mKCP seed
 	FinalMask   string // "fm": streamSettings.finalmask (raw JSON)
 
 	Security             string // "", "none", "tls" or "reality"
@@ -81,9 +82,9 @@ func (t *transportSpec) streamConfig(outbound bool) (*conf.StreamConfig, error) 
 			s.TCPSettings = tcp
 		}
 	case "kcp":
-		// mKCP "header" & "seed" were removed from xray-core (they now
-		// hard-error in Build()); use a bare mKCP config.
+		// xray-core moved mKCP's "header" and "seed" into finalmask.
 		s.KCPSettings = &conf.KCPConfig{}
+		s.FinalMask = t.kcpLegacyMask()
 	case "ws":
 		// The independent "host" field replaces the deprecated Host header.
 		s.WSSettings = &conf.WebSocketConfig{Path: t.Path, Host: t.Host}
@@ -122,7 +123,8 @@ func (t *transportSpec) streamConfig(outbound bool) (*conf.StreamConfig, error) 
 	default:
 		return nil, fmt.Errorf("unsupported transport %q", t.Network)
 	}
-	if outbound {
+	// "fm" is the whole finalmask and replaces what legacy params imply.
+	if t.FinalMask != "" {
 		fm, err := parseFinalMask(t.FinalMask)
 		if err != nil {
 			return nil, err
@@ -130,6 +132,35 @@ func (t *transportSpec) streamConfig(outbound bool) (*conf.StreamConfig, error) 
 		s.FinalMask = fm
 	}
 	return s, nil
+}
+
+// kcpLegacyMask maps a link's legacy mKCP header type and seed to
+// mkcp-legacy masks as v2rayN does: the seed (or, without one, the
+// original obfuscation) first, then the header. A link with neither gets
+// bare mKCP, as before.
+func (t *transportSpec) kcpLegacyMask() *conf.FinalMask {
+	header := strings.ToLower(t.HeaderType)
+	if header == "wechat-video" {
+		header = "wechat"
+	}
+	switch header {
+	case "srtp", "utp", "wechat", "dtls", "wireguard", "dns":
+	default:
+		header = ""
+	}
+	if header == "" && t.Seed == "" {
+		return nil
+	}
+	mask := func(settings map[string]string) conf.Mask {
+		raw, _ := json.Marshal(settings)
+		msg := json.RawMessage(raw)
+		return conf.Mask{Type: "mkcp-legacy", Settings: &msg}
+	}
+	fm := &conf.FinalMask{Udp: []conf.Mask{mask(map[string]string{"value": t.Seed})}}
+	if header != "" {
+		fm.Udp = append(fm.Udp, mask(map[string]string{"header": header}))
+	}
+	return fm
 }
 
 // parseFinalMask decodes a link's "fm" parameter, nil when it is empty.

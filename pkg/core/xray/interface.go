@@ -88,6 +88,7 @@ type Vless struct {
 	ServiceName          string `json:"serviceName"`   // GRPC
 	Mode                 string `json:"mode"`          // XHTTP - GRPC
 	Extra                string `json:"extra"`         // XHTTP - EXTRA
+	Seed                 string `json:"seed"`          // legacy mKCP seed
 	FinalMask            string `json:"fm"`            // streamSettings.finalmask (raw JSON)
 	CertFile             string `json:"-"`
 	KeyFile              string `json:"-"`
@@ -100,6 +101,7 @@ type Shadowsocks struct {
 	Encryption string
 	Password   string
 	Plugin     string // SIP003 plugin ("obfs-local;obfs=http;..."), unsupported by xray-core
+	FinalMask  string // streamSettings.finalmask ("fm", raw JSON)
 	Remark     string
 	OrigLink   string // Original link
 }
@@ -129,6 +131,7 @@ type Trojan struct {
 	ServiceName          string `json:"serviceName"` // GRPC
 	Mode                 string `json:"mode"`        // XHTTP, GRPC
 	Extra                string `json:"extra"`       // XHTTP - EXTRA
+	Seed                 string `json:"seed"`        // legacy mKCP seed
 	FinalMask            string `json:"fm"`          // streamSettings.finalmask (raw JSON)
 
 	// Yes, Trojan can have reality too xD

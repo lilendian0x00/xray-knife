@@ -65,6 +65,7 @@ func (t *Trojan) Parse() error {
 	t.Mode = query.Get("mode")
 	t.Extra = query.Get("extra") // XHTTP extra
 	t.FinalMask = query.Get("fm")
+	t.Seed = query.Get("seed")
 	t.PublicKey = query.Get("pbk")
 	t.ShortIds = query.Get("sid")
 	t.SpiderX = query.Get("spx")
@@ -205,6 +206,7 @@ func (t *Trojan) GetLink() string {
 		addQueryParam("mode", t.Mode)
 		addQueryParam("extra", t.Extra)
 		addQueryParam("fm", t.FinalMask)
+		addQueryParam("seed", t.Seed)
 		addQueryParam("pbk", t.PublicKey)
 		addQueryParam("sid", t.ShortIds)
 		addQueryParam("spx", t.SpiderX)
@@ -263,6 +265,7 @@ func (t *Trojan) transport() transportSpec {
 		ServiceName:          t.ServiceName,
 		Authority:            t.Authority,
 		Extra:                t.Extra,
+		Seed:                 t.Seed,
 		FinalMask:            t.FinalMask,
 		Security:             t.Security,
 		SNI:                  t.SNI,

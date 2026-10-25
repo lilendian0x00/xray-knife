@@ -46,7 +46,11 @@ func xrayToLink(o map[string]interface{}) (string, bool, error) {
 			}
 			return trojanLink(name, server, port, str(srv, "password"), s), true, nil
 		case "shadowsocks":
-			return ssLink(name, server, port, str(srv, "method"), str(srv, "password"), ""), true, nil
+			fm := ""
+			if m := sub(sub(o, "streamSettings"), "finalmask"); len(m) > 0 {
+				fm = compactJSON(m)
+			}
+			return ssLink(name, server, port, str(srv, "method"), str(srv, "password"), "", fm), true, nil
 		default:
 			// servers[0].users[0], or the flat form's user/pass.
 			user, pass := str(srv, "user"), str(srv, "pass")

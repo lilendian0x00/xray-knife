@@ -159,6 +159,9 @@ func vmessLink(name, server string, port int, uuid string, alterID int, cipher s
 		set("type", s.Mode)
 		set("path", s.ServiceName)
 		set("host", s.Authority)
+	case "kcp":
+		set("type", s.HeaderType)
+		set("path", s.Seed)
 	case "xhttp":
 		set("type", s.Mode)
 		set("path", s.Path)
@@ -185,7 +188,7 @@ func vmessLink(name, server string, port int, uuid string, alterID int, cipher s
 
 // ssLink builds a SIP002 link. SS-2022 keys go in plain (percent-encoded)
 // userinfo as SIP022 requires; other methods use base64url.
-func ssLink(name, server string, port int, method, password, plugin string) string {
+func ssLink(name, server string, port int, method, password, plugin, finalMask string) string {
 	var user string
 	if strings.HasPrefix(strings.ToLower(method), "2022-") {
 		user = url.PathEscape(method) + ":" + url.PathEscape(password)
@@ -193,8 +196,11 @@ func ssLink(name, server string, port int, method, password, plugin string) stri
 		user = base64.RawURLEncoding.EncodeToString([]byte(method + ":" + password))
 	}
 	link := "ss://" + user + "@" + net.JoinHostPort(server, strconv.Itoa(port))
-	if plugin != "" {
-		link += "/?plugin=" + url.QueryEscape(plugin)
+	q := params{}
+	q.set("plugin", plugin)
+	q.set("fm", finalMask)
+	if len(q) > 0 {
+		link += "/?" + url.Values(q).Encode()
 	}
 	return link + fragment(name)
 }

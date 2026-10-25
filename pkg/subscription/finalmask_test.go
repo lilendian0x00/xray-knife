@@ -17,13 +17,15 @@ func TestXrayFinalMaskCarriedToLinks(t *testing.T) {
      "streamSettings": {"network": "hysteria", "security": "tls", "tlsSettings": {"serverName": "h.example.com"}, "hysteriaSettings": {"version": 2, "auth": "pw"},
        "finalmask": {"udp": [{"type": "salamander", "settings": {"password": "op"}}, {"type": "noise", "settings": {"noise": [{"rand": "10-20", "delay": "5"}]}}]}}},
     {"protocol": "wireguard", "tag": "fm-wg", "settings": {"secretKey": "` + wgKey + `", "address": ["172.16.0.2/32"], "peers": [{"endpoint": "162.159.192.1:2408", "publicKey": "` + wgPub + `"}]},
-     "streamSettings": {"finalmask": {"udp": [{"type": "noise", "settings": {"noise": [{"rand": "10-20", "delay": "5"}]}}]}}}
+     "streamSettings": {"finalmask": {"udp": [{"type": "noise", "settings": {"noise": [{"rand": "10-20", "delay": "5"}]}}]}}},
+    {"protocol": "shadowsocks", "tag": "fm-ss", "settings": {"servers": [{"address": "5.6.7.8", "port": 8388, "method": "aes-128-gcm", "password": "pw"}]},
+     "streamSettings": {"finalmask": {"tcp": [{"type": "sudoku", "settings": {"password": "pw"}}]}}}
   ]}`
 	res, err := DecodeDetailed([]byte(config), DecodeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Links) != 3 {
+	if len(res.Links) != 4 {
 		t.Fatalf("links = %v", res.Links)
 	}
 	fm := func(link string) string {
@@ -52,5 +54,10 @@ func TestXrayFinalMaskCarriedToLinks(t *testing.T) {
 
 	if got := fm(res.Links[2]); !strings.Contains(got, `"noise"`) {
 		t.Errorf("wireguard fm = %q", got)
+	}
+
+	ss := &xray.Shadowsocks{OrigLink: res.Links[3]}
+	if err := ss.Parse(); err != nil || !strings.Contains(ss.FinalMask, `"sudoku"`) {
+		t.Errorf("shadowsocks link = %s, %v", res.Links[3], err)
 	}
 }
