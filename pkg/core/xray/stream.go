@@ -25,6 +25,7 @@ type transportSpec struct {
 	ServiceName string // gRPC
 	Authority   string // gRPC
 	Extra       string // xhttp "extra" (raw JSON)
+	FinalMask   string // "fm": streamSettings.finalmask (raw JSON)
 
 	Security             string // "", "none", "tls" or "reality"
 	SNI                  string
@@ -121,7 +122,27 @@ func (t *transportSpec) streamConfig(outbound bool) (*conf.StreamConfig, error) 
 	default:
 		return nil, fmt.Errorf("unsupported transport %q", t.Network)
 	}
+	if outbound {
+		fm, err := parseFinalMask(t.FinalMask)
+		if err != nil {
+			return nil, err
+		}
+		s.FinalMask = fm
+	}
 	return s, nil
+}
+
+// parseFinalMask decodes a link's "fm" parameter, nil when it is empty.
+// Like extra, it holds raw JSON that the query parser already decoded.
+func parseFinalMask(raw string) (*conf.FinalMask, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	fm := &conf.FinalMask{}
+	if err := json.Unmarshal([]byte(raw), fm); err != nil {
+		return nil, fmt.Errorf("fm (finalmask) is not valid JSON: %w", err)
+	}
+	return fm, nil
 }
 
 // httpObfs reports whether the link asks for TCP HTTP obfuscation. http is

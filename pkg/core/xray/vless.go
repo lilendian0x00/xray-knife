@@ -62,6 +62,7 @@ func (v *Vless) Parse() error {
 	v.Host = host                // for ws, http
 	v.Path = query.Get("path")   // for ws, http path
 	v.Extra = query.Get("extra") // XHTTP extra
+	v.FinalMask = query.Get("fm")
 	v.Flow = query.Get("flow")
 	v.PublicKey = query.Get("pbk")                                                     // reality public key
 	v.ShortIds = query.Get("sid")                                                      // reality short ID
@@ -227,6 +228,7 @@ func (v *Vless) GetLink() string {
 		addQueryParam("serviceName", v.ServiceName)
 		addQueryParam("mode", v.Mode)
 		addQueryParam("extra", v.Extra)
+		addQueryParam("fm", v.FinalMask)
 		addQueryParam("allowInsecure", v.AllowInsecure)
 		addQueryParam("quicSecurity", v.QuicSecurity)
 		addQueryParam("key", v.Key)
@@ -282,6 +284,7 @@ func (v *Vless) transport() transportSpec {
 		ServiceName:          v.ServiceName,
 		Authority:            v.Authority,
 		Extra:                v.Extra,
+		FinalMask:            v.FinalMask,
 		Security:             v.Security,
 		SNI:                  v.SNI,
 		ALPN:                 v.ALPN,

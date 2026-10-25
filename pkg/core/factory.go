@@ -117,9 +117,16 @@ func (c *AutomaticCore) selectCoreForLink(configLink string) (Core, error) {
 	}
 
 	switch scheme {
-	case protocol.Hysteria2Identifier, "hy2",
+	case protocol.Hysteria2Identifier, "hy2":
+		// sing-box has no finalmask: links whose "fm" needs it go to xray.
+		if p, err := c.xrayCore.CreateProtocol(configLink); err == nil && p.Parse() == nil {
+			if h, ok := p.(*xray.Hysteria2); ok && h.NeedsXray() {
+				return c.xrayCore, nil
+			}
+		}
+		return c.singboxCore, nil
+	case protocol.HysteriaIdentifier, protocol.TuicIdentifier, protocol.AnyTLSIdentifier, protocol.SSHIdentifier:
 		// Only sing-box implements these.
-		protocol.HysteriaIdentifier, protocol.TuicIdentifier, protocol.AnyTLSIdentifier, protocol.SSHIdentifier:
 		return c.singboxCore, nil
 	case protocol.HTTPIdentifier, protocol.HTTPSIdentifier:
 		// t.me MTProto links are https too; they were routed above. Web

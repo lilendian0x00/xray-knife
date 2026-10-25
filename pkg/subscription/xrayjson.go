@@ -83,10 +83,23 @@ func xrayToLink(o map[string]interface{}) (string, bool, error) {
 			ALPN:      strs(tls, "alpn"),
 			PinSHA256: str(tls, "pinnedPeerCertSha256"),
 		}
-		for _, m := range list(sub(ss, "finalmask"), "udp") {
+		// Salamander goes in obfs, which every client reads. Any other mask
+		// needs the whole finalmask in fm, salamander included, since mask
+		// order must match the server's.
+		fm := sub(ss, "finalmask")
+		onlySalamander := true
+		for key := range fm {
+			onlySalamander = onlySalamander && key == "udp"
+		}
+		for _, m := range list(fm, "udp") {
 			if mask, ok := m.(map[string]interface{}); ok && str(mask, "type") == "salamander" {
 				h.Obfs, h.ObfsPassword = "salamander", str(sub(mask, "settings"), "password")
+			} else {
+				onlySalamander = false
 			}
+		}
+		if !onlySalamander {
+			h.FinalMask = compactJSON(fm)
 		}
 		return hysteria2Link(name, server, port, h), true, nil
 	case "wireguard":
@@ -95,6 +108,9 @@ func xrayToLink(o map[string]interface{}) (string, bool, error) {
 			Addresses:  strs(settings, "address"),
 			MTU:        integer(settings, "mtu"),
 			Reserved:   reservedBytes(settings["reserved"]),
+		}
+		if fm := sub(sub(o, "streamSettings"), "finalmask"); len(fm) > 0 {
+			w.FinalMask = compactJSON(fm)
 		}
 		peers := list(settings, "peers")
 		if len(peers) == 0 {
@@ -225,6 +241,9 @@ func xrayStream(ss map[string]interface{}) (stream, error) {
 		s.ShortID = str(r, "shortId")
 		s.SpiderX = str(r, "spiderX")
 		s.Mldsa65Verify = str(r, "mldsa65Verify")
+	}
+	if fm := sub(ss, "finalmask"); len(fm) > 0 {
+		s.FinalMask = compactJSON(fm)
 	}
 	return s, nil
 }

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"net/url"
 	"strings"
 	"testing"
 
@@ -40,6 +41,18 @@ func TestAutomaticCoreRoutesSingboxOnlyProtocols(t *testing.T) {
 		if got, err := c.coreFor(p); err != nil || got != c.singboxCore {
 			t.Errorf("%s: coreFor = %v, %v", link, got, err)
 		}
+	}
+}
+
+func TestAutomaticCoreRoutesHysteria2FinalMaskToXray(t *testing.T) {
+	c := NewAutomaticCore(false, false).(*AutomaticCore)
+	noise := "hy2://pw@1.2.3.4:443?sni=a.com&fm=" + url.QueryEscape(`{"udp":[{"type":"noise","settings":{"noise":[{"rand":"10-20","delay":"5"}]}}]}`)
+	if selected, err := c.selectCoreForLink(noise); err != nil || selected != c.xrayCore {
+		t.Errorf("hy2 with a noise fm: %v, %v, want xray", selected, err)
+	}
+	dup := "hy2://pw@1.2.3.4:443?sni=a.com&obfs=salamander&obfs-password=x&fm=" + url.QueryEscape(`{"udp":[{"type":"salamander","settings":{"password":"x"}}]}`)
+	if selected, err := c.selectCoreForLink(dup); err != nil || selected != c.singboxCore {
+		t.Errorf("hy2 whose fm only repeats obfs: %v, %v, want sing-box", selected, err)
 	}
 }
 

@@ -26,6 +26,7 @@ type stream struct {
 	Mode        string // gRPC "multi" or the xhttp mode
 	Extra       string // xhttp extra JSON
 	Seed        string // mKCP seed
+	FinalMask   string // streamSettings.finalmask JSON ("fm")
 
 	Security    string // "", "tls" or "reality"
 	SNI         string
@@ -84,6 +85,7 @@ func streamQuery(q params, s stream) {
 	q.set("mode", s.Mode)
 	q.set("extra", s.Extra)
 	q.set("seed", s.Seed)
+	q.set("fm", s.FinalMask)
 	security := s.Security
 	if security == "" {
 		security = "none"
@@ -140,6 +142,7 @@ func vmessLink(name, server string, port int, uuid string, alterID int, cipher s
 		fields["aid"] = strconv.Itoa(alterID)
 	}
 	set("scy", cipher)
+	set("fm", s.FinalMask)
 	network := s.Network
 	if network == "" {
 		network = "tcp"
@@ -235,6 +238,7 @@ type hysteria2Opts struct {
 	Insecure                                     bool
 	ALPN                                         []string
 	Ports                                        string // hopping ranges, "20000-30000,40000-41000"
+	FinalMask                                    string // finalmask JSON ("fm")
 }
 
 func hysteria2Link(name, server string, port int, o hysteria2Opts) string {
@@ -245,6 +249,7 @@ func hysteria2Link(name, server string, port int, o hysteria2Opts) string {
 	q.set("pinSHA256", o.PinSHA256)
 	q.set("alpn", strings.Join(o.ALPN, ","))
 	q.set("mport", o.Ports)
+	q.set("fm", o.FinalMask)
 	q.flag("insecure", o.Insecure)
 	return shareURL("hysteria2", url.User(o.Password), server, port, q, name)
 }
@@ -349,6 +354,7 @@ type wireguardOpts struct {
 	Addresses, AllowedIPs               []string
 	MTU, KeepAlive                      int
 	Reserved                            []int
+	FinalMask                           string // finalmask JSON ("fm")
 }
 
 func wireguardLink(name, server string, port int, o wireguardOpts) string {
@@ -370,6 +376,7 @@ func wireguardLink(name, server string, port int, o wireguardOpts) string {
 		}
 		q.set("reserved", strings.Join(parts, ","))
 	}
+	q.set("fm", o.FinalMask)
 	// Keys are standard base64; escape "/" and "+" so no parser splits
 	// or mangles them.
 	return "wireguard://" + url.QueryEscape(o.PrivateKey) + "@" +

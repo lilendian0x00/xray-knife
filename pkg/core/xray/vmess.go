@@ -275,6 +275,11 @@ func (v *Vmess) transport() transportSpec {
 		PinnedPeerCertSha256: v.PinnedPeerCertSha256,
 		VerifyPeerCertByName: v.VerifyPeerCertByName,
 		ECHConfigList:        v.ECHConfigList,
+		FinalMask:            string(v.FinalMask),
+	}
+	var fm string
+	if json.Unmarshal(v.FinalMask, &fm) == nil {
+		ts.FinalMask = fm // "fm" as a string holding the JSON
 	}
 	switch ts.network() {
 	case "tcp", "raw":

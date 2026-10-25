@@ -148,9 +148,9 @@ func (t *transportSpec) singboxReason(insecure bool) string {
 		return reason
 	}
 	// Moving is only worth it when sing-box keeps everything the link
-	// says. ECH is dropped by xray-knife's sing-box builders, so such links
-	// stay on xray (which warns that insecure can't apply).
-	if !insecure || t.security() != "tls" || t.PinnedPeerCertSha256 != "" || t.ECHConfigList != "" {
+	// says. ECH and finalmask are dropped by xray-knife's sing-box builders,
+	// so such links stay on xray (which warns that insecure can't apply).
+	if !insecure || t.security() != "tls" || t.PinnedPeerCertSha256 != "" || t.ECHConfigList != "" || t.FinalMask != "" {
 		return ""
 	}
 	switch t.network() {

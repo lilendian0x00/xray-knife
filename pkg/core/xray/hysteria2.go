@@ -53,6 +53,7 @@ func (h *Hysteria2) Parse() error {
 	h.ObfusPassword = query.Get("obfs-password")
 	h.Insecure = query.Get("insecure") // "0", "1", "false", "true"
 	h.PinSHA256 = query.Get("pinSHA256")
+	h.FinalMask = query.Get("fm")
 	if mport := query.Get("mport"); mport != "" && h.Ports == "" {
 		h.Ports = mport
 	}
@@ -141,6 +142,7 @@ func (h *Hysteria2) GetLink() string {
 	addQueryParam("obfs", h.ObfusType)
 	addQueryParam("obfs-password", h.ObfusPassword)
 	addQueryParam("pinSHA256", h.PinSHA256)
+	addQueryParam("fm", h.FinalMask)
 	if s, ok := h.Insecure.(string); ok {
 		addQueryParam("insecure", s)
 	}
@@ -214,6 +216,13 @@ func (h *Hysteria2) BuildOutboundDetourConfig(allowInsecure bool) (*conf.Outboun
 	default:
 		return nil, fmt.Errorf("unsupported hysteria2 obfs %q", h.ObfusType)
 	}
+	// "fm" is the whole finalmask, salamander included, and replaces the
+	// one obfs implies, as in v2rayN: mask order must match the server's.
+	if h.FinalMask != "" {
+		if s.FinalMask, err = parseFinalMask(h.FinalMask); err != nil {
+			return nil, err
+		}
+	}
 
 	return &conf.OutboundDetourConfig{
 		Tag:           "proxy",
@@ -221,6 +230,24 @@ func (h *Hysteria2) BuildOutboundDetourConfig(allowInsecure bool) (*conf.Outboun
 		Settings:      &oset,
 		StreamSetting: s,
 	}, nil
+}
+
+// NeedsXray reports whether the link's "fm" asks for more than the
+// salamander obfs that sing-box also implements, so only xray carries it.
+func (h *Hysteria2) NeedsXray() bool {
+	fm, err := parseFinalMask(h.FinalMask)
+	if err != nil {
+		return true // let xray report it
+	}
+	if fm == nil {
+		return false
+	}
+	for _, m := range fm.Udp {
+		if !strings.EqualFold(m.Type, "salamander") || !strings.EqualFold(h.ObfusType, "salamander") {
+			return true
+		}
+	}
+	return len(fm.Tcp) > 0 || fm.QuicParams != nil
 }
 
 func (h *Hysteria2) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
