@@ -326,12 +326,25 @@ func (c *Core) applyFragment(s *conf.StreamConfig, udp bool) error {
 	}
 	// Masks apply outermost first, so appending keeps noise innermost:
 	// its packets leave raw, not wrapped by e.g. Hysteria2's salamander.
+	// udphop and xicmp do the dial themselves and xray-core only allows
+	// them last, so noise goes just above a link's own one.
 	if udp {
-		s.FinalMask.Udp = append(s.FinalMask.Udp, mask)
+		udp := s.FinalMask.Udp
+		if n := len(udp); n > 0 && dialsItself(udp[n-1]) {
+			s.FinalMask.Udp = append(udp[:n-1:n-1], mask, udp[n-1])
+		} else {
+			s.FinalMask.Udp = append(udp, mask)
+		}
 	} else {
 		s.FinalMask.Tcp = append(s.FinalMask.Tcp, mask)
 	}
 	return nil
+}
+
+// dialsItself reports a UDP mask that opens the connection itself
+// (HandleDial in xray-core's finalmask), which must be the last mask.
+func dialsItself(m conf.Mask) bool {
+	return strings.EqualFold(m.Type, "udphop") || strings.EqualFold(m.Type, "xicmp")
 }
 
 // newInstance builds an xray instance from outbound configs. The first

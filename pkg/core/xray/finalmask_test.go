@@ -62,6 +62,39 @@ func TestFinalMaskFromLink(t *testing.T) {
 	}
 }
 
+// --fragment noise goes above a link's udphop or xicmp mask: those dial
+// themselves, and xray-core fails every dial unless they come last.
+func TestFragmentNoiseBeforeDialMask(t *testing.T) {
+	for typ, settings := range map[string]string{
+		"udphop": `{"mode":"intervalRemote","interval":"5-10","remotePorts":"20000-20010"}`,
+		"xicmp":  `{"dgram":true,"ips":["1.2.3.4"]}`,
+	} {
+		fm := `{"udp":[{"type":"salamander","settings":{"password":"x"}},{"type":"` + typ + `","settings":` + settings + `}]}`
+		h := &Hysteria2{OrigLink: "hy2://pw@1.2.3.4:443?sni=a.com&fm=" + url.QueryEscape(fm)}
+		if err := h.Parse(); err != nil {
+			t.Fatal(err)
+		}
+		ob, err := h.BuildOutboundDetourConfig(false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := NewXrayService(false, false, WithFragment(mustFragment(t, "tlshello,10-20,1", "rand:10-20:5")))
+		if err := c.prepareEntry(ob, "1.2.3.4"); err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, m := range ob.StreamSetting.FinalMask.Udp {
+			got = append(got, m.Type)
+		}
+		if want := "salamander noise " + typ; strings.Join(got, " ") != want {
+			t.Errorf("udp masks = %v, want %s", got, want)
+		}
+		if _, err := ob.Build(); err != nil {
+			t.Errorf("%s: does not build: %v", typ, err)
+		}
+	}
+}
+
 func TestFinalMaskVmessJSON(t *testing.T) {
 	for _, fm := range []string{fragmentFM, `"` + `{\"tcp\":[{\"type\":\"fragment\",\"settings\":{\"packets\":\"tlshello\",\"length\":\"100-200\",\"delay\":\"10-20\"}}]}` + `"`} {
 		js := `{"v":"2","add":"1.2.3.4","port":"443","id":"00000000-0000-0000-0000-000000000000","net":"tcp","tls":"tls","sni":"example.com","fm":` + fm + `}`
