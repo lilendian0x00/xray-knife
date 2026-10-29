@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -9,6 +11,9 @@ import (
 
 // Restore removes the state a crashed run left and is idempotent.
 func TestRestoreIsIdempotent(t *testing.T) {
+	if runtime.GOOS == "linux" && os.Geteuid() != 0 {
+		t.Skip("Restore reads nftables and routing state, which needs root on Linux")
+	}
 	t.Setenv("XRAY_KNIFE_HOME", t.TempDir())
 	if r := Restore(false); !r.Empty() {
 		t.Fatalf("clean system reported %+v", r)
