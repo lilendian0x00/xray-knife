@@ -91,13 +91,17 @@ func xrayToLink(o map[string]interface{}) (string, bool, error) {
 		// needs the whole finalmask in fm, salamander included, since mask
 		// order must match the server's.
 		fm := sub(ss, "finalmask")
-		onlySalamander := true
+		udp := list(fm, "udp")
+		onlySalamander := len(udp) <= 1
 		for key := range fm {
 			onlySalamander = onlySalamander && key == "udp"
 		}
-		for _, m := range list(fm, "udp") {
+		for _, m := range udp {
 			if mask, ok := m.(map[string]interface{}); ok && str(mask, "type") == "salamander" {
-				h.Obfs, h.ObfsPassword = "salamander", str(sub(mask, "settings"), "password")
+				settings := sub(mask, "settings")
+				h.Obfs, h.ObfsPassword = "salamander", str(settings, "password")
+				// packetSize makes it gecko, which obfs cannot say.
+				onlySalamander = onlySalamander && len(settings) == 1
 			} else {
 				onlySalamander = false
 			}

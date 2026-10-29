@@ -61,3 +61,28 @@ func TestXrayFinalMaskCarriedToLinks(t *testing.T) {
 		t.Errorf("shadowsocks link = %s, %v", res.Links[3], err)
 	}
 }
+
+// A lone salamander with just a password fits obfs, which every client
+// reads. packetSize (gecko) or a second salamander only fit fm.
+func TestXrayHysteria2SalamanderOnlyInObfs(t *testing.T) {
+	hy2 := func(udp string) string {
+		return `{"protocol": "hysteria", "settings": {"version": 2, "address": "h.example.com", "port": 443},
+     "streamSettings": {"network": "hysteria", "security": "tls", "hysteriaSettings": {"version": 2, "auth": "pw"},
+       "finalmask": {"udp": [` + udp + `]}}}`
+	}
+	plain := `{"type": "salamander", "settings": {"password": "op"}}`
+	for udp, wantFM := range map[string]bool{
+		plain: false,
+		`{"type": "salamander", "settings": {"password": "op", "packetSize": "200-1200"}}`: true,
+		plain + `, ` + plain: true,
+	} {
+		res, err := DecodeDetailed([]byte(`{"outbounds": [`+hy2(udp)+`]}`), DecodeOptions{})
+		if err != nil || len(res.Links) != 1 {
+			t.Fatalf("%s: %v, %v", udp, res.Links, err)
+		}
+		link := res.Links[0]
+		if !strings.Contains(link, "obfs=salamander") || strings.Contains(link, "fm=") != wantFM {
+			t.Errorf("%s: link = %s, want fm %v", udp, link, wantFM)
+		}
+	}
+}
