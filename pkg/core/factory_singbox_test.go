@@ -54,6 +54,14 @@ func TestAutomaticCoreRoutesHysteria2FinalMaskToXray(t *testing.T) {
 	if selected, err := c.selectCoreForLink(dup); err != nil || selected != c.singboxCore {
 		t.Errorf("hy2 whose fm only repeats obfs: %v, %v, want sing-box", selected, err)
 	}
+	// xray cannot skip certificate checks; noise is client-side only.
+	if selected, err := c.selectCoreForLink(noise + "&insecure=1"); err != nil || selected != c.singboxCore {
+		t.Errorf("insecure hy2 with a noise fm: %v, %v, want sing-box", selected, err)
+	}
+	global := NewAutomaticCore(false, true).(*AutomaticCore)
+	if selected, err := global.selectCoreForLink(noise); err != nil || selected != global.singboxCore {
+		t.Errorf("hy2 with a noise fm under --insecure: %v, %v, want sing-box", selected, err)
+	}
 }
 
 func TestAutomaticCoreRoutesHTTPProxyLinks(t *testing.T) {

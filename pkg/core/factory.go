@@ -120,7 +120,7 @@ func (c *AutomaticCore) selectCoreForLink(configLink string) (Core, error) {
 	case protocol.Hysteria2Identifier, "hy2":
 		// sing-box has no finalmask: links whose "fm" needs it go to xray.
 		if p, err := c.xrayCore.CreateProtocol(configLink); err == nil && p.Parse() == nil {
-			if h, ok := p.(*xray.Hysteria2); ok && h.NeedsXray() {
+			if h, ok := p.(*xray.Hysteria2); ok && h.NeedsXray(c.insecure) {
 				return c.xrayCore, nil
 			}
 		}

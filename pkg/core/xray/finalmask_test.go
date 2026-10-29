@@ -128,24 +128,52 @@ func TestFinalMaskHysteria2(t *testing.T) {
 	if _, err := ob.Build(); err != nil {
 		t.Fatalf("hysteria2 with fm does not build: %v", err)
 	}
-	if !h.NeedsXray() {
+	if !h.NeedsXray(false) {
 		t.Error("noise in fm should need xray")
 	}
 
+	salamander := func(settings string) string {
+		return url.QueryEscape(`{"udp":[{"type":"salamander","settings":` + settings + `}]}`)
+	}
+	const obfs = "hy2://pw@1.2.3.4:443?obfs=salamander&obfs-password=x"
+	const quic = `{"quicParams":{"congestion":"bbr"}}`
 	for link, want := range map[string]bool{
 		// The salamander that panels repeat in fm is what obfs already says.
-		"hy2://pw@1.2.3.4:443?obfs=salamander&obfs-password=x&fm=" + url.QueryEscape(`{"udp":[{"type":"salamander","settings":{"password":"x"}}]}`): false,
-		"hy2://pw@1.2.3.4:443?fm=" + url.QueryEscape(`{"udp":[{"type":"salamander","settings":{"password":"x"}}]}`):                                 true,
-		"hy2://pw@1.2.3.4:443?fm=" + url.QueryEscape(`{"quicParams":{"congestion":"bbr"}}`):                                                         true,
-		"hy2://pw@1.2.3.4:443": false,
+		obfs + "&fm=" + salamander(`{"password":"x"}`):              false,
+		"hy2://pw@1.2.3.4:443?fm=" + salamander(`{"password":"x"}`): true,
+		"hy2://pw@1.2.3.4:443?fm=" + url.QueryEscape(quic):          true,
+		"hy2://pw@1.2.3.4:443":                                      false,
+		"hy2://pw@1.2.3.4:443?fm=" + url.QueryEscape(`{"udp":[]}`):  false,
+		// sing-box only has obfs and obfs-password: gecko, another password
+		// or a second salamander need xray.
+		obfs + "&fm=" + salamander(`{"password":"x","packetSize":"200-1200"}`): true,
+		obfs + "&fm=" + salamander(`{"password":"y"}`):                         true,
+		obfs + "&fm=" + url.QueryEscape(`{"udp":[{"type":"salamander","settings":{"password":"x"}},{"type":"salamander","settings":{"password":"x"}}]}`): true,
+		obfs + "&fm=" + url.QueryEscape(`{}`): true,
+		// xray cannot skip certificate checks, and noise and quicParams are
+		// client-side: links that ask for insecure stay on sing-box.
+		"hy2://pw@1.2.3.4:443?insecure=1&fm=" + url.QueryEscape(quic):                     false,
+		obfs + "&insecure=1&fm=" + url.QueryEscape(both):                                  false,
+		obfs + "&insecure=1&pinSHA256=ab&fm=" + url.QueryEscape(both):                     true,
+		"hy2://pw@1.2.3.4:443?insecure=1&fm=" + salamander(`{"password":"x"}`):            true,
+		obfs + "&insecure=1&fm=" + salamander(`{"password":"x","packetSize":"200-1200"}`): true,
 	} {
 		h := &Hysteria2{OrigLink: link}
 		if err := h.Parse(); err != nil {
 			t.Fatal(err)
 		}
-		if got := h.NeedsXray(); got != want {
+		if got := h.NeedsXray(false); got != want {
 			t.Errorf("%s: NeedsXray = %v, want %v", link, got, want)
 		}
+	}
+
+	// A global --insecure counts like insecure=1.
+	h = &Hysteria2{OrigLink: "hy2://pw@1.2.3.4:443?fm=" + url.QueryEscape(quic)}
+	if err := h.Parse(); err != nil {
+		t.Fatal(err)
+	}
+	if h.NeedsXray(true) {
+		t.Error("quicParams with --insecure should stay on sing-box")
 	}
 }
 

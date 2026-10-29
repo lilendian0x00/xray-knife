@@ -234,7 +234,11 @@ func (h *Hysteria2) BuildOutboundDetourConfig(allowInsecure bool) (*conf.Outboun
 
 // NeedsXray reports whether the link's "fm" asks for more than the
 // salamander obfs that sing-box also implements, so only xray carries it.
-func (h *Hysteria2) NeedsXray() bool {
+// insecure is the caller's global --insecure. xray-core cannot skip
+// certificate checks, so a link that asks to (without a pin) stays on
+// sing-box when all fm adds is client-side: noise and quicParams, which
+// the server never sees. sing-box drops those and still connects.
+func (h *Hysteria2) NeedsXray(insecure bool) bool {
 	fm, err := parseFinalMask(h.FinalMask)
 	if err != nil {
 		return true // let xray report it
@@ -242,12 +246,44 @@ func (h *Hysteria2) NeedsXray() bool {
 	if fm == nil {
 		return false
 	}
+	if len(fm.Tcp) > 0 {
+		return true
+	}
+	clientOnly := fm.QuicParams != nil
+	var server []conf.Mask
 	for _, m := range fm.Udp {
-		if !strings.EqualFold(m.Type, "salamander") || !strings.EqualFold(h.ObfusType, "salamander") {
-			return true
+		if strings.EqualFold(m.Type, "noise") {
+			clientOnly = true
+		} else {
+			server = append(server, m)
 		}
 	}
-	return len(fm.Tcp) > 0 || fm.QuicParams != nil
+	if !h.obfsIs(server) {
+		return true
+	}
+	return clientOnly && !((insecure || h.wantsInsecure()) && h.PinSHA256 == "")
+}
+
+// obfsIs reports whether masks are exactly what the link's obfs gives
+// sing-box: nothing, or one salamander with obfs-password and no other
+// setting (packetSize makes it gecko, which sing-box lacks).
+func (h *Hysteria2) obfsIs(masks []conf.Mask) bool {
+	switch strings.ToLower(h.ObfusType) {
+	case "", "none":
+		return len(masks) == 0
+	case "salamander":
+	default:
+		return false
+	}
+	if len(masks) != 1 || !strings.EqualFold(masks[0].Type, "salamander") || masks[0].Settings == nil {
+		return false
+	}
+	var settings map[string]json.RawMessage
+	if json.Unmarshal(*masks[0].Settings, &settings) != nil || len(settings) != 1 {
+		return false
+	}
+	var password string
+	return json.Unmarshal(settings["password"], &password) == nil && password == h.ObfusPassword
 }
 
 func (h *Hysteria2) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
