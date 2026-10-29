@@ -49,7 +49,7 @@ func clashToLink(p map[string]interface{}) (string, bool, error) {
 		if err != nil {
 			return "", true, err
 		}
-		return ssLink(name, server, port, str(p, "cipher"), str(p, "password"), plugin), true, nil
+		return ssLink(name, server, port, str(p, "cipher"), str(p, "password"), plugin, ""), true, nil
 	case "socks5":
 		if boolean(p, "tls") {
 			return "", true, skipf("socks5 over TLS is not supported")

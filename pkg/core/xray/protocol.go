@@ -118,7 +118,8 @@ func removedTransport(t *transportSpec) string {
 // when sing-box has its transport. xray-core only allows that to private
 // addresses (infra/conf validateOutboundTransportSecurity).
 func (t *transportSpec) plaintextReason(address string) string {
-	if t.security() != "none" || !isPublicAddress(address) {
+	// sing-box would drop the finalmask; xray's refusal is the honest result.
+	if t.security() != "none" || t.FinalMask != "" || !isPublicAddress(address) {
 		return ""
 	}
 	switch t.network() {
@@ -148,9 +149,9 @@ func (t *transportSpec) singboxReason(insecure bool) string {
 		return reason
 	}
 	// Moving is only worth it when sing-box keeps everything the link
-	// says. ECH is dropped by xray-knife's sing-box builders, so such links
-	// stay on xray (which warns that insecure can't apply).
-	if !insecure || t.security() != "tls" || t.PinnedPeerCertSha256 != "" || t.ECHConfigList != "" {
+	// says. ECH and finalmask are dropped by xray-knife's sing-box builders,
+	// so such links stay on xray (which warns that insecure can't apply).
+	if !insecure || t.security() != "tls" || t.PinnedPeerCertSha256 != "" || t.ECHConfigList != "" || t.FinalMask != "" {
 		return ""
 	}
 	switch t.network() {

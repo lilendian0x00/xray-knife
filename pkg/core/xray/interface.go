@@ -1,6 +1,8 @@
 package xray
 
 import (
+	"encoding/json"
+
 	"github.com/lilendian0x00/xray-knife/v11/pkg/core/protocol"
 
 	"github.com/xtls/xray-core/infra/conf"
@@ -42,6 +44,9 @@ type Vmess struct {
 	VerifyPeerCertByName string `json:"vcn,omitempty"`
 	// ECHConfigList ("ech") enables Encrypted Client Hello.
 	ECHConfigList string `json:"ech,omitempty"`
+	// FinalMask ("fm") is xray's streamSettings.finalmask: a JSON object,
+	// or a string holding one.
+	FinalMask json.RawMessage `json:"fm,omitempty"`
 
 	//// It's also possible for Vmess to have REALITY...
 	//PublicKey string `json:"pbk"`
@@ -83,6 +88,8 @@ type Vless struct {
 	ServiceName          string `json:"serviceName"`   // GRPC
 	Mode                 string `json:"mode"`          // XHTTP - GRPC
 	Extra                string `json:"extra"`         // XHTTP - EXTRA
+	Seed                 string `json:"seed"`          // legacy mKCP seed
+	FinalMask            string `json:"fm"`            // streamSettings.finalmask (raw JSON)
 	CertFile             string `json:"-"`
 	KeyFile              string `json:"-"`
 	OrigLink             string `json:"-"` // Original link
@@ -94,6 +101,7 @@ type Shadowsocks struct {
 	Encryption string
 	Password   string
 	Plugin     string // SIP003 plugin ("obfs-local;obfs=http;..."), unsupported by xray-core
+	FinalMask  string // streamSettings.finalmask ("fm", raw JSON)
 	Remark     string
 	OrigLink   string // Original link
 }
@@ -123,6 +131,8 @@ type Trojan struct {
 	ServiceName          string `json:"serviceName"` // GRPC
 	Mode                 string `json:"mode"`        // XHTTP, GRPC
 	Extra                string `json:"extra"`       // XHTTP - EXTRA
+	Seed                 string `json:"seed"`        // legacy mKCP seed
+	FinalMask            string `json:"fm"`          // streamSettings.finalmask (raw JSON)
 
 	// Yes, Trojan can have reality too xD
 	PublicKey     string `json:"pbk"`
@@ -144,6 +154,7 @@ type Wireguard struct {
 	KeepAlive    int32  `json:"keepalive"`  // Persistent keepalive (seconds)
 	AllowedIPs   string `json:"allowedips"` // Comma-separated allowed IP CIDRs
 	Reserved     string `json:"reserved"`   // Reserved bytes: "a,b,c" or base64 (e.g. WARP)
+	FinalMask    string `json:"fm"`         // streamSettings.finalmask (raw JSON)
 
 	OrigLink string `json:"-"` // Original link
 }
@@ -168,5 +179,6 @@ type Hysteria2 struct {
 	Insecure      interface{}
 	PinSHA256     string // Server certificate SHA-256 pin ("pinSHA256")
 	Ports         string // Port-hopping spec ("443,20000-30000"); xray uses Port only
+	FinalMask     string // streamSettings.finalmask ("fm", raw JSON)
 	OrigLink      string // Original link
 }

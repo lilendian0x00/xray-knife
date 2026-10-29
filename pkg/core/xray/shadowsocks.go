@@ -81,6 +81,7 @@ func (s *Shadowsocks) Parse() error {
 		return err
 	}
 	s.Plugin = uri.Query().Get("plugin")
+	s.FinalMask = uri.Query().Get("fm")
 	return nil
 }
 
@@ -133,8 +134,15 @@ func (s *Shadowsocks) GetLink() string {
 		// We construct the final URL string manually as url.URL doesn't handle this specific format directly
 		hostPart := net.JoinHostPort(s.Address, s.Port)
 		link := fmt.Sprintf("ss://%s@%s", encodedCreds, hostPart)
+		query := url.Values{}
 		if s.Plugin != "" {
-			link += "/?plugin=" + url.QueryEscape(s.Plugin)
+			query.Set("plugin", s.Plugin)
+		}
+		if s.FinalMask != "" {
+			query.Set("fm", s.FinalMask)
+		}
+		if len(query) > 0 {
+			link += "/?" + query.Encode()
 		}
 		if s.Remark != "" {
 			link += "#" + url.PathEscape(s.Remark)
@@ -199,11 +207,15 @@ func (s *Shadowsocks) BuildOutboundDetourConfig(allowInsecure bool) (*conf.Outbo
 		return nil, fmt.Errorf("marshal shadowsocks settings: %w", err)
 	}
 	oset := json.RawMessage(settings)
+	fm, err := parseFinalMask(s.FinalMask)
+	if err != nil {
+		return nil, err
+	}
 	return &conf.OutboundDetourConfig{
 		Tag:           "proxy",
 		Protocol:      s.Name(),
 		Settings:      &oset,
-		StreamSetting: &conf.StreamConfig{},
+		StreamSetting: &conf.StreamConfig{FinalMask: fm},
 	}, nil
 }
 

@@ -65,7 +65,7 @@ func singboxToLink(o map[string]interface{}) (string, bool, error) {
 				plugin += ";" + opts
 			}
 		}
-		return ssLink(name, server, port, str(o, "method"), str(o, "password"), plugin), true, nil
+		return ssLink(name, server, port, str(o, "method"), str(o, "password"), plugin, ""), true, nil
 	case "socks":
 		if v := str(o, "version"); v != "" && v != "5" {
 			return "", true, skipf("socks%s is not supported", v)

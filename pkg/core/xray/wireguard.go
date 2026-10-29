@@ -106,6 +106,7 @@ func (w *Wireguard) Parse() error {
 	w.KeepAlive = atoi(get("keepalive", "persistent_keepalive_interval"))
 	w.AllowedIPs = get("allowedips")
 	w.Reserved = get("reserved")
+	w.FinalMask = get("fm")
 
 	if w.SecretKey == "" {
 		return errors.New("wireguard link has no private key")
@@ -184,6 +185,7 @@ func (w *Wireguard) GetLink() string {
 		addQueryParamInt("keepalive", w.KeepAlive)
 		addQueryParam("allowedips", w.AllowedIPs)
 		addQueryParam("reserved", w.Reserved)
+		addQueryParam("fm", w.FinalMask)
 
 		baseURL.RawQuery = params.Encode()
 
@@ -256,11 +258,19 @@ func (w *Wireguard) BuildOutboundDetourConfig(allowInsecure bool) (*conf.Outboun
 		return nil, err
 	}
 	rawMSG := json.RawMessage(jsonData)
-	return &conf.OutboundDetourConfig{
+	ob := &conf.OutboundDetourConfig{
 		Tag:      "proxy",
 		Protocol: w.Name(),
 		Settings: &rawMSG,
-	}, nil
+	}
+	fm, err := parseFinalMask(w.FinalMask)
+	if err != nil {
+		return nil, err
+	}
+	if fm != nil {
+		ob.StreamSetting = &conf.StreamConfig{FinalMask: fm}
+	}
+	return ob, nil
 }
 
 func (w *Wireguard) BuildInboundDetourConfig() (*conf.InboundDetourConfig, error) {
