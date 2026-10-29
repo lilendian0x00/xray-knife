@@ -300,8 +300,10 @@ func TestKCPLegacyParams(t *testing.T) {
 	}
 	vless := "vless://00000000-0000-0000-0000-000000000000@10.0.0.1:443?security=none&type=kcp"
 	for link, want := range map[string]string{
-		vless:                      "",
-		vless + "&headerType=none": "",
+		// No header or seed is still the original obfuscation, as in v2rayN.
+		vless:                      `mkcp-legacy{"value":""}`,
+		vless + "&headerType=none": `mkcp-legacy{"value":""}`,
+		vless + "&fm=%7B%7D":       "",
 		vless + "&seed=s":          `mkcp-legacy{"value":"s"}`,
 		vless + "&headerType=srtp": `mkcp-legacy{"value":""} mkcp-legacy{"header":"srtp"}`,
 		vless + "&headerType=wechat-video&seed=s": `mkcp-legacy{"value":"s"} mkcp-legacy{"header":"wechat"}`,

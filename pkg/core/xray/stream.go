@@ -136,8 +136,9 @@ func (t *transportSpec) streamConfig(outbound bool) (*conf.StreamConfig, error) 
 
 // kcpLegacyMask maps a link's legacy mKCP header type and seed to
 // mkcp-legacy masks as v2rayN does: the seed (or, without one, the
-// original obfuscation) first, then the header. A link with neither gets
-// bare mKCP, as before.
+// original obfuscation) first, then the header. A link with neither still
+// gets the original obfuscation, which mKCP always had before finalmask;
+// fm={} asks for bare mKCP.
 func (t *transportSpec) kcpLegacyMask() *conf.FinalMask {
 	header := strings.ToLower(t.HeaderType)
 	if header == "wechat-video" {
@@ -147,9 +148,6 @@ func (t *transportSpec) kcpLegacyMask() *conf.FinalMask {
 	case "srtp", "utp", "wechat", "dtls", "wireguard", "dns":
 	default:
 		header = ""
-	}
-	if header == "" && t.Seed == "" {
-		return nil
 	}
 	mask := func(settings map[string]string) conf.Mask {
 		raw, _ := json.Marshal(settings)
