@@ -7,9 +7,9 @@
 //
 // The same Options value is understood by both cores:
 //
-//   - xray: a freedom outbound with "fragment"/"noises" settings, wired
-//     in front of the proxy outbound through sockopt.dialerProxy (the
-//     layout v2rayN and Hiddify use).
+//   - xray: a "fragment" (TCP) or "noise" (UDP) mask in the entry hop's
+//     streamSettings.finalmask (freedom's "fragment"/"noises" settings
+//     are deprecated upstream).
 //   - sing-box: the TLS "fragment" (TCP segments) and "record_fragment"
 //     (TLS records) switches. sing-box picks segment sizes itself, so
 //     Length/Interval/MaxSplit/Noises are xray-only.
