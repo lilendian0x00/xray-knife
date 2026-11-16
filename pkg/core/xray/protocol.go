@@ -134,12 +134,17 @@ func (t *transportSpec) plaintextReason(address string) string {
 	return "no TLS to a public server (refused by xray-core)"
 }
 
-// isPublicAddress matches xray-core's rule: anything outside its private IP
-// and private domain lists.
+// isPublicAddress matches xray-core's rule (requiresTransportSecurity): only
+// RFC 1918, fc00::/7, loopback and link-local IPs and its private domain
+// list are private. A missing address counts as public.
 func isPublicAddress(address string) bool {
+	if address == "" {
+		return true
+	}
 	addr := xnet.ParseAddress(address)
 	if addr.Family().IsIP() {
-		return !geodata.GetPrivateIPMatcher().Match(addr.IP())
+		ip := addr.IP()
+		return !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast()
 	}
 	return !geodata.GetPrivateDomainMatcher().MatchAny(strings.TrimSuffix(strings.ToLower(addr.Domain()), "."))
 }
